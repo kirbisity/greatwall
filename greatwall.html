@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<script src="https://code.jquery.com/jquery-1.11.0.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+<head>
+	<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+	<meta content="utf-8" http-equiv="encoding">
+	<title>Greatwall - The wall building game</title>
+	<link rel="stylesheet" type="text/css" href="greatwall.css" />
+	<link rel="icon" href="../images/favicon.png">
+</head>
+	
+<body onload = "loaded();">
+<div>
+	<div id="canvasesdiv">
+		<canvas id="background"
+			style="z-index: 1;
+			position:absolute;
+			left:0px;
+			top:0px;">
+		This text is displayed if your browser does not support HTML5 Canvas.
+		</canvas>
+	
+		<canvas id="canvas1"
+			style="z-index: 2;
+			position:absolute;
+			left:0px;
+			top:0px;">
+		This text is displayed if your browser does not support HTML5 Canvas.
+		</canvas>
+	
+		<canvas id="canvas2"
+			style="z-index: 3;
+			position:absolute;
+			left:0px;
+			top:0px;">
+		This text is displayed if your browser does not support HTML5 Canvas.
+		</canvas>
+	</div>
+	<div id="topMenu">
+		<p id="token0" class="topinfo">$</p>
+		<p id="time0" class="topinfo">0</p>
+		<button id="menuBtn" class="button menu" title="Open the menu"; onclick="menuBtn();"><img src="images/menuBtn.png" alt="Menu"></button>
+		<button id="move" class="button menu"; title="Move"; onclick="moveButton();"><img src="images/moveBtn.png" alt="Move"></button>
+		<button id="zoom" class="button menu"; title="Zoom the view"; onclick="zoomButton();"><img src="images/zoomBtn.png" alt="Zoom"></button>
+		<button id="help" class="button menu"; title="More information"; onclick="displayHelp();"><img src="images/helpBtn.png" alt="Help"></button>
+	</div>
+	
+	<div class="buttonHolder">
+		<a onclick="drawWallButton();" class="button tools build"></a>
+		<a onclick="destroyWallButton();" class="button tools destroy"></a>
+		<a href="#" class="button tools repair"></a>
+		<a onclick="upgradeCastleButton();" class="button tools city"></a>
+	</div>
+	
+	<div id="myNav" class="overlay">
+		<div class="overlay-content">
+			<a id="navinfo">Build Walls to Defend the City</a>
+			<a id="startBtn2" onclick="start2();">Start</a>
+			<a onclick="restart2();">Restart</a>
+			<a onclick="openSetting();">Setting</a>
+			<a href="../index.html">Quit</a>
+		</div>
+	</div>
+
+	<div id="settingMenu" class="overlay">
+		<div id="settingMenuContent"class="overlay-content">
+			<a id="soundBtn" onclick="soundBtn();">Sound: 40</a>
+			<a id="bgmusicBtn" onclick="bgmusicBtn();">Start Background Music</a>
+			<a onclick="closeSetting();">Back</a>
+		</div>
+	</div>
+	
+	<div id="loaderbg"></div>
+	<div id="loader"></div>
+	
+	<div id="helpInfo" class="modal">
+	  <div class="modal-content">
+		<span class="close" onclick="closeHelp();">&times;</span>
+		<p>Build Some Walls To Defend The City from raiders..</p>
+		<p>Note: Cavalry units are fast, but infantry units sometimes climb over walls, keep an eye on them.</p>
+		<p>...</p>
+		<p>To build a wall, click the first button in the botton left corner.</p>
+		<p>If you run out of money, no more wall can be built. If you remove a section of wall, half the cost will be refunded, but a damaged wall values less</p>
+		<p>A castle can create money and regen health every few seconds. You can upgrade a castle by clicking the ♖ button.</p>
+		<p>No civiliaztion lasts forever, but how long it lasts.</p>
+	  </div>
+	</div>
+	
+	<div id="gameInfo" class="modal infomodal">
+	  <div class="modal-content infomodal-content">
+		<span class="close" onclick="closeInfo();">&times;</span>
+		<p id="infoP">Build Some Walls To Defend The City from raiders..</p>
+	  </div>
+	</div>
+	
+	<div id="viewoverlay"></div>
+
+	<audio id="backgroundmusic" src="sounds/background.mp3" controls></audio>
+	
+	<script src="greatwall.js"></script>
+	
+</div>
+</body>
+</html>

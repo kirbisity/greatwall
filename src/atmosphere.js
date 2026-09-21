@@ -13,9 +13,12 @@ function wrap(value, span) {
  * much is on the map.
  */
 export class Atmosphere {
-  constructor(camera, random = Math.random) {
+  constructor(camera, { random = Math.random, now = () => performance.now() } = {}) {
     this.camera = camera;
-    this.drift = 0;
+    // Drift runs on the wall clock, not on game ticks, so the sky keeps moving
+    // while the game is paused and needs no per-frame bookkeeping.
+    this.now = now;
+    this.startedAt = now();
     this.sprite = new Image();
     this.sprite.src = CLOUD_SPRITE;
     this.clouds = CLOUD_LAYERS.flatMap((layer, index) => (
@@ -29,9 +32,9 @@ export class Atmosphere {
     ));
   }
 
-  /** Advance the drift by one frame's worth of seconds. */
-  update(seconds) {
-    this.drift += seconds;
+  /** Seconds of sky time elapsed. */
+  get drift() {
+    return (this.now() - this.startedAt) / 1000;
   }
 
   /**
@@ -72,6 +75,8 @@ export class Atmosphere {
     const aspect = this.sprite.height / this.sprite.width;
     const focus = this.camera.focus;
 
+    const drift = this.drift;
+
     for (const cloud of this.clouds) {
       const layer = CLOUD_LAYERS[cloud.layer];
       const cloudWidth = layer.size * cloud.scale;
@@ -79,7 +84,7 @@ export class Atmosphere {
       const spanX = width + cloudWidth * 2;
       const spanY = height + cloudHeight * 2;
 
-      const shiftX = this.drift * layer.drift - focus.x * layer.parallax;
+      const shiftX = drift * layer.drift - focus.x * layer.parallax;
       const shiftY = focus.y * layer.parallax;
       const x = wrap(cloud.x * spanX + shiftX, spanX) - cloudWidth;
       const y = wrap(cloud.y * spanY + shiftY, spanY) - cloudHeight;

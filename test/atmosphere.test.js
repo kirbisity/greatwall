@@ -32,7 +32,7 @@ function camera() {
 }
 
 test('one cloud per layer count, across every layer', () => {
-  const atmosphere = new Atmosphere(camera(), () => 0.5);
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
   const expected = CLOUD_LAYERS.reduce((total, layer) => total + layer.count, 0);
   assert.equal(atmosphere.clouds.length, expected);
   for (const layer of CLOUD_LAYERS.keys()) {
@@ -41,14 +41,14 @@ test('one cloud per layer count, across every layer', () => {
 });
 
 test('ground is further away higher up the screen', () => {
-  const atmosphere = new Atmosphere(camera(), () => 0.5);
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
   const near = atmosphere.groundDistanceAt(800);
   const far = atmosphere.groundDistanceAt(0);
   assert.ok(far > near, `expected ${far} > ${near}`);
 });
 
 test('fog is one gradient fill whose haze thickens with distance', () => {
-  const atmosphere = new Atmosphere(camera(), () => 0.5);
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
   const context = fakeContext();
   atmosphere.drawFog(context, 0);
 
@@ -64,7 +64,7 @@ test('fog is one gradient fill whose haze thickens with distance', () => {
 });
 
 test('fog takes its colour from the season', () => {
-  const atmosphere = new Atmosphere(camera(), () => 0.5);
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
   for (const [index, season] of SEASONS.entries()) {
     const context = fakeContext();
     atmosphere.drawFog(context, index);
@@ -74,7 +74,7 @@ test('fog takes its colour from the season', () => {
 });
 
 test('every cloud is drawn once and alpha is restored afterwards', () => {
-  const atmosphere = new Atmosphere(camera(), () => 0.5);
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
   const context = fakeContext();
   atmosphere.drawClouds(context);
   assert.equal(context.calls.images, atmosphere.clouds.length);
@@ -83,7 +83,8 @@ test('every cloud is drawn once and alpha is restored afterwards', () => {
 
 test('clouds stay placed however far the camera pans or time runs', () => {
   const view = camera();
-  const atmosphere = new Atmosphere(view, () => 0.5);
+  let clock = 0;
+  const atmosphere = new Atmosphere(view, { random: () => 0.5, now: () => clock });
   const positions = [];
   const original = atmosphere.sprite;
   const context = {
@@ -92,7 +93,7 @@ test('clouds stay placed however far the camera pans or time runs', () => {
   };
   for (const pan of [-50000, -1, 0, 1, 50000]) {
     view.centerOn({ x: pan, y: -pan });
-    atmosphere.update(pan);
+    clock += 9e6;
     atmosphere.drawClouds(context);
   }
   assert.ok(positions.length > 0);
@@ -104,6 +105,36 @@ test('clouds stay placed however far the camera pans or time runs', () => {
       `y ${position.y} outside the wrap band`);
   }
   assert.equal(atmosphere.sprite, original);
+});
+
+// Drift must come from the clock, not the game loop, or the sky freezes
+// whenever the game is paused behind a menu.
+test('clouds keep drifting while the game is paused', () => {
+  let clock = 0;
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5, now: () => clock });
+  const xAt = (time) => {
+    clock = time;
+    const seen = [];
+    atmosphere.drawClouds({ globalAlpha: 1, drawImage: (image, x) => seen.push(x) });
+    return seen;
+  };
+  const before = xAt(0);
+  const after = xAt(4000);
+  assert.ok(before.some((x, index) => Math.abs(after[index] - x) > 20),
+    'four seconds of sky time should visibly move the clouds');
+});
+
+test('each layer drifts faster than the one below it', () => {
+  let clock = 0;
+  const atmosphere = new Atmosphere(camera(), { random: () => 0.5, now: () => clock });
+  const speeds = CLOUD_LAYERS.map((layer) => layer.drift);
+  for (let i = 1; i < speeds.length; i += 1) {
+    assert.ok(speeds[i] > speeds[i - 1], 'higher layers drift faster');
+  }
+  // A full screen width should take under two minutes at the fastest layer.
+  const crossingSeconds = atmosphere.camera.width / speeds[speeds.length - 1];
+  assert.ok(crossingSeconds < 120, `slowest crossing ${crossingSeconds.toFixed(0)}s is too sluggish`);
+  assert.ok(crossingSeconds > 20, `crossing ${crossingSeconds.toFixed(0)}s would be frantic`);
 });
 
 test('atmosphere is on by default', () => {

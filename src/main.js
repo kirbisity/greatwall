@@ -5,7 +5,6 @@ import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { loadSprites } from './sprites.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
-import { FPS } from './config.js';
 
 function bind(id, handler) {
   const node = document.getElementById(id);
@@ -136,7 +135,6 @@ class App {
       return;
     }
     this.game.step();
-    this.renderer.atmosphere.update(1 / FPS);
     this.draw();
     if (this.game.isDefeated) {
       this.gameOver();

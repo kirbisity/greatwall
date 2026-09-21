@@ -135,9 +135,9 @@ export const FOG = {
  * opacity and parallax rise together, so larger clouds read as nearer.
  */
 export const CLOUD_LAYERS = [
-  { size: 340, opacity: 0.10, parallax: 0.20, drift: 2.4, count: 5 },
-  { size: 520, opacity: 0.15, parallax: 0.34, drift: 4.0, count: 4 },
-  { size: 760, opacity: 0.19, parallax: 0.52, drift: 6.2, count: 3 },
+  { size: 340, opacity: 0.10, parallax: 0.20, drift: 9, count: 5 },
+  { size: 520, opacity: 0.15, parallax: 0.34, drift: 15, count: 4 },
+  { size: 760, opacity: 0.19, parallax: 0.52, drift: 24, count: 3 },
 ];
 
 export const CLOUD_SPRITE = 'images/cloud.png';

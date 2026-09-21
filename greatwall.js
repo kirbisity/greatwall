@@ -1,4 +1,14 @@
-/* Skateboarding app JS*/
+/* Greatwall app JS*/
+/*
+Things to improve when I had time:
+	Improve the efficiency of finding the closest wall section by remembering the last closest wall.
+	
+	Currently path finding is done by line of sight, but I plan to impletement search algotithms, 
+	the difficuit part here is how to define a node.
+	
+	Use the midpoint of end nodes of two wall sections as node to find the shortest path
+*/
+
 let background = document.getElementById('background');
 let canvas1 = document.getElementById('canvas1');
 let canvas2 = document.getElementById('canvas2');
@@ -40,8 +50,6 @@ let lastWallc = {x: 9007199254740991, y: 9007199254740991};
 
 let CanvasOffsetX = W * 0.5;
 let CanvasOffsetY = H * 0.5;
-let trail = [];
-let trails = [];
 let walls = [];
 let castles = [];
 let raiders = [];
@@ -53,20 +61,19 @@ let scaleBeginMouse = {x: -1, y: -1};
 let epsilon = 0.05;
 let epsilonScale = 50;
 
-let gravity = -9.8;
 let fps = 60;
 let debugMode = false;
 let speedVectorContant = 2;
-let collisionFriction = 0;
 
 let timecountsmall = 0;
 let timecountlarge = 0;
 
 let enemyInterval = 4;
-let token = 100;
+let token = 1000;
 let bestscore = 0;
 let sound = 0.01;
 let soundlevel = 40;
+let graphics = {shadow: false};
 
 let season = 0;
 let seasonmessage = [
@@ -77,10 +84,10 @@ let seasonmessage = [
 					'Autumn comes, a good harvest doubles the income of the castle'
 					];
 let backgroundcolors = [
-					'#d1a663',
-					'#e0c8a3',
-					'#b1c579',
-					'#c1b56e'
+					'#84693f',
+					'#7f725e',
+					'#727f4e',
+					'#817841'
 					];
 
 // variables of cloud save
@@ -242,10 +249,10 @@ let randomRaider = [
 				   ];
 
 let dataRaider = [
-				['Sabre Cavalry', 'CR0', 18, 10, 5, 2, 5, CR0A, CR0B],
-				['Light Axe Infantry', 'IR0', 7, 20, 2, 3, 2, IR0A, IR0B],
-				['Light Sword Infantry', 'IR1', 7, 20, 3, 5, 2, IR1A, IR1B],
-				['Spear Cavalry', 'CR1', 20, 10, 10, 2, 6, CR1A, CR1B]
+				['Sabre Cavalry', 'CR0', 18, 10, 5, 2, 5, CR0A, CR0B, 40],
+				['Light Axe Infantry', 'IR0', 7, 20, 2, 3, 2, IR0A, IR0B, 30],
+				['Light Sword Infantry', 'IR1', 7, 20, 3, 5, 2, IR1A, IR1B, 30],
+				['Spear Cavalry', 'CR1', 20, 10, 10, 2, 6, CR1A, CR1B, 50]
 				 ];
 
 /**
@@ -256,8 +263,7 @@ let dataRaider = [
  * @this {Rastle}
  */
 function Raider(tp) {
-	this.xc = 0;
-	this.yc = 0;
+	this.position = {x: 0, y: 0};
 	this.vx = 0;
 	this.vy = 0;
 	for (let i=0; i<dataRaider.length; i++){
@@ -271,6 +277,11 @@ function Raider(tp) {
 			this.range = dataRaider[i][6];
 			this.imageA = dataRaider[i][7];
 			this.imageB = dataRaider[i][8];
+			this.waypoint = {x: 0, y: 0};
+			this.destination = {x: 0, y: 0};
+			this.lineOfSight = dataRaider[i][9];
+			this.steering = 0.01;
+			this.totalAngle = 0;
 		}
 	}
 };
@@ -403,7 +414,7 @@ function mouseMoves(event) {
         drawNewGrid = true;
         updateScreen();
     }
-    // put a new node to the trail
+    // put a new node to the wall
     if (drawButton && mouseStatusDown) {
 		if (token < 0){
 			return;
@@ -461,7 +472,7 @@ function mouseMoves(event) {
 			}
 		}
     }
-    // erase any trails the mouse touches
+    // erase any walls the mouse touches
     if (destroyBtn && mouseStatusDown) {
         for (let i=0; i<walls.length; i++) {
             if (getDistance(objc, walls[i].start) < (walls[i].getLength()+2) && getDistance(objc, walls[i].end) < (walls[i].getLength()+2)) {
@@ -548,10 +559,12 @@ window.onclick = function(event) {
     @param {object[]} wall - single wall section
 */
 function drawWallSection(wall) {
+	if (graphics.shadow) {
 		ctx2.shadowColor = '#111';
 		ctx2.shadowBlur = 4;
 		ctx2.shadowOffsetX = 0;
 		ctx2.shadowOffsetY = 0;
+	}
 		
         ctx2.beginPath();
         let ca = objToCanvas({x: wall.start.x, y: wall.start.y});
@@ -609,8 +622,9 @@ function drawWallSection(wall) {
 		ctx2.lineWidth = 40 * scale;
 		ctx2.strokeStyle = '#CCC';
 		ctx2.stroke();
-		
-		ctx2.shadowBlur = 0;
+		if (graphics.shadow) {
+			ctx2.shadowBlur = 0;
+		}
 }
 
 /** draw all walls
@@ -632,7 +646,7 @@ function drawOneEnemy(raider) {
 	} else {
 		unitimg = raider.imageB;
 	}
-	let cxy = objToCanvas({x: raider.xc, y: raider.yc});
+	let cxy = objToCanvas(raider.position);
     if (canvas2.getContext) {
         let x2 = cxy.x;
         let y2 = cxy.y;
@@ -659,7 +673,7 @@ function drawEnemy(raiders) {
     @param {object[]} castle - one castle
 */
 function drawCastle(castle) {
-	let cxy = objToCanvas({x: castle.position.x, y: castle.position.y});
+	let cxy = objToCanvas(castle.position);
 	/*
 	ctx2.beginPath();
 		ctx2.arc(cxy.x,cxy.y, castle.hitbox*scale*epsilonScale, 0 , 2*Math.PI);
@@ -830,8 +844,17 @@ function generateNewEnemy() {
 	}
 	nx += castles[0].position.x;
 	ny += castles[0].position.y;
-	newraider.xc = parseInt(nx);
-	newraider.yc = parseInt(ny);
+	newraider.position.x = parseInt(nx);
+	newraider.position.y = parseInt(ny);
+	newraider.destination.x = castles[0].position.x;
+	newraider.destination.y = castles[0].position.y;
+	newraider.waypoint.x = castles[0].position.x;
+	newraider.waypoint.y = castles[0].position.y;
+	let xdis = newraider.destination.x - newraider.position.x;
+	let ydis = newraider.destination.y - newraider.position.y;
+	let dis = Math.sqrt(xdis*xdis + ydis*ydis);
+	newraider.vx = newraider.speed/fps*xdis/dis;
+	newraider.vy = newraider.speed/fps*ydis/dis;
 	raiders.push(newraider);
 }
 
@@ -840,28 +863,11 @@ function generateNewEnemy() {
 function updateScreen() {
     ctx.clearRect(0, 0, W, H);
     ctx2.clearRect(0, 0, W, H);
-
-    /*
-    let my_gradient=ctx.createLinearGradient(0,0,0,H);
-    my_gradient.addColorStop(0,'#f8effa');
-    my_gradient.addColorStop(1,'#9ebbe1');
-    ctx.fillStyle=my_gradient;
-    ctx.fillRect(0,0,W,H);
-    */
-	/*
-    if (!paused) {
-        CanvasOffsetX -= parseInt(Math.min(1, skateBoarder.getSpeed()/10)
-        * (scale*epsilonScale) * (skateBoarder.vx/fps));
-        CanvasOffsetY -= parseInt(Math.min(1, skateBoarder.getSpeed()/10)
-        * (scale*epsilonScale) * (skateBoarder.vy/fps));
-        drawNewGrid = true;
-    }
-	*/
 	drawMap();
 	drawEnemy(raiders);
 	drawWalls(walls);
 	drawCastles(castles);
-
+	
     if (drawNewGrid) {
         drawNewGrid = false;
         if (!paused) {
@@ -876,6 +882,103 @@ function changeSeason(){
 	if (season < 5){
 		displayInfo(seasonmessage[season]);
 	}
+}
+
+function deadEnd(as, ae, bs, be, los){
+	if (intersect(as, ae, bs, be)){
+		if (getDistance(bs, {x: (as.x + ae.x)/2, y: (as.y + ae.y)/2}) < los) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function drawLine(adot, bdot){
+	let add = objToCanvas(adot);
+	let bdd = objToCanvas(bdot);
+	ctxbg.beginPath();
+    ctxbg.moveTo(add.x, add.y);
+    ctxbg.lineTo(bdd.x, bdd.y);
+    ctxbg.lineWidth = 2;
+    ctxbg.strokeStyle = '#555';
+    ctxbg.stroke();
+}
+
+function rotateLine(lineStart, lineEnd, degree) {
+	degree /= 57.3;
+	let dist = getDistance(lineStart, lineEnd);
+	let ang = Math.atan2(lineEnd.y-lineStart.y, lineEnd.x-lineStart.x);
+	ang += degree;
+	return {x: lineStart.x + dist*Math.cos(ang), y: lineStart.y + dist*Math.sin(ang)};
+}
+
+function findDirection(id) {
+	//castles[0].position.x
+	let xsight = raiders[id].lineOfSight* raiders[id].vx/raiders[id].speed;
+	let ysight = raiders[id].lineOfSight*raiders[id].vy/raiders[id].speed;
+	let rend = {x: raiders[id].position.x + xsight, y: raiders[id].position.y + ysight};
+	//drawLine(raiders[id].position, rend);
+	if (walls.length > 0) {
+		let dr = true;
+		for (let i = 0; i < walls.length; i++) {
+			if (walls[i].health > 80 && intersect(raiders[id].position, raiders[id].destination, walls[i].start, walls[i].end)) {
+				dr = false;
+				break;
+			}
+		}
+		for (let i = 0; i < walls.length; i++) {
+			let wallsta = {x: 1.5 * walls[i].start.x - 0.5 * walls[i].end.x, y: 1.5 * walls[i].start.y - 0.5 * walls[i].end.y};
+			let wallend = {x: 1.5 * walls[i].end.x - 0.5 * walls[i].start.x, y: 1.5 * walls[i].end.y - 0.5 * walls[i].start.y};
+			if (intersect(raiders[id].position, raiders[id].destination, wallsta, wallend)) {
+				dr = false;
+			}
+			if (intersect(raiders[id].position, rend, wallsta, wallend)) {
+				let rangle = 0;
+				while (rangle < 60) {
+					rangle += 10;
+					let leftend = rotateLine(raiders[id].position, rend, -rangle);
+					let rigtend = rotateLine(raiders[id].position, rend, rangle);
+					if (!intersect(wallsta, wallend, raiders[id].position, leftend)) {
+						raiders[id].waypoint.x = leftend.x;
+						raiders[id].waypoint.y = leftend.y;
+						break;
+					}
+					if (!intersect(wallsta, wallend, raiders[id].position, rigtend)) {
+						raiders[id].waypoint.x = rigtend.x;
+						raiders[id].waypoint.y = rigtend.y;
+						break;
+					}
+				}
+				break;
+			}
+		}
+		if (dr || raiders[id].totalAngle > 6.283) {
+			raiders[id].waypoint.x = raiders[id].destination.x;
+			raiders[id].waypoint.y = raiders[id].destination.y;
+		}
+	}
+		let xdis = raiders[id].waypoint.x - raiders[id].position.x;
+		let ydis = raiders[id].waypoint.y - raiders[id].position.y;
+		let dis = Math.sqrt(xdis*xdis + ydis*ydis);
+		let spdangle = Math.atan2(raiders[id].vy, raiders[id].vx);
+		let disangle = Math.atan2(ydis, xdis);
+		
+		if (disangle-spdangle <= -Math.PI) {
+			spdangle -= 2 * Math.PI;
+		} else if (disangle-spdangle >= Math.PI) {
+			spdangle += 2 * Math.PI;
+		}
+		
+		if (spdangle < disangle-4*raiders[id].steering) {
+			spdangle = Math.min(disangle, spdangle + raiders[id].steering);
+			raiders[id].totalAngle += raiders[id].steering;
+		} else if (spdangle > disangle+4*raiders[id].steering) {
+			spdangle = Math.max(disangle, spdangle - raiders[id].steering);
+			raiders[id].totalAngle += raiders[id].steering;
+		}
+		console.log(raiders[id].totalAngle);
+		raiders[id].vx = raiders[id].speed*Math.cos(spdangle);
+		raiders[id].vy = raiders[id].speed*Math.sin(spdangle);
 }
 
 /** refresh time counter
@@ -899,7 +1002,6 @@ function updateSimulation() {
 			displayInfo('Try clicking the ♖ button, then click on the castle to upgrade!');
 			firstUpgrade = true;
 		}
-		
 		if (timecountlarge > 20 && firstWall == false) {
 			displayInfo('Try clicking the first button to build some walls');
 			firstWall = true;
@@ -917,7 +1019,6 @@ function updateSimulation() {
 		token += productivity * multiplier;
 		document.getElementById('token0').innerText = '$' + parseInt(token).toString();
 	}
-	
 	if (timecountlarge % enemyInterval == enemyInterval-1 && timecountsmall == 0) {
 		if (timecountlarge % 60 == 59 && timecountsmall == 0){
 			changeSeason(timecountlarge);
@@ -929,17 +1030,18 @@ function updateSimulation() {
 			raiders.splice(i, 1);
 		}
 	}
+	ctxbg.clearRect(0, 0, W, H);
 	for (let i=0; i<raiders.length; i++){
-		let xdis = castles[0].position.x - raiders[i].xc;
-		let ydis = castles[0].position.y - raiders[i].yc;
-		let dis = Math.sqrt(xdis*xdis + ydis*ydis);
-		raiders[i].vx = raiders[i].speed/fps*xdis/dis;
-		raiders[i].vy = raiders[i].speed/fps*ydis/dis;
-		raiders[i].xc += raiders[i].vx;
-		raiders[i].yc += raiders[i].vy;
+		findDirection(i);
+		raiders[i].position.x += raiders[i].vx/fps;
+		raiders[i].position.y += raiders[i].vy/fps;
+
+			raiders[i].waypoint.x = castles[0].position.x;
+			raiders[i].waypoint.y = castles[0].position.y;
+
 		
 		for (let j=0; j<walls.length; j++){
-			let rdc = {x: raiders[i].xc, y: raiders[i].yc};
+			let rdc = raiders[i].position;
 			if (dotLineDistance(rdc, walls[j].start, walls[j].end) < raiders[i].range && getDistance(rdc, walls[j].start) < (walls[j].getLength()+2) && getDistance(rdc, walls[j].end) < (walls[j].getLength()+2)) {
 				walls[j].getHit(raiders[i]);
 				raiders[i].getHit(walls[j]);
@@ -948,7 +1050,7 @@ function updateSimulation() {
 				break;
 			}
 		}
-		if (getDistance(castles[0].position, {x: raiders[i].xc, y: raiders[i].yc}) < castles[0].hitbox + raiders[i].range) {
+		if (getDistance(castles[0].position, raiders[i].position) < castles[0].hitbox + raiders[i].range) {
 			castles[0].getHit(raiders[i]);
 			raiders[i].getHit(castles[0]);
 		}
@@ -958,6 +1060,7 @@ function updateSimulation() {
 			walls.splice(i, 1);
 		}
 	}
+	
 }
 
 /** reset every button
@@ -1106,156 +1209,6 @@ function reset() {
     resetButton = !before;
 }
 
-/** convert the trails and save files to text
-
-    @return {String} The text data of the save file
-*/
-function parseSaveFile() {
-    let txt = '<trail>';
-    for (let i=0; i<trails.length; i++) {
-        for (let j=1; j<trails[i].length; j++) {
-            txt += trails[i][j].x + ' ' + trails[i][j].y + '|';
-        }
-        txt += '<trail>';
-    }
-    return txt;
-}
-
-/** convert the save files to trails
-    @param {String} The text data of the save file
-*/
-function parseLoadFile(txt) {
-    let lines = txt.split('<trail>');
-    trails = [];
-    for (let i=1; i<lines.length-1; i++) {
-        let line = lines[i].split('|');
-        trail = [];
-        for (let j=0; j<line.length-1; j++) {
-            let point = line[j].split(' ');
-            trail.push({x:parseFloat(point[0]), y:parseFloat(point[1])});
-        }
-        trails.push(trail);
-        trail = [];
-    }
-    if (trails.length>0) {
-        updateScreen();
-    }
-}
-
-
-/** user login
-*/
-function userLogin() {
-    uncheckAllButtons();
-	let error = false;
-    let cloud = new CloudSaver();
-    let callback = function(data) {
-		error = false;
-	};
-    let errorBack = function(data) {
-		error = true;
-	};
-    cloud.loginPopup(callback, errorBack);
-    if (error) {
-        alert('The email or password is incorrect');
-        return;
-    }
-    // try to get user ID
-    cloud.getUser(callback, errorBack);
-    if (error) {
-        alert('Please log in');
-    } else {
-        username = data.username;
-        userID = data.userID;
-    }
-}
-
-/** save the trails drawn and spawn location
-*/
-function saveGameButton() {
-    uncheckAllButtons();
-	let text = parseSaveFile();
-	let filename = 'savefile.txt';
-	let pom = document.createElement('a');
-		pom.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-		pom.setAttribute('download', filename);
-		if (document.createEvent) {
-			let event = document.createEvent('MouseEvents');
-			event.initEvent('click', true, true);
-			pom.dispatchEvent(event);
-		}
-		else {
-			pom.click();
-		}
-    /*
-    let dt = new Date();
-    dt.getDate();
-    let pName;
-    let saveName = prompt('Please enter the name of the save file:',
-    'Save file ' + (parseInt(dt.getMonth())+1).toString() +
-    '/' + dt.getDate());
-
-    if (saveName == null || saveName == '') {
-        pName = 'Invalid name';
-        return;
-    } else {
-        pName = saveName;
-    }
-    alert(pName);
-    let cloud = new CloudSaver();
-    let savefile;
-    let callback;
-    let errorBack;
-    cloud.saveFile(savefile, callback, errorBack);
-    if (errorBack) {
-        alert('Unable to save the file');
-    }
-    let projectID;
-    cloud.loadProject(projectID, callback, errorBack);
-    if (errorBack) {
-        cloud.createProject(
-        pName, applicationID, dataID, imgID, callback, errorBack);
-        projectID = callback;
-    } else {
-        cloud.updateProject(
-        projectID, pName, applicationID, dataID, imgID, callback, errorBack);
-    }
-    */
-}
-
-/** load the trails drawn and spawn location
-*/
-function loadGameButton() {
-    uncheckAllButtons();
-	
-	let error = false;
-    let cloud = new CloudSaver();
-    let callback = function(data) {
-		error = false;
-	};
-    let errorBack = function(data) {
-		error = true;
-	};
-
-    // try to get user ID
-    cloud.getUser(callback, errorBack);
-    if (error) {
-        alert('Please log in');
-    } else {
-        username = data.username;
-        userID = data.userID;
-    }
-    console.log(username);
-
-    cloud.listProject(userID, callback, errorBack);
-    if (error) {
-        alert('No saved files');
-        return;
-    } else {
-        console.log(data);
-    }
-}
-
 const input = document.querySelector('#loadlocal');
 
 input.addEventListener('change', () => {
@@ -1282,21 +1235,6 @@ function save(content, fileName, mime) {
   a.href = url;
   a.download = fileName;
   a.click();
-}
-
-/** update the player position based on speed and gravity.
-    @param {Skateboarder} obj the player in game
-*/
-function updatePlayer(obj) {
-    obj.x += obj.vx/fps;
-    obj.y += obj.vy/fps;
-    obj.vy += gravity/fps;
-    obj.angle += obj.angularV/fps;
-    obj.angularV *= obj.angularF;
-    // auto center
-    if (obj.hit == 0) {
-        obj.angularV += 0.05*(0-obj.angle);
-    }
 }
 
 /** get the distance between two nodes
@@ -1332,16 +1270,14 @@ function dotProduct(lineAStart, lineAEnd, lineBStart, lineBEnd) {
 */
 
 function intersect(lineAStart, lineAEnd, lineBStart, lineBEnd) {
-    let lineAX = lineAEnd.x - lineAStart.x;
-    let lineAY = lineAEnd.y - lineAStart.y;
-    let lineBX = lineBEnd.x - lineBStart.x;
-    let lineBY = lineBEnd.y - lineBStart.y;
-    let s = (-lineAY * (lineAStart.x - lineBEnd.x) + lineAX * (lineAStart.y - lineBStart.y)) / (-lineBX * lineAY + lineAX * lineBY);
-    let t = ( lineBX * (lineAStart.y - lineBStart.y) - lineBY * (lineAStart.x - lineBStart.x)) / (-lineBX * lineAY + lineAX * lineBY);
-    if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
-        return true; // Collision detected
+    let det = (lineAEnd.x - lineAStart.x) * (lineBEnd.y - lineBStart.y) - (lineBEnd.x - lineBStart.x) * (lineAEnd.y - lineAStart.y);
+    if (det === 0) {
+        return false;
+    } else {
+        let lambda = ((lineBEnd.y - lineBStart.y) * (lineBEnd.x - lineAStart.x) + (lineBStart.x - lineBEnd.x) * (lineBEnd.y - lineAStart.y)) / det;
+        let gamma = ((lineAStart.y - lineAEnd.y) * (lineBEnd.x - lineAStart.x) + (lineAEnd.x - lineAStart.x) * (lineBEnd.y - lineAStart.y)) / det;
+        return (0 < lambda && lambda < 1) && (0 < gamma && gamma < 1);
     }
-    return false; // No collision
 }
 
 
@@ -1397,132 +1333,10 @@ function mirrorVector(v, p0, p1) {
     return {x: mendP.x-mstartP.x, y: mendP.y-mstartP.y};
 }
 
- /** change the player status after collision
-     * @param {Skateboarder} obj - the player
-     * @param {objectp} lineStart - first point for reflection line
-     * @param {object} lineEnd - second point for reflection line
-     */
-function collide(obj, lineStart, lineEnd) {
-    obj.hit = 30;
-    let mirroredVector = mirrorVector({x: obj.vx, y: obj.vy},
-        lineStart, lineEnd);
-    let intensity = Math.sqrt((mirroredVector.x-obj.vx) *
-        (mirroredVector.x-obj.vx) + (mirroredVector.y-obj.vy) *
-        (mirroredVector.y-obj.vy));
-    let vertLine = {x: lineStart.y-lineEnd.y, y: lineEnd.x-lineStart.x};
-    if (dotProduct( {x: 0, y: 0}, vertLine, {x: 0, y: 0}, mirroredVector) < 0) {
-        vertLine.x = -vertLine.x;
-        vertLine.y = -vertLine.y;
-    }
-    // new angle after collide with track
-    let newangle = (Math.atan2(lineEnd.y-lineStart.y, lineEnd.x-lineStart.x)
-        * 180 / Math.PI);
-
-    let vertLen = Math.sqrt(vertLine.x * vertLine.x + vertLine.y * vertLine.y);
-    if (dotLineDistance(obj, lineStart, lineEnd) < 0.3 * obj.collisionR) {
-        console.log('crashed');
-        obj.vx = mirroredVector.x *
-        Math.max(0.5, 1-collisionFriction*intensity);
-        obj.vy = mirroredVector.y *
-        Math.max(0.5, 1-collisionFriction*intensity);
-        obj.vx *= (1-obj.friction);
-        obj.vy *= (1-obj.friction);
-    } else {
-        obj.vx += 1 * vertLine.x / vertLen;
-        obj.vy += 1 * vertLine.y / vertLen;
-    }
-    // vertical friction
-    if (!obj.onTrack) {
-        obj.vx = obj.vx* (1 - 0 * vertLine.x / vertLen);
-        obj.vy = obj.vy* (1 - 0 * vertLine.y / vertLen);
-    }
-    // if ( newangle<-90 || newangle>90){
-    //    newangle += 180;
-    //
-    // newangle = newangle % 180;
-    /*
-    if ((Math.abs(newangle-obj.angle)%180) > 90){
-        obj.valid = false;
-        obj.friction = 0.5;
-        obj.collisionR = 20;
-    }*/
-    obj.angularV += 3*(newangle-obj.angle);
-    // obj.angle = newangle;
-}
-
- /** check if the player will have collision with any trail
-     * @param {Skateboarder} obj - the player
-     */
-function collision(obj) {
-    if (trails.length == 0) return;
-    let closestNode = {x: 0, y: 0, distance: W+H, i: -1, j: -1};
-    let i;
-    let j;
-    for (i=0; i<trails.length; i++) {
-        for (j=1; j<trails[i].length-1; j++) {
-            let closestDistance = getDistance(obj, trails[i][j]);
-            if (closestNode.distance >= closestDistance &&
-                dotProduct(obj, {x: trails[i][j].x, y: trails[i][j].y},
-                           obj, {x: obj.x + speedVectorContant * obj.vx,
-                           y: obj.y + speedVectorContant * obj.vy}) >= 0) {
-                closestNode.distance = closestDistance;
-                closestNode.x = trails[i][j].x;
-                closestNode.y = trails[i][j].y;
-                closestNode.i = i;
-                closestNode.j = j;
-            }
-        }
-    }
-    /*
-    let speed = Math.sqrt(obj.x * obj.x + obj.y * obj.y);
-    if (trails.length > 0){
-        let thisTrail = trails[closestNode.i];
-        let pos = closestNode.j;
-        for (let offset=0; offset<2+parseInt(speed)/100; offset++){
-            if (intersect(thisTrail[Math.max(0, pos-offset-1)],
-                          thisTrail[Math.max(0, pos-offset)], obj,
-                          {x:obj.x + speedVectorContant * obj.vx,
-                          y:obj.y + speedVectorContant * obj.vy})){
-                collide(obj, thisTrail[Math.max(0, pos-offset-1)],
-                thisTrail[Math.max(0, pos-offset)]);
-                return;
-            }
-            if (intersect(thisTrail[Math.min(thisTrail.length-1,
-            pos+offset)],
-                          thisTrail[Math.min(thisTrail.length-1,
-                          pos+offset+1)], obj,
-                          {x:obj.x + speedVectorContant * obj.vx,
-                          y:obj.y + speedVectorContant * obj.vy})){
-                collide(obj, thisTrail[Math.min(thisTrail.length-1,
-                pos+offset)], thisTrail[Math.min(thisTrail.length-1,
-                pos+offset+1)]);
-                return;
-            }
-        }
-    }
-    */
-    if (closestNode.j>0 && closestNode.i>=0) {
-        if ((dotLineDistance(obj, trails[closestNode.i][closestNode.j-1],
-             trails[closestNode.i][closestNode.j]) < obj.collisionR) &&
-            getDistance(closestNode, {x: obj.x+obj.head.x, y: obj.y+obj.head.y})
-            < Math.min(getDistance(closestNode, {x: obj.x+obj.frontWheel.x,
-                                   y: obj.y+obj.frontWheel.y}),
-                       getDistance(closestNode, {x: obj.x+obj.rearWheel.x,
-                                   y: obj.y+obj.rearWheel.y}))) {
-                collide(obj, trails[closestNode.i][closestNode.j-1],
-                        trails[closestNode.i][closestNode.j]);
-                obj.onTrack = true;
-            return;
-        }
-    }
-    obj.onTrack = false;
-}
-
-
-
  /** the function to draw a map based on a given seed
  */
 function drawMap() {
+	
 	ctxbg.fillStyle = backgroundcolors[season % 4];
 	ctxbg.fillRect(0, 0, W, H);
 }

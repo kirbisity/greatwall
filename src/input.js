@@ -47,12 +47,17 @@ export class Input {
 
   selectTool(tool) {
     this.tool = this.tool === tool ? 'move' : tool;
-    this.hud.setCursor(CURSORS[this.tool]);
+    this.applyTool();
   }
 
   resetTool() {
     this.tool = 'move';
-    this.hud.setCursor(CURSORS.move);
+    this.applyTool();
+  }
+
+  applyTool() {
+    this.hud.setCursor(CURSORS[this.tool]);
+    this.hud.setActiveTool(this.tool);
   }
 
   isOverMap(event) {

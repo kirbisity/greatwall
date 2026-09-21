@@ -99,15 +99,28 @@ export const SEASON_MESSAGES = [
   'Autumn comes, a good harvest doubles the income of the castle',
 ];
 
-export const SEASON_COLORS = ['#84693f', '#7f725e', '#727f4e', '#817841'];
+/** Terrain is painted as a radial wash so the map reads as lit from above. */
+export const SEASONS = [
+  { name: 'Autumn', light: '#9a7c4b', dark: '#5f4a2a', accent: '#d9a441' },
+  { name: 'Winter', light: '#8d8a83', dark: '#4f4e4b', accent: '#cfd8dc' },
+  { name: 'Spring', light: '#7f8f52', dark: '#4a5530', accent: '#9ccc65' },
+  { name: 'Summer', light: '#948a46', dark: '#5a5228', accent: '#e0c341' },
+];
 
 export const HEALTH_COLORS = [
-  { above: 0.8, color: '#00ff00' },
-  { above: 0.6, color: '#90ff00' },
-  { above: 0.4, color: '#fcff00' },
-  { above: 0.2, color: '#ffa200' },
-  { above: -Infinity, color: '#ff0000' },
+  { above: 0.66, color: '#7fb069' },
+  { above: 0.33, color: '#e0b84c' },
+  { above: -Infinity, color: '#c2453c' },
 ];
+
+export const PALETTE = {
+  wallCore: '#d6cbb2',
+  wallEdge: '#7d7362',
+  towerFill: '#b3a98f',
+  towerEdge: '#5f5748',
+  barFill: '#15110c',
+  barEdge: '#c9a227',
+};
 
 export const SPRITE_SCALE = 5;
 export const WALL_THICKNESS_UNITS = 2;

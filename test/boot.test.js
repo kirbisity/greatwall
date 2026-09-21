@@ -12,12 +12,15 @@ const pageIds = new Set(
 );
 
 const CONTEXT_METHODS = [
-  'clearRect', 'fillRect', 'beginPath', 'moveTo', 'lineTo', 'stroke',
+  'clearRect', 'fillRect', 'strokeRect', 'beginPath', 'moveTo', 'lineTo', 'stroke',
   'arc', 'fill', 'drawImage', 'save', 'translate', 'rotate', 'restore', 'fillText',
 ];
 
 function stubContext() {
-  const context = {};
+  const context = {
+    createRadialGradient: () => ({ addColorStop: () => {} }),
+    createLinearGradient: () => ({ addColorStop: () => {} }),
+  };
   for (const name of CONTEXT_METHODS) {
     context[name] = () => {};
   }
@@ -28,6 +31,7 @@ function stubElement(id) {
   return {
     id,
     style: {},
+    classList: { toggle: () => {} },
     innerText: '',
     loop: false,
     volume: 0,
@@ -94,6 +98,7 @@ test('the app boots, plays frames and reacts to input without touching a missing
   }
   assert.ok(dom.frames.length > 0, 'the loop keeps requesting frames');
   assert.match(dom.elements.get('token0').innerText, /^\$\d+$/);
+  assert.match(dom.elements.get('season0').innerText, /Autumn|Winter|Spring|Summer/);
 
   // A drag that starts without a prior mousemove must not jump the map.
   const originBefore = { x: app.camera.offsetX, y: app.camera.offsetY };

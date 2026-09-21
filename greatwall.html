@@ -4,100 +4,118 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Greatwall - The wall building game</title>
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link rel="stylesheet" type="text/css" href="greatwall.css" />
 	<link rel="icon" href="../images/favicon.png">
 </head>
 
 <body>
-<div>
 	<div id="canvasesdiv">
-		<canvas id="background"
-			style="z-index: 1;
-			position:absolute;
-			left:0px;
-			top:0px;">
-		This text is displayed if your browser does not support HTML5 Canvas.
-		</canvas>
-
-		<canvas id="canvas1"
-			style="z-index: 2;
-			position:absolute;
-			left:0px;
-			top:0px;">
-		This text is displayed if your browser does not support HTML5 Canvas.
-		</canvas>
-
-		<canvas id="canvas2"
-			style="z-index: 3;
-			position:absolute;
-			left:0px;
-			top:0px;">
-		This text is displayed if your browser does not support HTML5 Canvas.
-		</canvas>
-	</div>
-	<div id="topMenu">
-		<p id="token0" class="topinfo">$</p>
-		<p id="time0" class="topinfo">0</p>
-		<button id="menuBtn" class="button menu" title="Open the menu"><img src="images/menuBtn.png" alt="Menu"></button>
-		<button id="move" class="button menu" title="Move"><img src="images/moveBtn.png" alt="Move"></button>
-		<button id="zoom" class="button menu" title="Zoom the view"><img src="images/zoomBtn.png" alt="Zoom"></button>
-		<button id="help" class="button menu" title="More information"><img src="images/helpBtn.png" alt="Help"></button>
+		<canvas id="background" class="layer"></canvas>
+		<canvas id="canvas1" class="layer"></canvas>
+		<canvas id="canvas2" class="layer"></canvas>
 	</div>
 
-	<div class="buttonHolder">
-		<a id="buildTool" class="button tools build" title="Build walls"></a>
-		<a id="destroyTool" class="button tools destroy" title="Remove walls"></a>
-		<a id="repairTool" class="button tools repair" title="Repair walls"></a>
-		<a id="upgradeTool" class="button tools city" title="Upgrade the castle"></a>
-	</div>
+	<div id="viewoverlay"></div>
+
+	<header id="topMenu">
+		<button id="menuBtn" class="iconButton" title="Menu (Esc)">
+			<img src="images/menuBtn.png" alt="Menu">
+		</button>
+
+		<div class="readouts">
+			<div class="readout" title="Treasury">
+				<span class="readout-label">Treasury</span>
+				<span id="token0" class="readout-value">$0</span>
+			</div>
+			<div class="readout" title="Years endured">
+				<span class="readout-label">Endured</span>
+				<span id="time0" class="readout-value">0</span>
+			</div>
+			<div class="readout readout-season" title="Season">
+				<span class="readout-label">Season</span>
+				<span id="season0" class="readout-value">Autumn</span>
+			</div>
+		</div>
+
+		<div class="viewTools">
+			<button id="move" class="iconButton" title="Pan the map"><img src="images/moveBtn.png" alt="Move"></button>
+			<button id="zoom" class="iconButton" title="Zoom the view"><img src="images/zoomBtn.png" alt="Zoom"></button>
+			<button id="help" class="iconButton" title="How to play"><img src="images/helpBtn.png" alt="Help"></button>
+		</div>
+	</header>
+
+	<nav id="toolDock" class="toolDock">
+		<button id="buildTool" class="toolButton" title="Drag to raise a wall">
+			<img src="images/buildBtn.png" alt="">
+			<span class="toolName">Build</span>
+		</button>
+		<button id="destroyTool" class="toolButton" title="Drag over a wall to demolish it">
+			<img src="images/destroyBtn.png" alt="">
+			<span class="toolName">Raze</span>
+		</button>
+		<button id="repairTool" class="toolButton is-disabled" title="Not yet available" disabled>
+			<img src="images/attackBtn.png" alt="">
+			<span class="toolName">Repair</span>
+		</button>
+		<button id="upgradeTool" class="toolButton" title="Click the castle to upgrade it">
+			<img src="images/castleBtn.png" alt="">
+			<span class="toolName">Upgrade</span>
+		</button>
+	</nav>
 
 	<div id="myNav" class="overlay">
 		<div class="overlay-content">
-			<a id="navinfo">Build Walls to Defend the City</a>
-			<a id="startBtn2">Start</a>
-			<a id="restartBtn">Restart</a>
-			<a id="settingsBtn">Setting</a>
-			<a href="../index.html">Quit</a>
+			<h1 class="gameTitle">Greatwall</h1>
+			<p id="navinfo" class="gameTagline">Build walls to defend the city</p>
+			<div class="menuList">
+				<button id="startBtn2" class="menuItem menuItem-primary">Start</button>
+				<button id="restartBtn" class="menuItem">Restart</button>
+				<button id="settingsBtn" class="menuItem">Settings</button>
+				<a href="../index.html" class="menuItem">Quit</a>
+			</div>
 		</div>
 	</div>
 
 	<div id="settingMenu" class="overlay">
 		<div id="settingMenuContent" class="overlay-content">
-			<a id="soundBtn">Sound: 40</a>
-			<a id="bgmusicBtn">Start Background Music</a>
-			<a id="settingsBackBtn">Back</a>
+			<h2 class="panelTitle">Settings</h2>
+			<div class="menuList">
+				<button id="soundBtn" class="menuItem">Sound: 40</button>
+				<button id="bgmusicBtn" class="menuItem">Play Music</button>
+				<button id="settingsBackBtn" class="menuItem">Back</button>
+			</div>
 		</div>
 	</div>
 
 	<div id="loaderbg"></div>
-	<div id="loader"></div>
+	<div id="loader"><span class="loaderRing"></span><span class="loaderText">Raising the wall</span></div>
 
 	<div id="helpInfo" class="modal">
-	  <div class="modal-content">
-		<span id="helpClose" class="close">&times;</span>
-		<p>Build Some Walls To Defend The City from raiders..</p>
-		<p>Note: Cavalry units are fast, but infantry units sometimes climb over walls, keep an eye on them.</p>
-		<p>...</p>
-		<p>To build a wall, click the first button in the botton left corner.</p>
-		<p>If you run out of money, no more wall can be built. If you remove a section of wall, half the cost will be refunded, but a damaged wall values less</p>
-		<p>A castle can create money and regen health every few seconds. You can upgrade a castle by clicking the &#9814; button.</p>
-		<p>No civiliaztion lasts forever, but how long it lasts.</p>
-	  </div>
+		<div class="modal-content scroll">
+			<button id="helpClose" class="close" title="Close">&times;</button>
+			<h2 class="panelTitle">The Art of the Wall</h2>
+			<p>Raiders ride for your city. Walls are the only thing between them and your people.</p>
+			<ul class="helpList">
+				<li><b>Build</b> &mdash; drag to raise a wall. Sections cost coin by length.</li>
+				<li><b>Raze</b> &mdash; drag over a wall to demolish it. Half the price returns, less its damage.</li>
+				<li><b>Upgrade</b> &mdash; click your castle to grow it. Larger castles earn more and endure more.</li>
+				<li><b>Ctrl+Z</b> &mdash; undo the last section you laid.</li>
+			</ul>
+			<p class="helpNote">Cavalry die against walls. Infantry walk through them. Winter multiplies the cost of stone; autumn doubles the harvest.</p>
+			<p class="helpNote">No civilisation lasts forever. The question is how long.</p>
+		</div>
 	</div>
 
 	<div id="gameInfo" class="modal infomodal">
-	  <div class="modal-content infomodal-content">
-		<span id="infoClose" class="close">&times;</span>
-		<p id="infoP">Build Some Walls To Defend The City from raiders..</p>
-	  </div>
+		<div class="modal-content infomodal-content">
+			<button id="infoClose" class="close" title="Close">&times;</button>
+			<p id="infoP">Build walls to defend the city</p>
+		</div>
 	</div>
 
-	<div id="viewoverlay"></div>
-
-	<audio id="backgroundmusic" src="sounds/background.mp3" controls></audio>
+	<audio id="backgroundmusic" src="sounds/background.mp3"></audio>
 
 	<script type="module" src="src/main.js"></script>
-
-</div>
 </body>
 </html>

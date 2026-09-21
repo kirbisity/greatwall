@@ -1,18 +1,21 @@
 import {
   HEALTH_COLORS,
-  SEASON_COLORS,
+  PALETTE,
+  SEASONS,
   SPRITE_SCALE,
   WALL,
   WALL_NODE_RADIUS_UNITS,
   WALL_THICKNESS_UNITS,
 } from './config.js';
 
-const WALL_COLOR = '#CCC';
-const WALL_NODE_FILL = '#AAA';
-const DAMAGE_STRIPE_WIDTH = 40;
-const NODE_STROKE_WIDTH = 40;
-const CASTLE_FONT = '16px Trebuchet MS';
-const SEASONS_PER_YEAR = SEASON_COLORS.length;
+const DAMAGE_STRIPE_FRACTION = 0.45;
+// Bars track zoom but stay within a legible range. `lift` is the fraction of
+// sprite height to clear: castle art sits inside generous transparent padding,
+// so its bar tucks in rather than riding the sprite's bounding box.
+const CASTLE_BAR = { width: 0.26, minWidth: 44, maxWidth: 120, height: 7, gap: 6, lift: 0.4 };
+const RAIDER_BAR = { width: 0.55, minWidth: 14, maxWidth: 44, height: 4, gap: 3, lift: 0.5 };
+const SPRITE_FRAME_LENGTH = 10;
+const SPRITE_FRAME_SWITCH = 6;
 
 function healthColor(fraction) {
   for (const step of HEALTH_COLORS) {
@@ -26,9 +29,7 @@ function healthColor(fraction) {
 /** Draws the game onto three stacked canvases: terrain, units, structures. */
 export class Renderer {
   constructor({ terrain, units, structures }, camera, sprites) {
-    this.terrainCanvas = terrain;
-    this.unitsCanvas = units;
-    this.structuresCanvas = structures;
+    this.canvases = [terrain, units, structures];
     this.terrain = terrain.getContext('2d');
     this.units = units.getContext('2d');
     this.structures = structures.getContext('2d');
@@ -38,7 +39,7 @@ export class Renderer {
   }
 
   resize(width, height) {
-    for (const canvas of [this.terrainCanvas, this.unitsCanvas, this.structuresCanvas]) {
+    for (const canvas of this.canvases) {
       canvas.width = width;
       canvas.height = height;
     }
@@ -55,21 +56,30 @@ export class Renderer {
     this.drawCastles(game.castles);
   }
 
-  /** The terrain layer is a flat fill, so it only needs repainting on change. */
+  /** The terrain wash only changes with the season, so it is cached until then. */
   drawTerrain(season) {
     if (this.paintedSeason === season) {
       return;
     }
     this.paintedSeason = season;
-    this.terrain.fillStyle = SEASON_COLORS[season % SEASONS_PER_YEAR];
-    this.terrain.fillRect(0, 0, this.camera.width, this.camera.height);
+    const { width, height } = this.camera;
+    const palette = SEASONS[season % SEASONS.length];
+    const wash = this.terrain.createRadialGradient(
+      width / 2, height / 2, Math.min(width, height) * 0.1,
+      width / 2, height / 2, Math.max(width, height) * 0.75,
+    );
+    wash.addColorStop(0, palette.light);
+    wash.addColorStop(1, palette.dark);
+    this.terrain.fillStyle = wash;
+    this.terrain.fillRect(0, 0, width, height);
   }
+
+  // --- walls --------------------------------------------------------------
 
   drawWalls(walls) {
     if (walls.length === 0) {
       return;
     }
-    const context = this.structures;
     const pixelsPerUnit = this.camera.pixelsPerUnit;
     const screenWalls = walls.map((wall) => ({
       start: this.camera.toScreen(wall.start),
@@ -77,22 +87,28 @@ export class Renderer {
       health: wall.health,
     }));
 
+    // A dark sweep under a lighter one reads as a bevelled stone rampart.
+    this.strokeAll(screenWalls, PALETTE.wallEdge, WALL_THICKNESS_UNITS * pixelsPerUnit);
+    this.strokeAll(screenWalls, PALETTE.wallCore, WALL_THICKNESS_UNITS * pixelsPerUnit * 0.68);
+    this.drawDamageStripes(screenWalls, pixelsPerUnit);
+    this.drawTowers(screenWalls, pixelsPerUnit);
+  }
+
+  strokeAll(screenWalls, color, lineWidth) {
+    const context = this.structures;
     context.beginPath();
     for (const wall of screenWalls) {
       context.moveTo(wall.start.x, wall.start.y);
       context.lineTo(wall.end.x, wall.end.y);
     }
-    context.lineWidth = WALL_THICKNESS_UNITS * pixelsPerUnit;
-    context.strokeStyle = WALL_COLOR;
+    context.lineCap = 'round';
+    context.lineWidth = lineWidth;
+    context.strokeStyle = color;
     context.stroke();
-
-    this.drawDamageStripes(screenWalls);
-    this.drawWallNodes(screenWalls, pixelsPerUnit);
   }
 
   /** One stroke per distinct damage colour instead of one per wall. */
-  drawDamageStripes(screenWalls) {
-    const context = this.structures;
+  drawDamageStripes(screenWalls, pixelsPerUnit) {
     const byColor = new Map();
     for (const wall of screenWalls) {
       if (wall.health >= WALL.maxHealth) {
@@ -104,39 +120,39 @@ export class Renderer {
       }
       byColor.get(color).push(wall);
     }
-    context.lineWidth = DAMAGE_STRIPE_WIDTH * this.camera.scale;
+    const width = WALL_THICKNESS_UNITS * pixelsPerUnit * DAMAGE_STRIPE_FRACTION;
     for (const [color, group] of byColor) {
-      context.beginPath();
-      for (const wall of group) {
-        context.moveTo(wall.start.x, wall.start.y);
-        context.lineTo(wall.end.x, wall.end.y);
-      }
-      context.strokeStyle = color;
-      context.stroke();
+      this.strokeAll(group, color, width);
     }
   }
 
-  drawWallNodes(screenWalls, pixelsPerUnit) {
-    const context = this.structures;
+  drawTowers(screenWalls, pixelsPerUnit) {
     const radius = WALL_NODE_RADIUS_UNITS * pixelsPerUnit;
-    context.beginPath();
+    const nodes = [];
     for (const wall of screenWalls) {
-      for (const node of [wall.start, wall.end]) {
-        context.moveTo(node.x + radius, node.y);
-        context.arc(node.x, node.y, radius, 0, 2 * Math.PI);
-      }
+      nodes.push(wall.start, wall.end);
     }
-    context.fillStyle = WALL_NODE_FILL;
-    context.fill();
-    context.lineWidth = NODE_STROKE_WIDTH * this.camera.scale;
-    context.strokeStyle = WALL_COLOR;
-    context.stroke();
+    this.fillCircles(nodes, radius, PALETTE.towerEdge);
+    this.fillCircles(nodes, radius * 0.66, PALETTE.towerFill);
   }
+
+  fillCircles(nodes, radius, color) {
+    const context = this.structures;
+    context.beginPath();
+    for (const node of nodes) {
+      context.moveTo(node.x + radius, node.y);
+      context.arc(node.x, node.y, radius, 0, 2 * Math.PI);
+    }
+    context.fillStyle = color;
+    context.fill();
+  }
+
+  // --- units and castles --------------------------------------------------
 
   drawRaiders(raiders, frame) {
     const context = this.units;
     const scale = this.camera.scale;
-    const spriteIndex = frame % 10 < 6 ? 0 : 1;
+    const spriteIndex = frame % SPRITE_FRAME_LENGTH < SPRITE_FRAME_SWITCH ? 0 : 1;
     for (const raider of raiders) {
       const image = this.sprites.get(raider.type.sprites[spriteIndex]);
       if (!image || !image.width) {
@@ -150,31 +166,45 @@ export class Renderer {
       context.rotate(-Math.atan2(-raider.velocity.x, raider.velocity.y));
       context.drawImage(image, -width / 2, -height / 2, width, height);
       context.restore();
+
+      // Only wounded raiders carry a bar, so a healthy field stays uncluttered.
+      const fraction = raider.health / raider.type.maxHealth;
+      if (fraction < 1) {
+        this.drawHealthBar(context, position, width, height, RAIDER_BAR, fraction);
+      }
     }
   }
 
   drawCastles(castles) {
     const context = this.structures;
     const scale = this.camera.scale;
-    context.font = CASTLE_FONT;
-    context.shadowColor = 'black';
     for (const castle of castles) {
       const position = this.camera.toScreen(castle.position);
       const image = this.sprites.get(castle.type.sprite);
-      if (image && image.width) {
-        const width = image.width * SPRITE_SCALE * scale;
-        const height = image.height * SPRITE_SCALE * scale;
-        context.shadowBlur = 0;
-        context.drawImage(image, position.x - width / 2, position.y - height / 2, width, height);
+      if (!image || !image.width) {
+        continue;
       }
-      context.fillStyle = healthColor(castle.healthFraction);
-      context.shadowBlur = 7;
-      context.fillText(
-        String(Math.trunc(castle.health)),
-        position.x - 30 * scale - 11,
-        position.y - 800 * scale,
-      );
+      const width = image.width * SPRITE_SCALE * scale;
+      const height = image.height * SPRITE_SCALE * scale;
+      context.drawImage(image, position.x - width / 2, position.y - height / 2, width, height);
+      this.drawHealthBar(context, position, width, height, CASTLE_BAR, castle.healthFraction);
     }
-    context.shadowBlur = 0;
+  }
+
+  /** A bronze-framed bar resting just above the sprite it belongs to. */
+  drawHealthBar(context, position, spriteWidth, spriteHeight, spec, fraction) {
+    const barWidth = Math.min(Math.max(spriteWidth * spec.width, spec.minWidth), spec.maxWidth);
+    const barHeight = spec.height;
+    const left = position.x - barWidth / 2;
+    const y = position.y - spriteHeight * spec.lift - barHeight - spec.gap;
+    const filled = Math.max(0, Math.min(1, fraction));
+
+    context.fillStyle = PALETTE.barFill;
+    context.fillRect(left - 1, y - 1, barWidth + 2, barHeight + 2);
+    context.fillStyle = healthColor(filled);
+    context.fillRect(left, y, barWidth * filled, barHeight);
+    context.lineWidth = 1;
+    context.strokeStyle = PALETTE.barEdge;
+    context.strokeRect(left - 1.5, y - 1.5, barWidth + 3, barHeight + 3);
   }
 }

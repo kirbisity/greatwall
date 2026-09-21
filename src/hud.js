@@ -1,7 +1,17 @@
-import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL } from './config.js';
+import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL, SEASONS } from './config.js';
 
 const SOUND_LEVEL_STEP = 20;
 const MAX_SOUND_LEVEL = 100;
+const TOAST_DURATION_MS = 5200;
+
+/** Which button lights up for each tool. */
+const TOOL_BUTTONS = {
+  move: 'move',
+  zoom: 'zoom',
+  build: 'buildTool',
+  destroy: 'destroyTool',
+  upgrade: 'upgradeTool',
+};
 
 function element(id) {
   const node = document.getElementById(id);
@@ -16,6 +26,7 @@ export class Hud {
   constructor() {
     this.tokenLabel = element('token0');
     this.timeLabel = element('time0');
+    this.seasonLabel = element('season0');
     this.menu = element('myNav');
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
@@ -29,6 +40,8 @@ export class Hud {
     this.soundLevel = INITIAL_SOUND_LEVEL;
     this.shownTokens = null;
     this.shownSeconds = null;
+    this.shownSeason = null;
+    this.toastTimer = null;
 
     this.music.loop = true;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
@@ -58,6 +71,20 @@ export class Hud {
     if (game.seconds !== this.shownSeconds) {
       this.shownSeconds = game.seconds;
       this.timeLabel.innerText = String(game.seconds);
+    }
+    if (game.season !== this.shownSeason) {
+      this.shownSeason = game.season;
+      this.seasonLabel.innerText = SEASONS[game.season % SEASONS.length].name;
+    }
+  }
+
+  /** Light up the button for the active tool and dim the rest. */
+  setActiveTool(tool) {
+    for (const [name, id] of Object.entries(TOOL_BUTTONS)) {
+      const button = document.getElementById(id);
+      if (button) {
+        button.classList.toggle('is-active', name === tool && tool !== 'move');
+      }
     }
   }
 
@@ -90,9 +117,12 @@ export class Hud {
   showMessage(text) {
     this.messageText.innerText = text;
     this.messageModal.style.display = 'block';
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => this.closeMessage(), TOAST_DURATION_MS);
   }
 
   closeMessage() {
+    clearTimeout(this.toastTimer);
     this.messageModal.style.display = 'none';
   }
 

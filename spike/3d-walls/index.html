@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Greatwall 3D spike</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#14100c;font:13px Georgia,serif;color:#ece0c4}
+  canvas{position:absolute;inset:0;cursor:move}
+  #hud{position:absolute;left:12px;top:12px;z-index:2;background:rgba(20,16,12,.85);
+       border:1px solid #8a6d24;padding:10px 14px;line-height:1.6}
+  b{color:#c9a227}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <b>Native canvas 2D — extruded walls under a perspective camera</b><br>
+  drag = pan &nbsp;·&nbsp; wheel = zoom &nbsp;·&nbsp; [ ] = tilt<br>
+  tilt <span id="tilt"></span>° &nbsp; focus <span id="focus"></span> &nbsp; faces <span id="faces"></span>
+</div>
+<script type="module">
+/*
+ * Throwaway prototype, not production code. It exists to answer one question:
+ * can plain canvas 2D render walls as extruded blocks whose sides appear as the
+ * view pans? See README.md in this folder for the measurements it produced.
+ */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- camera -------------------------------------------------------------
+// Elevation is the angle above the ground plane: 90 deg is straight down.
+const camera = { focus: {x: 0, y: 0}, distance: 520, elevation: 62, focal: 900 };
+
+function basis() {
+  const phi = camera.elevation * Math.PI / 180;
+  const sin = Math.sin(phi), cos = Math.cos(phi);
+  return {
+    position: {x: camera.focus.x, y: camera.focus.y - camera.distance * cos, z: camera.distance * sin},
+    right: {x: 1, y: 0, z: 0},
+    up: {x: 0, y: sin, z: cos},
+    forward: {x: 0, y: cos, z: -sin},
+  };
+}
+
+function project(point, view) {
+  const rel = {x: point.x - view.position.x, y: point.y - view.position.y, z: point.z - view.position.z};
+  const depth = rel.y * view.forward.y + rel.z * view.forward.z;
+  if (depth <= 1) return null;
+  const x = rel.x;
+  const y = rel.y * view.up.y + rel.z * view.up.z;
+  return {
+    x: canvas.width / 2 + camera.focal * x / depth,
+    y: canvas.height / 2 - camera.focal * y / depth,
+    depth,
+  };
+}
+
+/** Screen pixel to the point where its ray meets the ground plane. */
+function toGround(px, py, view) {
+  const u = (px - canvas.width / 2) / camera.focal;
+  const v = -(py - canvas.height / 2) / camera.focal;
+  const dir = {
+    x: u,
+    y: v * view.up.y + view.forward.y,
+    z: v * view.up.z + view.forward.z,
+  };
+  const t = -view.position.z / dir.z;
+  return {x: view.position.x + t * dir.x, y: view.position.y + t * dir.y};
+}
+
+// --- scene --------------------------------------------------------------
+const WALL_HEIGHT = 26;
+const WALL_THICKNESS = 18;
+
+const walls = [];
+for (let i = 0; i < 13; i++) {
+  const a = (i - 6) * 0.2, b = (i - 5) * 0.2, r = 300;
+  walls.push({
+    start: {x: Math.cos(a) * r, y: Math.sin(a) * r},
+    end: {x: Math.cos(b) * r, y: Math.sin(b) * r},
+    health: i === 5 ? 0.3 : i === 6 ? 0.6 : 1,
+  });
+}
+for (let i = 0; i < 6; i++) {
+  walls.push({start: {x: -340 + i * 90, y: -300}, end: {x: -340 + (i + 1) * 90, y: -300}, health: 1});
+}
+
+/** The eight corners of the box a wall segment occupies. */
+function wallBox(wall) {
+  const dx = wall.end.x - wall.start.x, dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len * WALL_THICKNESS / 2, ny = dx / len * WALL_THICKNESS / 2;
+  // Wound counter-clockwise seen from above, so face normals point outwards
+  // and back-face culling keeps the roof rather than discarding it.
+  const ground = [
+    {x: wall.start.x - nx, y: wall.start.y - ny},
+    {x: wall.end.x - nx, y: wall.end.y - ny},
+    {x: wall.end.x + nx, y: wall.end.y + ny},
+    {x: wall.start.x + nx, y: wall.start.y + ny},
+  ];
+  return {
+    base: ground.map((p) => ({x: p.x, y: p.y, z: 0})),
+    top: ground.map((p) => ({x: p.x, y: p.y, z: WALL_HEIGHT})),
+  };
+}
+
+const LIGHT = {x: -0.5, y: 0.35, z: 0.79};
+
+function faceNormal(a, b, c) {
+  const u = {x: b.x - a.x, y: b.y - a.y, z: b.z - a.z};
+  const v = {x: c.x - a.x, y: c.y - a.y, z: c.z - a.z};
+  const n = {x: u.y * v.z - u.z * v.y, y: u.z * v.x - u.x * v.z, z: u.x * v.y - u.y * v.x};
+  const len = Math.hypot(n.x, n.y, n.z) || 1;
+  return {x: n.x / len, y: n.y / len, z: n.z / len};
+}
+
+function shade(normal, base) {
+  const lit = Math.max(0, normal.x * LIGHT.x + normal.y * LIGHT.y + normal.z * LIGHT.z);
+  const level = 0.42 + 0.58 * lit;
+  return `rgb(${Math.round(base[0] * level)},${Math.round(base[1] * level)},${Math.round(base[2] * level)})`;
+}
+
+const STONE = [214, 203, 178];
+const DAMAGED = [194, 69, 60];
+
+function collectFaces(view) {
+  const faces = [];
+  for (const wall of walls) {
+    const box = wallBox(wall);
+    const tint = wall.health < 1 ? DAMAGED.map((c, i) => c * (1 - wall.health) + STONE[i] * wall.health) : STONE;
+    const quads = [box.top];
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      quads.push([box.base[i], box.base[j], box.top[j], box.top[i]]);
+    }
+    for (const quad of quads) {
+      const normal = faceNormal(quad[0], quad[1], quad[2]);
+      const centre = quad.reduce((acc, p) => ({x: acc.x + p.x / 4, y: acc.y + p.y / 4, z: acc.z + p.z / 4}), {x: 0, y: 0, z: 0});
+      const toCamera = {x: view.position.x - centre.x, y: view.position.y - centre.y, z: view.position.z - centre.z};
+      if (normal.x * toCamera.x + normal.y * toCamera.y + normal.z * toCamera.z <= 0) continue;
+      const points = quad.map((p) => project(p, view));
+      if (points.some((p) => p === null)) continue;
+      faces.push({points, fill: shade(normal, tint), depth: points.reduce((s, p) => s + p.depth, 0) / 4});
+    }
+  }
+  return faces.sort((a, b) => b.depth - a.depth);
+}
+
+function drawGround(view) {
+  ctx.fillStyle = '#6d5836';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(0,0,0,.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let g = -1200; g <= 1200; g += 100) {
+    const a = project({x: g, y: -1200, z: 0}, view), b = project({x: g, y: 1200, z: 0}, view);
+    if (a && b) { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    const c = project({x: -1200, y: g, z: 0}, view), d = project({x: 1200, y: g, z: 0}, view);
+    if (c && d) { ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y); }
+  }
+  ctx.stroke();
+}
+
+function render() {
+  const view = basis();
+  drawGround(view);
+  const faces = collectFaces(view);
+  for (const face of faces) {
+    ctx.beginPath();
+    ctx.moveTo(face.points[0].x, face.points[0].y);
+    for (let i = 1; i < face.points.length; i++) ctx.lineTo(face.points[i].x, face.points[i].y);
+    ctx.closePath();
+    ctx.fillStyle = face.fill;
+    ctx.fill();
+  }
+  document.getElementById('tilt').textContent = camera.elevation.toFixed(0);
+  document.getElementById('focus').textContent = `${camera.focus.x.toFixed(0)}, ${camera.focus.y.toFixed(0)}`;
+  document.getElementById('faces').textContent = faces.length;
+}
+
+// --- input --------------------------------------------------------------
+let dragging = false, last = {x: 0, y: 0};
+canvas.addEventListener('mousedown', (e) => { dragging = true; last = {x: e.clientX, y: e.clientY}; });
+addEventListener('mouseup', () => { dragging = false; });
+addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const view = basis();
+  const before = toGround(last.x, last.y, view);
+  const after = toGround(e.clientX, e.clientY, view);
+  camera.focus.x -= after.x - before.x;
+  camera.focus.y -= after.y - before.y;
+  last = {x: e.clientX, y: e.clientY};
+  render();
+});
+addEventListener('wheel', (e) => {
+  camera.distance = Math.min(2400, Math.max(140, camera.distance * (1 + Math.sign(e.deltaY) * 0.1)));
+  render();
+});
+addEventListener('keydown', (e) => {
+  if (e.key === '[') camera.elevation = Math.max(18, camera.elevation - 4);
+  if (e.key === ']') camera.elevation = Math.min(89, camera.elevation + 4);
+  render();
+});
+
+function resize() { canvas.width = innerWidth; canvas.height = innerHeight; render(); }
+addEventListener('resize', resize);
+resize();
+window.spike = {camera, render, basis, project, toGround, collectFaces, walls, ctx, canvas,
+  setWalls(next) { walls.length = 0; walls.push(...next); },
+  drawFaces(faces) {
+    for (const face of faces) {
+      ctx.beginPath();
+      ctx.moveTo(face.points[0].x, face.points[0].y);
+      for (let i = 1; i < face.points.length; i++) ctx.lineTo(face.points[i].x, face.points[i].y);
+      ctx.closePath(); ctx.fillStyle = face.fill; ctx.fill();
+    }
+  }};
+</script></body></html>

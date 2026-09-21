@@ -12,8 +12,9 @@ const pageIds = new Set(
 );
 
 const CONTEXT_METHODS = [
-  'clearRect', 'fillRect', 'strokeRect', 'beginPath', 'moveTo', 'lineTo', 'stroke',
-  'arc', 'fill', 'drawImage', 'save', 'translate', 'rotate', 'restore', 'fillText',
+  'clearRect', 'fillRect', 'strokeRect', 'beginPath', 'moveTo', 'lineTo', 'closePath',
+  'stroke', 'arc', 'fill', 'drawImage', 'save', 'translate', 'rotate', 'restore',
+  'fillText', 'setTransform',
 ];
 
 function stubContext() {
@@ -123,9 +124,14 @@ test('the app boots, plays frames and reacts to input without touching a missing
   const builtWalls = app.game.walls.length;
   dom.documentListeners.get('keydown')({ key: 'z', code: 'KeyZ', ctrlKey: true });
   assert.equal(app.game.walls.length, builtWalls - 1, 'ctrl+z removed one section');
-  const zoomBefore = app.camera.scale;
+  // Zooming in pulls the camera closer, so distance falls.
+  const distanceBefore = app.camera.distance;
   dom.documentListeners.get('wheel')({ clientX: 400, clientY: 400, deltaY: -1 });
-  assert.ok(app.camera.scale > zoomBefore, 'scrolling up zooms in');
+  assert.ok(app.camera.distance < distanceBefore, 'scrolling up zooms in');
+
+  const tiltBefore = app.camera.elevation;
+  dom.documentListeners.get('keydown')({ key: '[' });
+  assert.ok(app.camera.elevation < tiltBefore, 'bracket keys tilt the camera');
 
   dom.documentListeners.get('keydown')({ key: 'Escape' });
   assert.equal(app.running, false, 'escape pauses and opens the menu');

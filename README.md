@@ -23,9 +23,10 @@ already have.
 | Control | Action |
 |---|---|
 | Drag | Pan the map |
-| Scroll wheel | Zoom |
+| Scroll wheel | Zoom in and out |
 | Bottom-left buttons | Build wall, remove wall, repair (unimplemented), upgrade castle |
 | Ctrl+Z | Undo the last wall section |
+| `[` and `]` | Tilt the camera |
 | Esc | Menu |
 
 Drag with the build tool to lay wall sections. Removing a section refunds half its

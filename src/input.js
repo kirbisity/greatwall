@@ -1,4 +1,4 @@
-import { SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
+import { CAMERA, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
 import { distance } from './geometry.js';
 
 const CURSORS = {
@@ -10,7 +10,7 @@ const CURSORS = {
 };
 
 const DRAG_ZOOM_SENSITIVITY = 5;
-const MAX_DRAG_ZOOM_STEPS = 5;
+const MAX_DRAG_ZOOM_STEPS = 3;
 
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {
@@ -101,7 +101,7 @@ export class Input {
         this.dragDestroy();
         break;
       default:
-        this.camera.pan(this.pointer.x - previous.x, this.pointer.y - previous.y);
+        this.camera.panFrom(previous, this.pointer);
     }
     this.onChange();
   }
@@ -160,6 +160,11 @@ export class Input {
   handleKey(event) {
     if (event.key === 'Escape') {
       this.onMenu();
+      return;
+    }
+    if (event.key === '[' || event.key === ']') {
+      this.camera.tilt(event.key === '[' ? -CAMERA.elevationStep : CAMERA.elevationStep);
+      this.onChange();
       return;
     }
     if (event.ctrlKey && event.code === 'KeyZ') {

@@ -1,71 +1,36 @@
-import { rotateAround, scaleSegment, segmentsIntersect } from './geometry.js';
-import {
-  RAIDER_AVOID_MAX_DEGREES,
-  RAIDER_AVOID_STEP_DEGREES,
-  RAIDER_STEERING_RADIANS,
-} from './config.js';
+import { distanceSquared } from './geometry.js';
+import { NAVIGATION, RAIDER_STEERING_RADIANS } from './config.js';
+import { isBlocked, routeFrom, siegeTarget } from './navigation.js';
 
 const FULL_TURN_RADIANS = 2 * Math.PI;
-const DEGREES_TO_RADIANS = Math.PI / 180;
-// Walls are treated as longer than they are so raiders aim past the ends
-// instead of grazing along them.
-const WALL_AVOIDANCE_SCALE = 2;
 
-/** The point a raider can currently see ahead of itself. */
-function sightPoint(raider) {
-  const reach = raider.type.lineOfSight / raider.type.speed;
-  return {
-    x: raider.position.x + raider.velocity.x * reach,
-    y: raider.position.y + raider.velocity.y * reach,
-  };
+function midpointOf(wall) {
+  return { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
 }
 
-/** First heading within the avoidance arc that clears the wall, or null. */
-function findGap(raider, sight, wallStart, wallEnd) {
-  for (let degrees = RAIDER_AVOID_STEP_DEGREES; degrees <= RAIDER_AVOID_MAX_DEGREES; degrees += RAIDER_AVOID_STEP_DEGREES) {
-    const radians = degrees * DEGREES_TO_RADIANS;
-    const left = rotateAround(raider.position, sight, -radians);
-    if (!segmentsIntersect(wallStart, wallEnd, raider.position, left)) {
-      return left;
-    }
-    const right = rotateAround(raider.position, sight, radians);
-    if (!segmentsIntersect(wallStart, wallEnd, raider.position, right)) {
-      return right;
-    }
-  }
-  return null;
-}
-
-function chooseWaypoint(raider, walls) {
-  if (walls.length === 0) {
-    return raider.destination;
+/**
+ * Where this raider should head next: straight at the city when the way is
+ * open, otherwise the cheapest gateway round the walls, and failing that the
+ * wall barring its path.
+ */
+function chooseWaypoint(raider, navigation) {
+  const castle = raider.destination;
+  if (navigation.barriers.length === 0 || !isBlocked(raider.position, castle, navigation.barriers)) {
+    raider.siegeTarget = null;
+    return castle;
   }
 
-  let pathIsClear = true;
-  for (const wall of walls) {
-    if (wall.isIntact && segmentsIntersect(raider.position, raider.destination, wall.start, wall.end)) {
-      pathIsClear = false;
-      break;
-    }
+  const route = routeFrom(navigation, raider.position);
+  if (route) {
+    raider.siegeTarget = null;
+    return route.waypoint;
   }
 
-  const sight = sightPoint(raider);
-  let detour = null;
-  for (const wall of walls) {
-    const avoided = scaleSegment(wall.start, wall.end, WALL_AVOIDANCE_SCALE);
-    if (segmentsIntersect(raider.position, raider.destination, avoided.start, avoided.end)) {
-      pathIsClear = false;
-    }
-    if (segmentsIntersect(raider.position, sight, avoided.start, avoided.end)) {
-      detour = findGap(raider, sight, avoided.start, avoided.end);
-      break;
-    }
+  // Walled in. Keep hitting the same section so the damage adds up.
+  if (!raider.siegeTarget || !navigation.barriers.includes(raider.siegeTarget)) {
+    raider.siegeTarget = siegeTarget(navigation, raider.position, castle);
   }
-
-  if (pathIsClear || raider.turnedRadians > FULL_TURN_RADIANS) {
-    return raider.destination;
-  }
-  return detour ?? raider.destination;
+  return raider.siegeTarget ? midpointOf(raider.siegeTarget) : castle;
 }
 
 function turnTowards(raider, waypoint) {
@@ -82,18 +47,27 @@ function turnTowards(raider, waypoint) {
   const deadzone = 4 * RAIDER_STEERING_RADIANS;
   if (heading < desired - deadzone) {
     heading = Math.min(desired, heading + RAIDER_STEERING_RADIANS);
-    raider.turnedRadians += RAIDER_STEERING_RADIANS;
   } else if (heading > desired + deadzone) {
     heading = Math.max(desired, heading - RAIDER_STEERING_RADIANS);
-    raider.turnedRadians += RAIDER_STEERING_RADIANS;
   }
 
   raider.velocity.x = raider.type.speed * Math.cos(heading);
   raider.velocity.y = raider.type.speed * Math.sin(heading);
 }
 
-/** Pick a waypoint around any blocking wall and turn the raider towards it. */
-export function steerRaider(raider, walls) {
-  raider.waypoint = chooseWaypoint(raider, walls);
+/** Re-plan only on arrival, on a wall change, or a few times a second. */
+function needsNewWaypoint(raider, navigation) {
+  return raider.planVersion !== navigation.version
+    || raider.replanCountdown <= 0
+    || distanceSquared(raider.position, raider.waypoint) < NAVIGATION.arriveRadius ** 2;
+}
+
+export function steerRaider(raider, navigation) {
+  raider.replanCountdown -= 1;
+  if (needsNewWaypoint(raider, navigation)) {
+    raider.waypoint = chooseWaypoint(raider, navigation);
+    raider.planVersion = navigation.version;
+    raider.replanCountdown = NAVIGATION.replanFrames;
+  }
   turnTowards(raider, raider.waypoint);
 }

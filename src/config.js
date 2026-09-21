@@ -51,8 +51,21 @@ export const WALL = {
 };
 
 export const RAIDER_STEERING_RADIANS = 0.01;
-export const RAIDER_AVOID_STEP_DEGREES = 10;
-export const RAIDER_AVOID_MAX_DEGREES = 60;
+
+/**
+ * Raiders route by a graph of the ways past the wall network. It is rebuilt
+ * only when walls change, and each raider re-picks a waypoint a few times a
+ * second rather than every frame.
+ */
+export const NAVIGATION = {
+  // How far past a wall's tip a gateway sits, clear of the longest weapon reach.
+  gatewayClearance: 12,
+  // Rebuild cost grows with the square of this, and a build drag rebuilds per
+  // section, so it is capped well below what a sane wall layout ever produces.
+  maxGateways: 32,
+  replanFrames: 20,
+  arriveRadius: 10,
+};
 export const SPAWN_MIN_DISTANCE = 200;
 export const SPAWN_MAX_DISTANCE = 400;
 

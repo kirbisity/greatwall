@@ -35,6 +35,10 @@ const MIN_TOWER_PIXELS = 1.5;
 const CASTLE_BAR = { minWidth: 44, maxWidth: 120, height: 7, gap: 7 };
 const RAIDER_BAR = { minWidth: 14, maxWidth: 44, height: 4, gap: 4 };
 
+const ROUTE_OPEN = '#7fd4ff';
+const ROUTE_SHUT = '#8a8a8a';
+const ROUTE_SIEGE = '#ff8a5c';
+
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
 const TOWER = [186, 173, 143];
@@ -160,6 +164,9 @@ export class Renderer {
     if (settings.atmosphere) {
       this.atmosphere.drawFog(this.overlay, game.season);
       this.atmosphere.drawClouds(this.overlay);
+    }
+    if (settings.showRoutes) {
+      this.drawRoutes(view, game);
     }
     this.drawBars(view, game);
   }
@@ -372,6 +379,46 @@ export class Renderer {
   }
 
   // --- screen-space overlays ----------------------------------------------
+
+  /** Debug view: the gateways raiders navigate by, and the waypoint each holds. */
+  drawRoutes(view, game) {
+    const context = this.overlay;
+    const navigation = game.navigation();
+    context.save();
+    context.font = '11px monospace';
+
+    for (const [index, gateway] of navigation.gateways.entries()) {
+      const screen = projectPoint(view, gateway.x, gateway.y, 0);
+      if (!screen) {
+        continue;
+      }
+      const reachable = Number.isFinite(navigation.distances[index]);
+      context.fillStyle = reachable ? ROUTE_OPEN : ROUTE_SHUT;
+      context.beginPath();
+      context.arc(screen.x, screen.y, 5, 0, 2 * Math.PI);
+      context.fill();
+      context.fillText(
+        reachable ? String(Math.round(navigation.distances[index])) : 'x',
+        screen.x + 8,
+        screen.y - 6,
+      );
+    }
+
+    context.lineWidth = 1;
+    for (const raider of game.raiders) {
+      const from = projectPoint(view, raider.position.x, raider.position.y, 0);
+      const to = projectPoint(view, raider.waypoint.x, raider.waypoint.y, 0);
+      if (!from || !to) {
+        continue;
+      }
+      context.strokeStyle = raider.siegeTarget ? ROUTE_SIEGE : ROUTE_OPEN;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+    }
+    context.restore();
+  }
 
   drawBars(view, game) {
     for (const castle of game.castles) {

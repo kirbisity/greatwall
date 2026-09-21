@@ -4,8 +4,6 @@ import {
   distance,
   isWithinSegmentBand,
   pointToLineDistance,
-  rotateAround,
-  scaleSegment,
   segmentsIntersect,
 } from '../src/geometry.js';
 
@@ -51,16 +49,4 @@ test('isWithinSegmentBand agrees with the unoptimised distance checks', () => {
 test('isWithinSegmentBand rejects a degenerate segment', () => {
   const point = { x: 0, y: 0 };
   assert.equal(isWithinSegmentBand(point, point, point, 5, 10), false);
-});
-
-test('rotateAround preserves radius and turns by the given angle', () => {
-  const rotated = rotateAround({ x: 0, y: 0 }, { x: 10, y: 0 }, Math.PI / 2);
-  assert.ok(Math.abs(rotated.x) < 1e-9);
-  assert.ok(Math.abs(rotated.y - 10) < 1e-9);
-});
-
-test('scaleSegment grows a segment about its midpoint', () => {
-  const { start, end } = scaleSegment({ x: 0, y: 0 }, { x: 10, y: 0 }, 2);
-  assert.deepEqual(start, { x: -5, y: 0 });
-  assert.deepEqual(end, { x: 15, y: 0 });
 });

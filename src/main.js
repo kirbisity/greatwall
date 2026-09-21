@@ -48,6 +48,7 @@ class App {
     window.addEventListener('resize', () => this.resize());
     this.hud.setCursor('move');
     this.hud.setAtmosphereLabel(settings.atmosphere);
+    this.hud.setRoutesLabel(settings.showRoutes);
     this.draw();
   }
 
@@ -58,6 +59,7 @@ class App {
     bind('settingsBackBtn', () => this.hud.closeSettings());
     bind('soundBtn', () => this.hud.cycleSoundLevel());
     bind('atmosphereBtn', () => this.toggleAtmosphere());
+    bind('routesBtn', () => this.toggleRoutes());
     bind('bgmusicBtn', () => this.hud.playMusic());
     bind('menuBtn', () => this.openMenu());
     bind('help', () => this.openHelp());
@@ -77,6 +79,14 @@ class App {
     settings.atmosphere = !settings.atmosphere;
     saveSettings();
     this.hud.setAtmosphereLabel(settings.atmosphere);
+    this.hud.setRoutesLabel(settings.showRoutes);
+    this.draw();
+  }
+
+  toggleRoutes() {
+    settings.showRoutes = !settings.showRoutes;
+    saveSettings();
+    this.hud.setRoutesLabel(settings.showRoutes);
     this.draw();
   }
 

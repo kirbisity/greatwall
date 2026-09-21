@@ -28,8 +28,9 @@ already have.
 | Ctrl+Z | Undo the last wall section |
 | `[` and `]` | Tilt the camera |
 
-Settings has an **Atmosphere** toggle (distance haze and drifting cloud layers). It is on
-by default, costs about 0.45 ms a frame, and the choice is remembered.
+Settings has an **Atmosphere** toggle (distance haze and drifting cloud layers), on by
+default, and a **Show Routes** toggle that draws the gateways raiders navigate by. Both
+choices are remembered.
 | Esc | Menu |
 
 Drag with the build tool to lay wall sections. Ends snap to other wall ends and to the
@@ -60,7 +61,6 @@ src/                Game source (ES modules)
   config.js           Tuning tables: castles, raiders, seasons, costs
   geometry.js         Vector and segment maths
   entities.js         Wall, Castle, Raider
-  pathfinding.js      Raider steering around walls
   game.js             Rules and state — no DOM
   camera.js           World/screen transforms, pan and zoom
   renderer.js         Canvas drawing
@@ -72,6 +72,8 @@ src/                Game source (ES modules)
   structures.js       Turns a building definition into 3D faces
   buildings/          Building layouts, one data module per castle tier
   atmosphere.js       Distance haze and cloud layers
+  navigation.js       Gateway graph raiders route by
+  pathfinding.js      Waypoint choice and steering
   settings.js         Player preferences, persisted
 test/               Tests
 images/  sounds/    Assets

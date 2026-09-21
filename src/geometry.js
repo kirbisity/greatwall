@@ -54,23 +54,7 @@ export function isWithinSegmentBand(point, lineStart, lineEnd, range, reach) {
   return cross * cross < range * range * lengthSquared;
 }
 
-export function rotateAround(origin, point, radians) {
-  const radius = distance(origin, point);
-  const angle = Math.atan2(point.y - origin.y, point.x - origin.x) + radians;
-  return {
-    x: origin.x + radius * Math.cos(angle),
-    y: origin.y + radius * Math.sin(angle),
-  };
-}
 
-/** Grow a segment outwards from its midpoint by `factor` (1 leaves it unchanged). */
-export function scaleSegment(start, end, factor) {
-  const half = (factor - 1) / 2;
-  return {
-    start: { x: start.x - (end.x - start.x) * half, y: start.y - (end.y - start.y) * half },
-    end: { x: end.x + (end.x - start.x) * half, y: end.y + (end.y - start.y) * half },
-  };
-}
 
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));

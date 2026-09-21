@@ -3,6 +3,7 @@ const STORAGE_KEY = 'greatwall.settings';
 /** Player preferences that survive a reload. Atmosphere is the costly one. */
 export const settings = {
   atmosphere: true,
+  showRoutes: false,
 };
 
 export function loadSettings() {

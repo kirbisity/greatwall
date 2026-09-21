@@ -61,8 +61,11 @@ export class Raider {
     this.destination = { x: 0, y: 0 };
     this.waypoint = { x: 0, y: 0 };
     this.health = type.maxHealth;
-    // Raiders that have turned a full circle give up avoiding and charge.
-    this.turnedRadians = 0;
+    // Navigation state: which section to batter when walled in, and when to
+    // think again rather than re-planning every frame.
+    this.siegeTarget = null;
+    this.planVersion = null;
+    this.replanCountdown = 0;
   }
 
   get isAlive() {

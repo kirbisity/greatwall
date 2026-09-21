@@ -113,11 +113,34 @@ export const SEASON_MESSAGES = [
 
 /** Terrain is painted as a radial wash so the map reads as lit from above. */
 export const SEASONS = [
-  { name: 'Autumn', light: '#9a7c4b', dark: '#5f4a2a', accent: '#d9a441' },
-  { name: 'Winter', light: '#8d8a83', dark: '#4f4e4b', accent: '#cfd8dc' },
-  { name: 'Spring', light: '#7f8f52', dark: '#4a5530', accent: '#9ccc65' },
-  { name: 'Summer', light: '#948a46', dark: '#5a5228', accent: '#e0c341' },
+  { name: 'Autumn', light: '#9a7c4b', dark: '#5f4a2a', accent: '#d9a441', haze: '198, 176, 138' },
+  { name: 'Winter', light: '#8d8a83', dark: '#4f4e4b', accent: '#cfd8dc', haze: '198, 202, 206' },
+  { name: 'Spring', light: '#7f8f52', dark: '#4a5530', accent: '#9ccc65', haze: '178, 190, 154' },
+  { name: 'Summer', light: '#948a46', dark: '#5a5228', accent: '#e0c341', haze: '206, 194, 142' },
 ];
+
+/**
+ * Aerial perspective. Ground depth is sampled down the screen and turned into
+ * one vertical gradient, so distance haze costs a single fill per frame.
+ */
+export const FOG = {
+  samples: 6,
+  startDistance: 260,
+  falloff: 0.00085,
+  maxAlpha: 0.5,
+};
+
+/**
+ * Cloud layers, lowest first. Following the effect on the personal site, size,
+ * opacity and parallax rise together, so larger clouds read as nearer.
+ */
+export const CLOUD_LAYERS = [
+  { size: 340, opacity: 0.10, parallax: 0.20, drift: 2.4, count: 5 },
+  { size: 520, opacity: 0.15, parallax: 0.34, drift: 4.0, count: 4 },
+  { size: 760, opacity: 0.19, parallax: 0.52, drift: 6.2, count: 3 },
+];
+
+export const CLOUD_SPRITE = 'images/cloud.png';
 
 export const HEALTH_COLORS = [
   { above: 0.66, color: '#7fb069' },

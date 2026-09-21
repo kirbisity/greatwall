@@ -17,6 +17,8 @@ import {
   normalOf,
   projectPoint,
 } from './projection.js';
+import { Atmosphere } from './atmosphere.js';
+import { settings } from './settings.js';
 import { BUILDINGS } from './buildings/index.js';
 import { compileStructure } from './structures.js';
 
@@ -105,6 +107,7 @@ export class Renderer {
     this.camera = camera;
     this.sprites = sprites;
     this.paintedSeason = null;
+    this.atmosphere = new Atmosphere(camera);
     // Building geometry never changes, so each type is compiled and shaded once.
     this.structures = new Map();
   }
@@ -153,6 +156,11 @@ export class Renderer {
     this.paint(paving);
     this.paint(items);
 
+    // Haze and cloud sit above the world but below the readouts.
+    if (settings.atmosphere) {
+      this.atmosphere.drawFog(this.overlay, game.season);
+      this.atmosphere.drawClouds(this.overlay);
+    }
     this.drawBars(view, game);
   }
 

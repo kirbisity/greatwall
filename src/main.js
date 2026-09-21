@@ -4,6 +4,8 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { loadSprites } from './sprites.js';
+import { loadSettings, saveSettings, settings } from './settings.js';
+import { FPS } from './config.js';
 
 function bind(id, handler) {
   const node = document.getElementById(id);
@@ -14,6 +16,7 @@ function bind(id, handler) {
 
 class App {
   constructor() {
+    loadSettings();
     this.hud = new Hud();
     this.camera = new Camera(window.innerWidth, window.innerHeight);
     this.game = new Game({ onMessage: (text) => this.hud.showMessage(text) });
@@ -45,6 +48,7 @@ class App {
     this.bindButtons();
     window.addEventListener('resize', () => this.resize());
     this.hud.setCursor('move');
+    this.hud.setAtmosphereLabel(settings.atmosphere);
     this.draw();
   }
 
@@ -54,6 +58,7 @@ class App {
     bind('settingsBtn', () => this.hud.openSettings());
     bind('settingsBackBtn', () => this.hud.closeSettings());
     bind('soundBtn', () => this.hud.cycleSoundLevel());
+    bind('atmosphereBtn', () => this.toggleAtmosphere());
     bind('bgmusicBtn', () => this.hud.playMusic());
     bind('menuBtn', () => this.openMenu());
     bind('help', () => this.openHelp());
@@ -67,6 +72,13 @@ class App {
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
+  }
+
+  toggleAtmosphere() {
+    settings.atmosphere = !settings.atmosphere;
+    saveSettings();
+    this.hud.setAtmosphereLabel(settings.atmosphere);
+    this.draw();
   }
 
   resize() {
@@ -124,6 +136,7 @@ class App {
       return;
     }
     this.game.step();
+    this.renderer.atmosphere.update(1 / FPS);
     this.draw();
     if (this.game.isDefeated) {
       this.gameOver();

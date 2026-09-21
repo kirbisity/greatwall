@@ -1,10 +1,25 @@
 export const FPS = 60;
 export const PIXELS_PER_WORLD_UNIT = 50;
 
-export const MIN_ZOOM = 0.01;
-export const MAX_ZOOM = 1;
-export const INITIAL_ZOOM = 0.05;
-export const ZOOM_STEP = 0.05;
+/**
+ * The camera orbits a focus point on the ground. Elevation is the angle above
+ * the ground plane, so 90 degrees looks straight down. The lower bound keeps the
+ * horizon off screen; below roughly 23 degrees it creeps into view and the
+ * ground plane stops filling the canvas.
+ */
+export const CAMERA = {
+  focalLength: 900,
+  initialDistance: 380,
+  minDistance: 90,
+  maxDistance: 3000,
+  initialElevation: 52,
+  minElevation: 35,
+  maxElevation: 85,
+  elevationStep: 4,
+  nearPlane: 1,
+};
+
+export const ZOOM_STEP = 0.08;
 
 // The top menu and any side chrome overlay the canvas; pointer events inside
 // these bands belong to the UI, not the map.
@@ -122,9 +137,17 @@ export const PALETTE = {
   barEdge: '#c9a227',
 };
 
-export const SPRITE_SCALE = 5;
-export const WALL_THICKNESS_UNITS = 2;
-export const WALL_NODE_RADIUS_UNITS = 2;
+/** World units per sprite pixel, preserving the scale the flat renderer used. */
+export const SPRITE_UNITS_PER_PIXEL = 0.1;
+
+export const WALL_THICKNESS_UNITS = 3;
+export const WALL_HEIGHT_UNITS = 6;
+export const TOWER_RADIUS_UNITS = 2.6;
+export const TOWER_HEIGHT_UNITS = 8.5;
+
+/** Direction the sun comes from, used to shade each face by its normal. */
+export const SUN = { x: -0.42, y: 0.38, z: 0.82 };
+export const AMBIENT_LIGHT = 0.45;
 
 export const AUDIO_VOLUME_STEP = 0.01;
 export const INITIAL_SOUND_LEVEL = 40;

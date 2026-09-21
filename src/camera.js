@@ -1,59 +1,77 @@
 import { clamp } from './geometry.js';
-import { INITIAL_ZOOM, MAX_ZOOM, MIN_ZOOM, PIXELS_PER_WORLD_UNIT } from './config.js';
+import { CAMERA } from './config.js';
+import { createView, groundAt, groundJacobian, project } from './projection.js';
 
-/** Maps between world coordinates (y up) and canvas pixels (y down). */
+/**
+ * A perspective camera looking down at a focus point on the ground. Panning
+ * moves the focus; zooming changes the distance rather than a flat scale.
+ */
 export class Camera {
   constructor(width, height) {
     this.width = width;
     this.height = height;
-    this.scale = INITIAL_ZOOM;
-    this.offsetX = width * 0.5;
-    this.offsetY = height * 0.5;
+    this.focus = { x: 0, y: 0 };
+    this.distance = CAMERA.initialDistance;
+    this.elevation = CAMERA.initialElevation;
+    this.refreshView();
   }
 
-  get pixelsPerUnit() {
-    return this.scale * PIXELS_PER_WORLD_UNIT;
+  /** Rebuild the cached frame snapshot after any camera change. */
+  refreshView() {
+    this.view = createView({
+      focus: this.focus,
+      distance: this.distance,
+      elevation: this.elevation,
+      width: this.width,
+      height: this.height,
+    });
   }
 
   toScreen(point) {
-    const pixelsPerUnit = this.pixelsPerUnit;
-    return {
-      x: Math.trunc(pixelsPerUnit * point.x + this.offsetX),
-      y: Math.trunc(this.height - pixelsPerUnit * point.y - this.offsetY),
-    };
+    return project(this.view, point);
   }
 
-  toWorld(point) {
-    const pixelsPerUnit = this.pixelsPerUnit;
-    return {
-      x: (point.x - this.offsetX) / pixelsPerUnit,
-      y: -(point.y + this.offsetY - this.height) / pixelsPerUnit,
-    };
+  toWorld(pixel) {
+    return groundAt(this.view, pixel.x, pixel.y);
   }
 
-  pan(deltaX, deltaY) {
-    this.offsetX += deltaX;
-    this.offsetY -= deltaY;
+  jacobianAt(point) {
+    return groundJacobian(this.view, point.x, point.y);
   }
 
-  /** Zoom by `factor`, keeping the world point under `anchor` in place. */
+  /** Drag the ground so the point under `from` ends up under `to`. */
+  panFrom(from, to) {
+    const before = this.toWorld(from);
+    const after = this.toWorld(to);
+    this.focus.x -= after.x - before.x;
+    this.focus.y -= after.y - before.y;
+    this.refreshView();
+  }
+
+  /** Zoom by `factor`, keeping the ground point under `anchor` in place. */
   zoomAt(anchor, factor) {
-    const worldAnchor = this.toWorld(anchor);
-    this.scale = clamp(this.scale * factor, MIN_ZOOM, MAX_ZOOM);
-    const shifted = this.toScreen(worldAnchor);
-    this.offsetX += anchor.x - shifted.x;
-    this.offsetY -= anchor.y - shifted.y;
+    const held = this.toWorld(anchor);
+    this.distance = clamp(this.distance / factor, CAMERA.minDistance, CAMERA.maxDistance);
+    this.refreshView();
+    const moved = this.toWorld(anchor);
+    this.focus.x += held.x - moved.x;
+    this.focus.y += held.y - moved.y;
+    this.refreshView();
+  }
+
+  tilt(degrees) {
+    this.elevation = clamp(this.elevation + degrees, CAMERA.minElevation, CAMERA.maxElevation);
+    this.refreshView();
   }
 
   centerOn(point) {
-    this.offsetX = this.width * 0.5 - point.x * PIXELS_PER_WORLD_UNIT;
-    this.offsetY = this.height * 0.5 - point.y * PIXELS_PER_WORLD_UNIT;
+    this.focus = { x: point.x, y: point.y };
+    this.refreshView();
   }
 
   resize(width, height) {
-    this.offsetX += (width - this.width) * 0.5;
-    this.offsetY += (height - this.height) * 0.5;
     this.width = width;
     this.height = height;
+    this.refreshView();
   }
 }

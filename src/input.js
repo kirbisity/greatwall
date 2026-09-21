@@ -9,6 +9,9 @@ const CURSORS = {
   upgrade: 'url(images/castleBtn.png), default',
 };
 
+// Outcomes that leave a usable end to keep drawing from.
+const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact']);
+
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 3;
 
@@ -128,15 +131,19 @@ export class Input {
     if (span <= WALL.minLength || span >= WALL.maxLength) {
       return;
     }
+
     const result = this.game.buildWall(this.chainPoint, target);
-    if (result.built) {
-      this.chainPoint = target;
+    if (CHAIN_CONTINUES.has(result.status)) {
+      // Carry on from the snapped end so chains follow walls and city edges.
+      this.chainPoint = result.end ?? target;
       return;
     }
-    if (result.reason === 'castle') {
+    if (result.status === 'blocked') {
       this.chainPoint = null;
+      this.hud.showMessage('Walls cannot cross the city');
+      return;
     }
-    if (result.reason === 'tooPoor') {
+    if (result.status === 'poor') {
       this.hud.showMessage('Not enough money');
     }
   }

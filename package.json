@@ -1,0 +1,10 @@
+{
+  "name": "greatwall",
+  "version": "1.0.0",
+  "description": "The wall building game",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

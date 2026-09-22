@@ -11,7 +11,7 @@ const CURSORS = {
 };
 
 // Outcomes that leave a usable end to keep drawing from.
-const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact']);
+const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact', 'planning']);
 
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;

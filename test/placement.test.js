@@ -81,11 +81,38 @@ test('existing wall ends still win over the city brim', () => {
 
 // --- redrawing a wall repairs it ------------------------------------------
 
+/**
+ * Lay a section and see its planning phase out, so it is stone a redraw can
+ * actually work on rather than a line of pegs.
+ */
+function laySection(game, from, to) {
+  const result = game.buildWall(from, to);
+  if (result.wall) {
+    result.wall.raise(WALL.planSeconds);
+  }
+  return result;
+}
+
+test('a section still pegged out cannot be repaired into existence', () => {
+  const game = gameWith('CC0');
+  const from = { x: 200, y: -60 };
+  const to = { x: 200, y: 60 };
+  const wall = game.buildWall(from, to).wall;
+  const before = game.tokens;
+
+  const result = game.buildWall(from, to);
+  assert.equal(result.status, 'planning');
+  assert.equal(game.tokens, before, 'nothing charged');
+  assert.equal(wall.isPlanned, true, 'still only pegs');
+  assert.equal(wall.isComplete, false, 'the three seconds cannot be bought back');
+  assert.equal(game.walls.length, 1, 'no duplicate section');
+});
+
 test('redrawing over a damaged wall repairs it instead of stacking a new one', () => {
   const game = gameWith('CC0');
   const from = { x: 200, y: -60 };
   const to = { x: 200, y: 60 };
-  assert.equal(game.buildWall(from, to).status, 'built');
+  assert.equal(laySection(game, from, to).status, 'built');
   const wall = game.walls[0];
   wall.health = WALL.maxHealth * 0.25;
 
@@ -102,7 +129,7 @@ test('redrawing over a damaged wall repairs it instead of stacking a new one', (
 
 test('repair is charged in proportion to the damage', () => {
   const game = gameWith('CC0');
-  game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
   const wall = game.walls[0];
   const full = game.wallCost(wall.length);
 
@@ -128,7 +155,7 @@ test('redrawing a finished, undamaged wall is free and changes nothing', () => {
 
 test('redrawing an unfinished wall pays off the rest of its construction', () => {
   const game = gameWith('CC0');
-  const wall = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).wall;
+  const wall = laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 }).wall;
   const result = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
   assert.equal(result.status, 'repaired');
   assert.equal(wall.isComplete, true);
@@ -138,7 +165,7 @@ test('redrawing an unfinished wall pays off the rest of its construction', () =>
 
 test('a wall drawn in the reverse direction still repairs rather than stacks', () => {
   const game = gameWith('CC0');
-  game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
   game.walls[0].health = 10;
   assert.equal(game.buildWall({ x: 200, y: 60 }, { x: 200, y: -60 }).status, 'repaired');
   assert.equal(game.walls.length, 1);
@@ -146,7 +173,7 @@ test('a wall drawn in the reverse direction still repairs rather than stacks', (
 
 test('a repair the treasury cannot cover is refused', () => {
   const game = gameWith('CC0');
-  game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
   game.walls[0].health = 1;
   game.tokens = 0;
   assert.equal(game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).status, 'poor');

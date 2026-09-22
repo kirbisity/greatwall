@@ -528,6 +528,12 @@ export class Game {
 
   /** Restore a damaged wall, charging only for the stonework replaced. */
   repairWall(wall) {
+    // A section still pegged out has nothing to repair, and letting a redraw
+    // finish it would be a way to buy back the three seconds it is meant to
+    // cost. The masons have to mark it out first.
+    if (wall.isPlanned) {
+      return { status: 'planning', wall };
+    }
     const missing = WALL.maxHealth - wall.health;
     if (missing <= 0) {
       return { status: 'intact', wall };

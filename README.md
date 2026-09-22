@@ -32,8 +32,12 @@ Settings has an **Atmosphere** toggle (distance haze and drifting cloud layers).
 by default, costs about 0.45 ms a frame, and the choice is remembered.
 | Esc | Menu |
 
-Drag with the build tool to lay wall sections. Removing a section refunds half its
-price, less its damage. Castles pay income and regenerate every two seconds, and can
+Drag with the build tool to lay wall sections. Ends snap to other wall ends and to the
+edge of a city, so a wall can be anchored flush against the settlement. Redrawing over an
+existing section repairs it rather than stacking a second wall, charging only for the
+damage made good. Nothing may be built across a city, and upgrading to a larger city
+demolishes and refunds any wall its new footprint covers. Removing a section refunds half
+its price, less its damage. Castles pay income and regenerate every two seconds, and can
 be upgraded twice. Seasons turn every 60 seconds: winter multiplies build costs,
 autumn doubles income, and later seasons bring tougher raiders.
 

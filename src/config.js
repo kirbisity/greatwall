@@ -37,6 +37,8 @@ export const WINTER_BUILD_MULTIPLIER = 8;
 
 export const WALL = {
   maxHealth: 100,
+  // How close a wall end must come to a city edge before it snaps onto it.
+  brimSnapRadius: 26,
   attack: 1,
   defense: 2,
   costPerUnit: 2,
@@ -57,15 +59,15 @@ export const SPAWN_MAX_DISTANCE = 400;
 export const CASTLE_TYPES = {
   CC0: {
     name: 'Small Castle', cost: 300, maxHealth: 100, wealth: 40,
-    attack: 2, defense: 3, hitbox: 20, upgradesTo: 'CC1',
+    attack: 2, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
   },
   CC1: {
     name: 'Medium Castle', cost: 1000, maxHealth: 200, wealth: 80,
-    attack: 2, defense: 3, hitbox: 40, upgradesTo: 'CC2',
+    attack: 2, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
   },
   CC2: {
     name: 'Fortified City', cost: 3000, maxHealth: 400, wealth: 160,
-    attack: 2, defense: 3, hitbox: 60, upgradesTo: null,
+    attack: 2, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
   },
 };
 

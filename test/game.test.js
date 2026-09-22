@@ -67,7 +67,7 @@ test('building a wall charges for its length and refunds half when removed', () 
   const game = new Game({ random: fixedRandom() });
   game.tokens = 1000;
   const result = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 });
-  assert.equal(result.built, true);
+  assert.equal(result.status, 'built');
   assert.equal(game.tokens, 1000 - 100 * WALL.costPerUnit);
   game.removeWallAt({ x: 150, y: 0 });
   assert.equal(game.walls.length, 0);
@@ -81,12 +81,12 @@ test('a damaged wall refunds less than an intact one', () => {
   assert.equal(wall.refundValue, Math.trunc(intactRefund / 2));
 });
 
-test('a wall cannot be built across the castle or without funds', () => {
+test('a wall cannot be built across the city or without funds', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 1000;
-  assert.equal(game.buildWall({ x: 100, y: 0 }, { x: 0, y: 0 }).reason, 'castle');
+  assert.equal(game.buildWall({ x: 100, y: 0 }, { x: -100, y: 0 }).status, 'blocked');
   game.tokens = 1;
-  assert.equal(game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).reason, 'tooPoor');
+  assert.equal(game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).status, 'poor');
 });
 
 test('wall ends snap onto a nearby node so junctions share a point', () => {

@@ -8,6 +8,7 @@ import {
   segmentEntersSquare,
 } from './geometry.js';
 import { steerRaider } from './pathfinding.js';
+import { buildNavigation } from './navigation.js';
 import {
   FPS,
   HARVEST_MULTIPLIER,
@@ -54,6 +55,7 @@ export class Game {
   }
 
   restart() {
+    this.navigationCache = null;
     this.walls = [];
     this.castles = [new Castle(STARTING_CASTLE_TYPE)];
     this.raiders = [];
@@ -156,10 +158,29 @@ export class Game {
     this.raiders.push(raider);
   }
 
+  /**
+   * Wall layout drives the route graph, and a breach opens a way through, so
+   * the signature counts both the sections standing and those still intact.
+   */
+  navigation() {
+    let intact = 0;
+    for (const wall of this.walls) {
+      if (wall.isIntact) {
+        intact += 1;
+      }
+    }
+    const version = `${this.walls.length}:${intact}`;
+    if (this.navigationCache?.version !== version) {
+      this.navigationCache = buildNavigation(this.walls, this.castles[0]?.position, version);
+    }
+    return this.navigationCache;
+  }
+
   moveRaiders() {
     const target = this.castles[0];
+    const navigation = this.navigation();
     for (const raider of this.raiders) {
-      steerRaider(raider, this.walls);
+      steerRaider(raider, navigation);
       raider.advance(1 / FPS);
       this.resolveWallContact(raider);
       if (raider.isAlive && target) {

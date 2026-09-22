@@ -36,6 +36,7 @@ export class Hud {
     this.messageText = element('infoP');
     this.soundButton = element('soundBtn');
     this.atmosphereButton = element('atmosphereBtn');
+    this.routesButton = element('routesBtn');
     this.music = element('backgroundmusic');
 
     this.soundLevel = INITIAL_SOUND_LEVEL;
@@ -147,6 +148,10 @@ export class Hud {
 
   setAtmosphereLabel(enabled) {
     this.atmosphereButton.innerText = `Atmosphere: ${enabled ? 'On' : 'Off'}`;
+  }
+
+  setRoutesLabel(enabled) {
+    this.routesButton.innerText = `Show Routes: ${enabled ? 'On' : 'Off'}`;
   }
 
   cycleSoundLevel() {

@@ -30,9 +30,12 @@ const NORTH = Math.PI / 2;
 // the detailed build is reserved for when someone zooms in to look.
 const UNIT_DETAIL_PIXELS = 130;
 const UNIT_PLAIN_PIXELS = 26;
-const UNIT_SWAY = 0.22;
-const UNIT_SURGE = 0.3;
-const UNIT_BOB = 0.26;
+const UNIT_SWAY = 0.55;
+const UNIT_SURGE = 0.72;
+const UNIT_BOB = 0.6;
+// Locked in a fight, ranks shudder against each other rather than march.
+const MELEE_SHAKE = 2.1;
+const MELEE_RATE = 7.5;
 // Shading is quantised so every face colour can be pre-built at compile time
 // instead of formatting a colour string per face per frame.
 const LIGHT_BANDS = 12;
@@ -206,6 +209,7 @@ export class Renderer {
     this.collectWalls(items, view, game.walls);
     this.collectTowers(items, view, game.walls);
     this.collectRaiders(items, view, game.raiders);
+    this.collectRaiders(items, view, game.guards);
     items.sort((a, b) => b.depth - a.depth);
     this.paint(paving);
     this.paint(items);
@@ -412,10 +416,14 @@ export class Renderer {
       const cos = Math.cos(turn);
       const sin = Math.sin(turn);
 
+      const fighting = raider.inMelee;
+      const shake = fighting ? MELEE_SHAKE : 1;
+      const rate = fighting ? MELEE_RATE : 1;
+
       for (const figure of model.figures) {
-        const swayX = Math.sin(seconds * 2.3 + figure.phase) * UNIT_SWAY;
-        const swayY = Math.sin(seconds * 1.7 + figure.phase * 1.7) * UNIT_SURGE;
-        const bob = Math.abs(Math.sin(seconds * 3.1 + figure.phase)) * UNIT_BOB;
+        const swayX = Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
+        const swayY = Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
+        const bob = Math.abs(Math.sin(seconds * 3.1 * rate + figure.phase)) * UNIT_BOB * shake;
         for (const face of figure[build]) {
           this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob });
         }
@@ -519,14 +527,14 @@ export class Renderer {
         this.drawCastleBar(view, castle, definition);
       }
     }
-    for (const raider of game.raiders) {
-      const fraction = raider.health / raider.type.maxHealth;
+    for (const company of [...game.raiders, ...game.guards]) {
+      const fraction = company.health / company.type.maxHealth;
       if (fraction >= 1) {
         continue;
       }
-      const model = this.unitFor(raider.typeId);
+      const model = this.unitFor(company.typeId);
       if (model) {
-        this.drawRaiderBar(view, raider.position, model.radius, fraction);
+        this.drawRaiderBar(view, company.position, model.radius, fraction);
       }
     }
   }

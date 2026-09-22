@@ -1,6 +1,6 @@
-import { distanceSquared } from './geometry.js';
-import { NAVIGATION, RAIDER_STEERING_RADIANS } from './config.js';
-import { isBlocked, routeFrom, siegeTarget } from './navigation.js';
+import { distanceSquared, pointToLineDistance } from './geometry.js';
+import { AVOIDANCE, NAVIGATION, RAIDER_STEERING_RADIANS } from './config.js';
+import { isBlocked, routeFrom, siegeTarget, wallsNear } from './navigation.js';
 
 const FULL_TURN_RADIANS = 2 * Math.PI;
 
@@ -25,12 +25,45 @@ function chooseWaypoint(raider, navigation) {
     raider.siegeTarget = null;
     return route.waypoint;
   }
+  if (!raider.besieges) {
+    return castle;
+  }
 
   // Walled in. Keep hitting the same section so the damage adds up.
   if (!raider.siegeTarget || !navigation.barriers.includes(raider.siegeTarget)) {
     raider.siegeTarget = siegeTarget(navigation, raider.position, castle);
   }
   return raider.siegeTarget ? midpointOf(raider.siegeTarget) : castle;
+}
+
+/**
+ * Nudge the aim away from any wall the company is crowding. This is what turns
+ * a graze along the stone into an arc around it, and it stacks with whatever
+ * route the graph handed down.
+ */
+function shoveOffWalls(company, waypoint, navigation) {
+  let shiftX = 0;
+  let shiftY = 0;
+  for (const wall of wallsNear(navigation.grid, company.position, AVOIDANCE.repelDistance)) {
+    const gap = pointToLineDistance(company.position, wall.start, wall.end);
+    if (gap >= AVOIDANCE.repelDistance || gap === 0) {
+      continue;
+    }
+    const strength = (1 - gap / AVOIDANCE.repelDistance) ** 2 * AVOIDANCE.repelStrength;
+    // Push along the perpendicular, on whichever side the company already sits.
+    const dx = wall.end.x - wall.start.x;
+    const dy = wall.end.y - wall.start.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const side = Math.sign(
+      (company.position.x - wall.start.x) * dy - (company.position.y - wall.start.y) * dx,
+    ) || 1;
+    shiftX += side * dy / length * strength * AVOIDANCE.repelDistance;
+    shiftY += -side * dx / length * strength * AVOIDANCE.repelDistance;
+  }
+  if (shiftX === 0 && shiftY === 0) {
+    return waypoint;
+  }
+  return { x: waypoint.x + shiftX, y: waypoint.y + shiftY };
 }
 
 function turnTowards(raider, waypoint) {
@@ -62,12 +95,15 @@ function needsNewWaypoint(raider, navigation) {
     || distanceSquared(raider.position, raider.waypoint) < NAVIGATION.arriveRadius ** 2;
 }
 
-export function steerRaider(raider, navigation) {
+export function steerCompany(raider, navigation) {
   raider.replanCountdown -= 1;
   if (needsNewWaypoint(raider, navigation)) {
     raider.waypoint = chooseWaypoint(raider, navigation);
     raider.planVersion = navigation.version;
     raider.replanCountdown = NAVIGATION.replanFrames;
   }
-  turnTowards(raider, raider.waypoint);
+  const aim = raider.siegeTarget
+    ? raider.waypoint
+    : shoveOffWalls(raider, raider.waypoint, navigation);
+  turnTowards(raider, aim);
 }

@@ -56,6 +56,15 @@ export function isWithinSegmentBand(point, lineStart, lineEnd, range, reach) {
 
 
 
+/** Grow a segment outwards from its midpoint by `factor` (1 leaves it alone). */
+export function scaleSegment(start, end, factor) {
+  const half = (factor - 1) / 2;
+  return {
+    start: { x: start.x - (end.x - start.x) * half, y: start.y - (end.y - start.y) * half },
+    end: { x: end.x + (end.x - start.x) * half, y: end.y + (end.y - start.y) * half },
+  };
+}
+
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }

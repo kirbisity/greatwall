@@ -1,4 +1,4 @@
-import { CAMERA, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
+import { CAMERA, IMPERIAL, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
 import { distance } from './geometry.js';
 
 const CURSORS = {
@@ -7,6 +7,7 @@ const CURSORS = {
   build: 'url(images/buildBtn.png), default',
   destroy: 'url(images/destroyBtn.png), default',
   upgrade: 'url(images/castleBtn.png), default',
+  attack: 'url(images/attackBtn.png), crosshair',
 };
 
 // Outcomes that leave a usable end to keep drawing from.
@@ -76,14 +77,29 @@ export class Input {
   }
 
   handleClick(event) {
-    if (!this.isOverMap(event) || this.tool !== 'upgrade') {
+    if (!this.isOverMap(event)) {
       return;
     }
-    this.trackPointer(event);
-    if (this.game.upgradeCastleAt(this.camera.toWorld(this.pointer))) {
-      this.resetTool();
+    if (this.tool === 'upgrade') {
+      this.trackPointer(event);
+      if (this.game.upgradeCastleAt(this.camera.toWorld(this.pointer))) {
+        this.resetTool();
+      }
+      this.onChange();
+      return;
     }
-    this.onChange();
+    if (this.tool === 'attack') {
+      this.trackPointer(event);
+      this.orderAttack(this.camera.toWorld(this.pointer));
+      this.onChange();
+    }
+  }
+
+  orderAttack(target) {
+    const result = this.game.sendGuard(target);
+    if (result.status === 'poor') {
+      this.hud.showMessage(`A company costs $${IMPERIAL.cost} to muster`);
+    }
   }
 
   handleMove(event) {

@@ -11,6 +11,7 @@ const TOOL_BUTTONS = {
   build: 'buildTool',
   destroy: 'destroyTool',
   upgrade: 'upgradeTool',
+  attack: 'attackTool',
 };
 
 function element(id) {

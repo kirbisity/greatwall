@@ -1,10 +1,16 @@
-import { distance, distanceSquared, segmentsIntersect } from './geometry.js';
-import { NAVIGATION } from './config.js';
+import { distance, distanceSquared, scaleSegment, segmentsIntersect } from './geometry.js';
+import { AVOIDANCE, NAVIGATION } from './config.js';
 
-/** Whether a straight run between two points is cut by any standing wall. */
+/**
+ * Whether a straight run between two points is cut by any standing wall.
+ * Walls are treated as longer than they are, so a route that would shave past
+ * an end is rejected and the company aims properly clear instead.
+ */
 export function isBlocked(from, to, barriers) {
   for (const wall of barriers) {
-    if (segmentsIntersect(from, to, wall.start, wall.end)) {
+    const margin = 1 + AVOIDANCE.wallStandoff / Math.max(wall.length, 1);
+    const wide = scaleSegment(wall.start, wall.end, margin);
+    if (segmentsIntersect(from, to, wide.start, wide.end)) {
       return true;
     }
   }
@@ -91,7 +97,7 @@ export function buildNavigation(walls, castle, version) {
   // Every standing section blocks, so the wall list is the barrier list.
   const barriers = walls;
   if (!castle) {
-    return { version, barriers: [], gateways: [], distances: [] };
+    return { version, barriers: [], grid: new Map(), gateways: [], distances: [] };
   }
 
   // Keep the nearest ends when a sprawling network would make the graph large.
@@ -103,6 +109,7 @@ export function buildNavigation(walls, castle, version) {
   return {
     version,
     barriers,
+    grid: buildWallGrid(barriers),
     gateways,
     distances: routeDistances(gateways, castle, barriers),
   };
@@ -147,4 +154,60 @@ export function siegeTarget(navigation, from, castle) {
     }
   }
   return chosen;
+}
+
+/**
+ * A coarse bucket grid over the walls.
+ *
+ * Steering, collision and combat each need "which walls are near me", and
+ * doing that by scanning every wall for every company is three passes over the
+ * whole network every frame. The grid is rebuilt with the route graph, so it
+ * costs nothing on a frame where no wall changed.
+ */
+const CELL = 64;
+
+function cellKey(x, y) {
+  return `${Math.floor(x / CELL)}:${Math.floor(y / CELL)}`;
+}
+
+export function buildWallGrid(walls) {
+  const cells = new Map();
+  for (const wall of walls) {
+    const minX = Math.min(wall.start.x, wall.end.x);
+    const maxX = Math.max(wall.start.x, wall.end.x);
+    const minY = Math.min(wall.start.y, wall.end.y);
+    const maxY = Math.max(wall.start.y, wall.end.y);
+    for (let x = Math.floor(minX / CELL); x <= Math.floor(maxX / CELL); x += 1) {
+      for (let y = Math.floor(minY / CELL); y <= Math.floor(maxY / CELL); y += 1) {
+        const key = `${x}:${y}`;
+        const bucket = cells.get(key);
+        if (bucket) {
+          bucket.push(wall);
+        } else {
+          cells.set(key, [wall]);
+        }
+      }
+    }
+  }
+  return cells;
+}
+
+/** Every wall whose cell is within `radius` of a point, without duplicates. */
+export function wallsNear(grid, point, radius) {
+  const found = new Set();
+  const minX = Math.floor((point.x - radius) / CELL);
+  const maxX = Math.floor((point.x + radius) / CELL);
+  const minY = Math.floor((point.y - radius) / CELL);
+  const maxY = Math.floor((point.y + radius) / CELL);
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      const bucket = grid.get(`${x}:${y}`);
+      if (bucket) {
+        for (const wall of bucket) {
+          found.add(wall);
+        }
+      }
+    }
+  }
+  return found;
 }

@@ -58,17 +58,14 @@ export const CASTLE_TYPES = {
   CC0: {
     name: 'Small Castle', cost: 300, maxHealth: 100, wealth: 40,
     attack: 2, defense: 3, hitbox: 20, upgradesTo: 'CC1',
-    sprite: 'images/castles/castle_small.png',
   },
   CC1: {
     name: 'Medium Castle', cost: 1000, maxHealth: 200, wealth: 80,
     attack: 2, defense: 3, hitbox: 40, upgradesTo: 'CC2',
-    sprite: 'images/castles/castle_medium.png',
   },
   CC2: {
     name: 'Fortified City', cost: 3000, maxHealth: 400, wealth: 160,
     attack: 2, defense: 3, hitbox: 60, upgradesTo: null,
-    sprite: 'images/castles/castle_large.png',
   },
 };
 
@@ -146,8 +143,8 @@ export const TOWER_RADIUS_UNITS = 2.6;
 export const TOWER_HEIGHT_UNITS = 8.5;
 
 /** Direction the sun comes from, used to shade each face by its normal. */
-export const SUN = { x: -0.42, y: 0.38, z: 0.82 };
-export const AMBIENT_LIGHT = 0.45;
+export const SUN = { x: -0.60, y: 0.40, z: 0.69 };
+export const AMBIENT_LIGHT = 0.34;
 
 export const AUDIO_VOLUME_STEP = 0.01;
 export const INITIAL_SOUND_LEVEL = 40;

@@ -61,6 +61,9 @@ src/                Game source (ES modules)
   hud.js              Menus, modals, HUD, audio
   input.js            Mouse and keyboard
   main.js             Wiring and the frame loop
+  projection.js       Perspective camera maths
+  structures.js       Turns a building definition into 3D faces
+  buildings/          Building layouts, one data module per castle tier
 test/               Tests
 images/  sounds/    Assets
 ```

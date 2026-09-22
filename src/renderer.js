@@ -17,6 +17,8 @@ import {
   normalOf,
   projectPoint,
 } from './projection.js';
+import { BUILDINGS } from './buildings/index.js';
+import { compileStructure } from './structures.js';
 
 const NORTH = Math.PI / 2;
 const SPRITE_FRAME_LENGTH = 10;
@@ -103,6 +105,27 @@ export class Renderer {
     this.camera = camera;
     this.sprites = sprites;
     this.paintedSeason = null;
+    // Building geometry never changes, so each type is compiled and shaded once.
+    this.structures = new Map();
+  }
+
+  structureFor(typeId) {
+    const cached = this.structures.get(typeId);
+    if (cached) {
+      return cached;
+    }
+    const faces = compileStructure(BUILDINGS[typeId]).map((face) => {
+      const normal = normalOf(face.points[0], face.points[1], face.points[2]);
+      return {
+        points: face.points,
+        normal,
+        centre: centroid(face.points),
+        fill: shade(face.material, lightingFor(normal)),
+        ground: face.ground === true,
+      };
+    });
+    this.structures.set(typeId, faces);
+    return faces;
   }
 
   resize(width, height) {
@@ -121,11 +144,13 @@ export class Renderer {
 
     const view = this.camera.view;
     const items = [];
+    const paving = [];
+    this.collectCastles(items, paving, view, game.castles);
     this.collectWalls(items, view, game.walls);
     this.collectTowers(items, view, game.walls);
-    this.collectCastles(items, view, game.castles);
     this.collectRaiders(items, view, game.raiders, game.frame);
     items.sort((a, b) => b.depth - a.depth);
+    this.paint(paving);
     this.paint(items);
 
     this.drawBars(view, game);
@@ -266,13 +291,46 @@ export class Renderer {
     return jacobian;
   }
 
-  collectCastles(items, view, castles) {
+  collectCastles(items, paving, view, castles) {
     for (const castle of castles) {
-      const image = this.sprites.get(castle.type.sprite);
-      if (image && image.width) {
-        this.collectSprite(items, view, image, castle.position, NORTH);
+      const definition = BUILDINGS[castle.typeId];
+      if (!definition) {
+        continue;
+      }
+      const { x, y } = castle.position;
+      const reach = definition.radius;
+      if (!this.isOnScreen(view, [
+        { x: x - reach, y: y - reach }, { x: x + reach, y: y - reach },
+        { x: x + reach, y: y + reach }, { x: x - reach, y: y + reach },
+      ])) {
+        continue;
+      }
+      for (const face of this.structureFor(castle.typeId)) {
+        this.collectStructureFace(face.ground ? paving : items, view, face, castle.position);
       }
     }
+  }
+
+  collectStructureFace(items, view, face, offset) {
+    const centre = {
+      x: face.centre.x + offset.x,
+      y: face.centre.y + offset.y,
+      z: face.centre.z,
+    };
+    if (!facesCamera(view, face.normal, centre)) {
+      return;
+    }
+    const points = [];
+    let depth = 0;
+    for (const corner of face.points) {
+      const screen = projectPoint(view, corner.x + offset.x, corner.y + offset.y, corner.z);
+      if (!screen) {
+        return;
+      }
+      points.push(screen);
+      depth += screen.depth;
+    }
+    items.push({ kind: 'face', depth: depth / points.length, points, fill: face.fill });
   }
 
   collectRaiders(items, view, raiders, frame) {
@@ -309,8 +367,10 @@ export class Renderer {
 
   drawBars(view, game) {
     for (const castle of game.castles) {
-      const image = this.sprites.get(castle.type.sprite);
-      this.drawBarOver(view, castle.position, image, CASTLE_BAR, castle.healthFraction);
+      const definition = BUILDINGS[castle.typeId];
+      if (definition) {
+        this.drawCastleBar(view, castle, definition);
+      }
     }
     for (const raider of game.raiders) {
       const fraction = raider.health / raider.type.maxHealth;
@@ -320,6 +380,19 @@ export class Renderer {
       const image = this.sprites.get(raider.type.sprites[0]);
       this.drawBarOver(view, raider.position, image, RAIDER_BAR, fraction);
     }
+  }
+
+  /** Above the building's far edge, widening with the compound itself. */
+  drawCastleBar(view, castle, definition) {
+    const anchor = projectPoint(view, castle.position.x, castle.position.y + definition.radius, 0);
+    const jacobian = this.camera.jacobianAt(castle.position);
+    if (!anchor || !jacobian) {
+      return;
+    }
+    const footprint = Math.hypot(jacobian.east.x, jacobian.east.y) * definition.radius * 2;
+    const width = Math.min(Math.max(footprint * 0.4, CASTLE_BAR.minWidth), CASTLE_BAR.maxWidth);
+    this.drawBar(anchor.x, anchor.y - CASTLE_BAR.height - CASTLE_BAR.gap, width, CASTLE_BAR.height,
+      castle.healthFraction);
   }
 
   /** Rest the bar above the sprite's far edge, measured in world units. */

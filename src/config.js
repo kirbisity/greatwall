@@ -230,6 +230,42 @@ export const SEASON_MESSAGES = [
 ];
 
 /** Terrain is painted as a radial wash so the map reads as lit from above. */
+/**
+ * The landscape. Height is scenery only — companies walk a flat plane and are
+ * drawn sitting on the ground — but woodland does slow them down.
+ */
+export const TERRAIN = {
+  // Rolling hills, plus a finer grain on top of them.
+  hillScale: 300,
+  hillHeight: 44,
+  detailScale: 130,
+  detailHeight: 4,
+  // Slopes are gentle in world terms, so the shading is exaggerated or the
+  // hills read as a flat plain.
+  slopeRelief: 4,
+
+  // Ground under a settlement is levelled, easing back into the hillside.
+  levelSkirt: 60,
+
+  // Woodland. Cover above the threshold grows trees, thicker towards 1.
+  forestScale: 240,
+  forestThreshold: 0.62,
+  treeSpacing: 26,
+  treeSize: 5.4,
+
+  // Trees are felled this near a wall, and anywhere a city stands.
+  clearOfWall: 16,
+
+  // Companies lose this much of their pace in the thickest wood.
+  forestDrag: 0.45,
+
+  // Mesh drawn for the ground. The cell size is chosen so one cell lands
+  // roughly this many pixels across, whatever the zoom.
+  meshCellPixels: 86,
+  minCell: 34,
+  maxCell: 240,
+};
+
 export const SEASONS = [
   { name: 'Autumn', light: '#9a7c4b', dark: '#5f4a2a', accent: '#d9a441', haze: '198, 176, 138' },
   { name: 'Winter', light: '#8d8a83', dark: '#4f4e4b', accent: '#cfd8dc', haze: '198, 202, 206' },

@@ -36,10 +36,6 @@ export class Wall {
     this.health = WALL.maxHealth;
   }
 
-  get isIntact() {
-    return this.health > WALL.intactHealth;
-  }
-
   /** Half the build price, scaled by how much of the wall is left standing. */
   get refundValue() {
     return Math.trunc(this.length * WALL.costPerUnit * this.health / WALL.maxHealth / 2);

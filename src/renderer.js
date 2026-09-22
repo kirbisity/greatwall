@@ -1,8 +1,9 @@
 import {
+  AMBIENT_LIGHT,
   HEALTH_COLORS,
   PALETTE,
   SEASONS,
-  SPRITE_UNITS_PER_PIXEL,
+  SUN,
   TOWER_HEIGHT_UNITS,
   TOWER_RADIUS_UNITS,
   WALL,
@@ -12,7 +13,6 @@ import {
 import {
   centroid,
   facesCamera,
-  groundTransform,
   lightingFor,
   normalOf,
   projectPoint,
@@ -21,10 +21,21 @@ import { Atmosphere } from './atmosphere.js';
 import { settings } from './settings.js';
 import { BUILDINGS } from './buildings/index.js';
 import { compileStructure } from './structures.js';
+import { compileUnit } from './units.js';
 
 const NORTH = Math.PI / 2;
-const SPRITE_FRAME_LENGTH = 10;
-const SPRITE_FRAME_SWITCH = 6;
+
+// Below this many pixels across, a company draws as plain blocks. At play zoom
+// a formation is only a few dozen pixels wide, so that is the usual case and
+// the detailed build is reserved for when someone zooms in to look.
+const UNIT_DETAIL_PIXELS = 130;
+const UNIT_PLAIN_PIXELS = 26;
+const UNIT_SWAY = 0.22;
+const UNIT_SURGE = 0.3;
+const UNIT_BOB = 0.26;
+// Shading is quantised so every face colour can be pre-built at compile time
+// instead of formatting a colour string per face per frame.
+const LIGHT_BANDS = 12;
 // Off-screen geometry is rejected on a four-corner bounding box before the
 // full prism is built, and prisms too short to show a flank draw as a flat roof.
 const CULL_MARGIN = 80;
@@ -113,17 +124,46 @@ function prismFrom(footprint, height) {
 
 /** Draws the world with a perspective camera: terrain, sorted scene, overlays. */
 export class Renderer {
-  constructor({ terrain, units, structures }, camera, sprites) {
+  constructor({ terrain, units, structures }, camera) {
     this.canvases = [terrain, units, structures];
     this.terrain = terrain.getContext('2d');
     this.scene = units.getContext('2d');
     this.overlay = structures.getContext('2d');
     this.camera = camera;
-    this.sprites = sprites;
     this.paintedSeason = null;
+    this.units = new Map();
+    this.startedAt = performance.now();
     this.atmosphere = new Atmosphere(camera);
     // Building geometry never changes, so each type is compiled and shaded once.
     this.structures = new Map();
+  }
+
+  /** Seconds of animation time, shared by every company on the field. */
+  get clock() {
+    return (performance.now() - this.startedAt) / 1000;
+  }
+
+  /** Formation geometry with every face colour pre-shaded per light band. */
+  unitFor(typeId) {
+    const cached = this.units.get(typeId);
+    if (cached) {
+      return cached;
+    }
+    const model = compileUnit(typeId);
+    if (!model) {
+      return null;
+    }
+    for (const figure of model.figures) {
+      for (const faces of [figure.detail, figure.plain, figure.speck]) {
+        for (const face of faces) {
+          face.shades = Array.from({ length: LIGHT_BANDS + 1 }, (unused, band) => (
+            shade(face.material, AMBIENT_LIGHT + (1 - AMBIENT_LIGHT) * (band / LIGHT_BANDS))
+          ));
+        }
+      }
+    }
+    this.units.set(typeId, model);
+    return model;
   }
 
   structureFor(typeId) {
@@ -165,7 +205,7 @@ export class Renderer {
     this.collectCastles(items, paving, view, game.castles);
     this.collectWalls(items, view, game.walls);
     this.collectTowers(items, view, game.walls);
-    this.collectRaiders(items, view, game.raiders, game.frame);
+    this.collectRaiders(items, view, game.raiders);
     items.sort((a, b) => b.depth - a.depth);
     this.paint(paving);
     this.paint(items);
@@ -302,22 +342,6 @@ export class Renderer {
     }
   }
 
-  collectSprite(items, view, image, position, heading) {
-    const jacobian = this.camera.jacobianAt(position);
-    if (!jacobian) {
-      return null;
-    }
-    items.push({
-      kind: 'sprite',
-      depth: jacobian.origin.depth,
-      image,
-      transform: groundTransform(jacobian, heading),
-      width: image.width * SPRITE_UNITS_PER_PIXEL,
-      height: image.height * SPRITE_UNITS_PER_PIXEL,
-    });
-    return jacobian;
-  }
-
   collectCastles(items, paving, view, castles) {
     for (const castle of castles) {
       const definition = BUILDINGS[castle.typeId];
@@ -360,33 +384,89 @@ export class Renderer {
     items.push({ kind: 'face', depth: depth / points.length, points, fill: face.fill });
   }
 
-  collectRaiders(items, view, raiders, frame) {
-    const spriteIndex = frame % SPRITE_FRAME_LENGTH < SPRITE_FRAME_SWITCH ? 0 : 1;
+  collectRaiders(items, view, raiders) {
+    const seconds = this.clock;
     for (const raider of raiders) {
-      const image = this.sprites.get(raider.type.sprites[spriteIndex]);
-      if (image && image.width) {
-        this.collectSprite(items, view, image, raider.position, raider.heading);
+      const model = this.unitFor(raider.typeId);
+      if (!model) {
+        continue;
+      }
+      const { x, y } = raider.position;
+      const reach = model.radius;
+      if (!this.isOnScreen(view, [
+        { x: x - reach, y: y - reach }, { x: x + reach, y: y - reach },
+        { x: x + reach, y: y + reach }, { x: x - reach, y: y + reach },
+      ])) {
+        continue;
+      }
+      const footing = projectPoint(view, x, y, 0);
+      if (!footing) {
+        continue;
+      }
+      const across = view.focal / footing.depth * reach * 2;
+      const build = across > UNIT_DETAIL_PIXELS ? 'detail'
+        : across > UNIT_PLAIN_PIXELS ? 'plain' : 'speck';
+
+      // Local +y is the way a formation faces, so turn it onto the heading.
+      const turn = raider.heading - NORTH;
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+
+      for (const figure of model.figures) {
+        const swayX = Math.sin(seconds * 2.3 + figure.phase) * UNIT_SWAY;
+        const swayY = Math.sin(seconds * 1.7 + figure.phase * 1.7) * UNIT_SURGE;
+        const bob = Math.abs(Math.sin(seconds * 3.1 + figure.phase)) * UNIT_BOB;
+        for (const face of figure[build]) {
+          this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob });
+        }
       }
     }
+  }
+
+  collectUnitFace(items, view, face, origin, pose) {
+    const world = face.points.map((point) => {
+      const localX = point.x + pose.swayX;
+      const localY = point.y + pose.swayY;
+      return {
+        x: origin.x + localX * pose.cos - localY * pose.sin,
+        y: origin.y + localX * pose.sin + localY * pose.cos,
+        z: point.z + pose.bob,
+      };
+    });
+    const normal = normalOf(world[0], world[1], world[2]);
+    if (!facesCamera(view, normal, centroid(world))) {
+      return;
+    }
+    const points = [];
+    let depth = 0;
+    for (const corner of world) {
+      const screen = projectPoint(view, corner.x, corner.y, corner.z);
+      if (!screen) {
+        return;
+      }
+      points.push(screen);
+      depth += screen.depth;
+    }
+    const lit = Math.max(0, normal.x * SUN.x + normal.y * SUN.y + normal.z * SUN.z);
+    items.push({
+      kind: 'face',
+      depth: depth / points.length,
+      points,
+      fill: face.shades[Math.round(lit * LIGHT_BANDS)],
+    });
   }
 
   paint(items) {
     const context = this.scene;
     for (const item of items) {
-      if (item.kind === 'face') {
-        context.beginPath();
-        context.moveTo(item.points[0].x, item.points[0].y);
-        for (let i = 1; i < item.points.length; i += 1) {
-          context.lineTo(item.points[i].x, item.points[i].y);
-        }
-        context.closePath();
-        context.fillStyle = item.fill;
-        context.fill();
-      } else {
-        context.setTransform(...item.transform);
-        context.drawImage(item.image, -item.width / 2, -item.height / 2, item.width, item.height);
-        context.setTransform(1, 0, 0, 1, 0, 0);
+      context.beginPath();
+      context.moveTo(item.points[0].x, item.points[0].y);
+      for (let i = 1; i < item.points.length; i += 1) {
+        context.lineTo(item.points[i].x, item.points[i].y);
       }
+      context.closePath();
+      context.fillStyle = item.fill;
+      context.fill();
     }
   }
 
@@ -444,8 +524,10 @@ export class Renderer {
       if (fraction >= 1) {
         continue;
       }
-      const image = this.sprites.get(raider.type.sprites[0]);
-      this.drawBarOver(view, raider.position, image, RAIDER_BAR, fraction);
+      const model = this.unitFor(raider.typeId);
+      if (model) {
+        this.drawRaiderBar(view, raider.position, model.radius, fraction);
+      }
     }
   }
 
@@ -462,20 +544,16 @@ export class Renderer {
       castle.healthFraction);
   }
 
-  /** Rest the bar above the sprite's far edge, measured in world units. */
-  drawBarOver(view, position, image, spec, fraction) {
-    if (!image || !image.width) {
-      return;
-    }
-    const halfDepth = image.height * SPRITE_UNITS_PER_PIXEL / 2;
-    const anchor = projectPoint(view, position.x, position.y + halfDepth, 0);
+  /** Above the formation's far edge, sized to how wide it is on screen. */
+  drawRaiderBar(view, position, radius, fraction) {
+    const anchor = projectPoint(view, position.x, position.y + radius, 0);
     const jacobian = this.camera.jacobianAt(position);
     if (!anchor || !jacobian) {
       return;
     }
-    const spriteWidth = Math.hypot(jacobian.east.x, jacobian.east.y) * image.width * SPRITE_UNITS_PER_PIXEL;
-    const width = Math.min(Math.max(spriteWidth * 0.5, spec.minWidth), spec.maxWidth);
-    this.drawBar(anchor.x, anchor.y - spec.height - spec.gap, width, spec.height, fraction);
+    const across = Math.hypot(jacobian.east.x, jacobian.east.y) * radius * 2;
+    const width = Math.min(Math.max(across * 0.5, RAIDER_BAR.minWidth), RAIDER_BAR.maxWidth);
+    this.drawBar(anchor.x, anchor.y - RAIDER_BAR.height - RAIDER_BAR.gap, width, RAIDER_BAR.height, fraction);
   }
 
   drawBar(centreX, top, width, height, fraction) {

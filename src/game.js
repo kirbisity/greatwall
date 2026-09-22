@@ -6,6 +6,7 @@ import {
   distanceToSquare,
   isWithinSegmentBand,
   segmentEntersSquare,
+  segmentsIntersect,
 } from './geometry.js';
 import { steerRaider } from './pathfinding.js';
 import { buildNavigation } from './navigation.js';
@@ -162,17 +163,11 @@ export class Game {
   }
 
   /**
-   * Wall layout drives the route graph, and a breach opens a way through, so
-   * the signature counts both the sections standing and those still intact.
+   * Wall layout drives the route graph. Sections are solid until destroyed, so
+   * the only thing that opens a new way through is one of them falling.
    */
   navigation() {
-    let intact = 0;
-    for (const wall of this.walls) {
-      if (wall.isIntact) {
-        intact += 1;
-      }
-    }
-    const version = `${this.walls.length}:${intact}`;
+    const version = `${this.walls.length}`;
     if (this.navigationCache?.version !== version) {
       this.navigationCache = buildNavigation(this.walls, this.castles[0]?.position, version);
     }
@@ -184,11 +179,52 @@ export class Game {
     const navigation = this.navigation();
     for (const raider of this.raiders) {
       steerRaider(raider, navigation);
-      raider.advance(1 / FPS);
+      this.advanceAgainstWalls(raider);
       this.resolveWallContact(raider);
       if (raider.isAlive && target) {
         this.resolveCastleContact(raider, target);
       }
+    }
+  }
+
+  /** The first standing section a step would cross, or null if the way is clear. */
+  wallAcross(from, to) {
+    for (const wall of this.walls) {
+      if (segmentsIntersect(from, to, wall.start, wall.end)) {
+        return wall;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Walls are solid. A raider still looking for a way round slides along the
+   * face it meets, which is what carries it to the nearest gap; one that has
+   * given up and is besieging plants itself and swings instead.
+   */
+  advanceAgainstWalls(raider) {
+    const step = { x: raider.velocity.x / FPS, y: raider.velocity.y / FPS };
+    const ahead = { x: raider.position.x + step.x, y: raider.position.y + step.y };
+    const blocking = this.wallAcross(raider.position, ahead);
+    if (!blocking) {
+      raider.position = ahead;
+      return;
+    }
+    if (raider.siegeTarget) {
+      return;
+    }
+
+    // Keep whatever part of the step runs along the wall, drop the rest.
+    const dx = blocking.end.x - blocking.start.x;
+    const dy = blocking.end.y - blocking.start.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const along = (step.x * dx + step.y * dy) / length;
+    const slid = {
+      x: raider.position.x + dx / length * along,
+      y: raider.position.y + dy / length * along,
+    };
+    if (!this.wallAcross(raider.position, slid)) {
+      raider.position = slid;
     }
   }
 

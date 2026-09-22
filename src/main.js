@@ -3,7 +3,6 @@ import { Game } from './game.js';
 import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
-import { loadSprites } from './sprites.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 
 // A long stall must not teleport the camera or fast-forward the game.
@@ -29,7 +28,6 @@ class App {
         structures: document.getElementById('canvas2'),
       },
       this.camera,
-      loadSprites(),
     );
     this.input = new Input({
       game: this.game,

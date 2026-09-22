@@ -6,7 +6,6 @@ import {
   facesCamera,
   groundAt,
   groundJacobian,
-  groundTransform,
   lightingFor,
   normalOf,
   projectPoint,
@@ -92,19 +91,6 @@ test('lighting stays between the ambient floor and full sun', () => {
     const light = lightingFor(normal);
     assert.ok(light >= AMBIENT_LIGHT - 1e-9 && light <= 1 + 1e-9, `light ${light}`);
   }
-});
-
-test('a ground sprite facing north keeps its top towards north', () => {
-  const v = view();
-  const jacobian = groundJacobian(v, 0, 0);
-  const [a, b, c, d, e, f] = groundTransform(jacobian, Math.PI / 2);
-  // The image's top edge is local -y, which should land north of the origin,
-  // and north is up the screen.
-  const topEdgeScreenY = f + d * -1;
-  assert.ok(topEdgeScreenY < f, 'sprite top draws above its centre');
-  const rightEdgeScreenX = e + a * 1;
-  assert.ok(rightEdgeScreenX > e, 'sprite right draws right of its centre');
-  assert.ok(Math.abs(b) < 1e-9 && Math.abs(c) < 1e-9, 'no skew when facing north');
 });
 
 /** Run the camera forward until it stops moving. */

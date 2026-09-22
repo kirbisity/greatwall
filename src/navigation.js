@@ -88,7 +88,8 @@ function routeDistances(gateways, castle, barriers) {
  * is rebuilt when walls change rather than every frame.
  */
 export function buildNavigation(walls, castle, version) {
-  const barriers = walls.filter((wall) => wall.isIntact);
+  // Every standing section blocks, so the wall list is the barrier list.
+  const barriers = walls;
   if (!castle) {
     return { version, barriers: [], gateways: [], distances: [] };
   }

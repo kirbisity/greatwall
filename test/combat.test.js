@@ -109,7 +109,7 @@ test('a raider walled in picks a section to batter', () => {
   assert.ok(ring.includes(raider.siegeTarget));
 });
 
-test('a breach in the ring reopens a route and calls off the siege', () => {
+test('destroying a section reopens a route and calls off the siege', () => {
   const raider = approaching();
   const r = 70;
   const corners = [{ x: -r, y: -r }, { x: r, y: -r }, { x: r, y: r }, { x: -r, y: r }];
@@ -117,16 +117,17 @@ test('a breach in the ring reopens a route and calls off the siege', () => {
   navigate(raider, ring);
   assert.ok(raider.siegeTarget, 'besieging to begin with');
 
-  // Knock the eastern section below the intact threshold.
-  ring[1].health = WALL.intactHealth;
+  // A section only stops blocking once it is gone, not merely damaged.
+  const battered = ring.filter((wall, index) => index !== 1);
   raider.replanCountdown = 0;
-  navigate(raider, ring);
-  assert.equal(raider.siegeTarget, null, 'walks through the breach instead');
+  navigate(raider, battered);
+  assert.equal(raider.siegeTarget, null, 'walks through the gap instead');
 });
 
-test('a breached wall no longer diverts raiders on its own', () => {
-  const wall = new Wall({ x: 50, y: -30 }, { x: 50, y: 30 });
-  assert.equal(wall.isIntact, true);
-  wall.health = WALL.intactHealth;
-  assert.equal(wall.isIntact, false);
+test('a badly damaged section still blocks until it is destroyed', () => {
+  const raider = approaching();
+  const wall = new Wall({ x: 80, y: -60 }, { x: 80, y: 60 });
+  wall.health = 1;
+  navigate(raider, [wall]);
+  assert.notDeepEqual(raider.waypoint, CITY, 'a wall on its last legs is still a wall');
 });

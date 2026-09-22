@@ -14,7 +14,11 @@ export class Camera {
   constructor(width, height) {
     this.width = width;
     this.height = height;
+    // `target` is where the view is headed, `focus` is where it has got to.
+    // Everything drags the target; the focus trails it, which is what gives
+    // panning its weight.
     this.focus = { x: 0, y: 0 };
+    this.target = { x: 0, y: 0 };
     this.distance = CAMERA.initialDistance;
     this.targetDistance = this.distance;
     this.elevation = CAMERA.initialElevation;
@@ -84,6 +88,7 @@ export class Camera {
 
   centerOn(point) {
     this.focus = { x: point.x, y: point.y };
+    this.target = { x: point.x, y: point.y };
     this.drift = { x: 0, y: 0 };
     this.dragDelta = { x: 0, y: 0 };
     this.zoomAnchor = null;
@@ -108,12 +113,12 @@ export class Camera {
    * edge into a brick wall.
    */
   resisted(deltaX, deltaY) {
-    const radius = Math.hypot(this.focus.x, this.focus.y);
+    const radius = Math.hypot(this.target.x, this.target.y);
     if (radius <= CAMERA.softLimit) {
       return { x: deltaX, y: deltaY };
     }
-    const outX = this.focus.x / radius;
-    const outY = this.focus.y / radius;
+    const outX = this.target.x / radius;
+    const outY = this.target.y / radius;
     const outward = deltaX * outX + deltaY * outY;
     if (outward <= 0) {
       return { x: deltaX, y: deltaY };
@@ -126,19 +131,27 @@ export class Camera {
 
   /** Backstop for a single huge delta; resistance normally gets there first. */
   containFocus() {
-    const radius = Math.hypot(this.focus.x, this.focus.y);
+    const radius = Math.hypot(this.target.x, this.target.y);
     if (radius > CAMERA.hardLimit) {
       const scale = CAMERA.hardLimit / radius;
-      this.focus.x *= scale;
-      this.focus.y *= scale;
+      this.target.x *= scale;
+      this.target.y *= scale;
     }
   }
 
-  /** Keep the point grabbed at the start of a zoom under the same pixel. */
+  /**
+   * Keep the point grabbed at the start of a zoom under the same pixel. The
+   * correction goes to both, or the anchor would visibly crawl while the focus
+   * caught up.
+   */
   holdZoomAnchor() {
     const now = this.toWorld(this.zoomAnchor.screen);
-    this.focus.x += this.zoomAnchor.world.x - now.x;
-    this.focus.y += this.zoomAnchor.world.y - now.y;
+    const shiftX = this.zoomAnchor.world.x - now.x;
+    const shiftY = this.zoomAnchor.world.y - now.y;
+    this.focus.x += shiftX;
+    this.focus.y += shiftY;
+    this.target.x += shiftX;
+    this.target.y += shiftY;
   }
 
   settleZoom(ease) {
@@ -162,8 +175,8 @@ export class Camera {
   settlePan(seconds) {
     if (this.dragDelta.x !== 0 || this.dragDelta.y !== 0) {
       const move = this.resisted(this.dragDelta.x, this.dragDelta.y);
-      this.focus.x += move.x;
-      this.focus.y += move.y;
+      this.target.x += move.x;
+      this.target.y += move.y;
       if (seconds > 0) {
         this.drift.x = move.x / seconds;
         this.drift.y = move.y / seconds;
@@ -184,11 +197,26 @@ export class Camera {
       return false;
     }
     const move = this.resisted(this.drift.x * seconds, this.drift.y * seconds);
-    this.focus.x += move.x;
-    this.focus.y += move.y;
+    this.target.x += move.x;
+    this.target.y += move.y;
     const decay = Math.exp(-CAMERA.driftDamping * seconds);
     this.drift.x *= decay;
     this.drift.y *= decay;
+    return true;
+  }
+
+  /** Close the remaining gap between where the view is and where it is going. */
+  settleFocus(ease) {
+    const gapX = this.target.x - this.focus.x;
+    const gapY = this.target.y - this.focus.y;
+    if (Math.hypot(gapX, gapY) < CAMERA.focusCutoff) {
+      const arrived = this.focus.x !== this.target.x || this.focus.y !== this.target.y;
+      this.focus.x = this.target.x;
+      this.focus.y = this.target.y;
+      return arrived;
+    }
+    this.focus.x += gapX * ease;
+    this.focus.y += gapY * ease;
     return true;
   }
 
@@ -196,16 +224,17 @@ export class Camera {
   update(seconds) {
     const ease = 1 - Math.exp(-CAMERA.smoothing * seconds);
     const zoomed = this.settleZoom(ease);
-    const panned = this.settlePan(seconds);
-    if (!zoomed && !panned) {
+    this.settlePan(seconds);
+    this.containFocus();
+    const drifted = this.settleFocus(ease);
+    if (!zoomed && !drifted) {
       return false;
     }
     this.refreshView();
     if (zoomed && this.zoomAnchor) {
       this.holdZoomAnchor();
+      this.refreshView();
     }
-    this.containFocus();
-    this.refreshView();
     return true;
   }
 }

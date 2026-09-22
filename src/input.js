@@ -13,7 +13,7 @@ const CURSORS = {
 const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact']);
 
 const DRAG_ZOOM_SENSITIVITY = 5;
-const MAX_DRAG_ZOOM_STEPS = 3;
+const MAX_DRAG_ZOOM_STEPS = 2;
 
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {

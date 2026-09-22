@@ -20,9 +20,10 @@ export const CAMERA = {
 
   // Zoom and tilt ease towards their target rather than snapping; higher is
   // snappier. A drag becomes momentum that decays at `driftDamping`.
-  smoothing: 14,
-  driftDamping: 5.2,
-  driftCutoff: 1.5,
+  smoothing: 5.5,
+  driftDamping: 1.9,
+  driftCutoff: 3,
+  focusCutoff: 0.05,
 
   // The map is unbounded, so the view is. Past `softLimit` the ground starts
   // resisting and compresses asymptotically towards `hardLimit`, which means
@@ -31,7 +32,7 @@ export const CAMERA = {
   hardLimit: 1400,
 };
 
-export const ZOOM_STEP = 0.08;
+export const ZOOM_STEP = 0.045;
 
 // The top menu and any side chrome overlay the canvas; pointer events inside
 // these bands belong to the UI, not the map.
@@ -156,14 +157,30 @@ export const FOG = {
 };
 
 /**
- * Cloud layers, lowest first. Following the effect on the personal site, size,
- * opacity and parallax rise together, so larger clouds read as nearer.
+ * Cloud layers, lowest first. Clouds sit at a real altitude and are projected
+ * like anything else, so a higher deck is nearer the camera and slides past
+ * faster than the ground when the view pans — no parallax constant needed.
+ * Sizes and drift are world units.
  */
 export const CLOUD_LAYERS = [
-  { size: 340, opacity: 0.10, parallax: 0.20, drift: 9, count: 5 },
-  { size: 520, opacity: 0.15, parallax: 0.34, drift: 15, count: 4 },
-  { size: 760, opacity: 0.19, parallax: 0.52, drift: 24, count: 3 },
+  { altitude: 55, worldSize: 85, opacity: 0.10, drift: 3.5, count: 12 },
+  { altitude: 95, worldSize: 125, opacity: 0.13, drift: 5.5, count: 9 },
+  { altitude: 150, worldSize: 185, opacity: 0.16, drift: 8.5, count: 7 },
 ];
+
+/**
+ * Clouds tile over this square of world, recentred on wherever the view is.
+ * Sized against the ground a default view takes in, so a handful are always
+ * overhead; off-screen decks cost one projection each and are then dropped.
+ */
+export const CLOUD_FIELD = 900;
+/** A deck fades out over this last stretch as the camera descends onto it. */
+export const CLOUD_FADE_HEIGHT = 90;
+/**
+ * A cloud this much wider than the viewport is one the camera has all but
+ * flown into, so it thins out rather than smothering the map.
+ */
+export const CLOUD_ENGULF_WIDTH = 0.8;
 
 export const CLOUD_SPRITE = 'images/cloud.png';
 

@@ -10,13 +10,25 @@ export const PIXELS_PER_WORLD_UNIT = 50;
 export const CAMERA = {
   focalLength: 900,
   initialDistance: 380,
-  minDistance: 90,
-  maxDistance: 3000,
+  minDistance: 110,
+  maxDistance: 1600,
   initialElevation: 52,
   minElevation: 35,
   maxElevation: 85,
   elevationStep: 4,
   nearPlane: 1,
+
+  // Zoom and tilt ease towards their target rather than snapping; higher is
+  // snappier. A drag becomes momentum that decays at `driftDamping`.
+  smoothing: 14,
+  driftDamping: 5.2,
+  driftCutoff: 1.5,
+
+  // The map is unbounded, so the view is. Past `softLimit` the ground starts
+  // resisting and compresses asymptotically towards `hardLimit`, which means
+  // the further out you push the less ground each drag covers.
+  softLimit: 700,
+  hardLimit: 1400,
 };
 
 export const ZOOM_STEP = 0.08;
@@ -37,6 +49,10 @@ export const WINTER_BUILD_MULTIPLIER = 8;
 
 export const WALL = {
   maxHealth: 100,
+  // A new section is a foundation course that rises to full strength over
+  // `buildSeconds`. It can be attacked the whole time.
+  buildSeconds: 10,
+  initialFraction: 0.2,
   // How close a wall end must come to a city edge before it snaps onto it.
   brimSnapRadius: 26,
   attack: 1,

@@ -69,9 +69,37 @@ test('building a wall charges for its length and refunds half when removed', () 
   const result = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 });
   assert.equal(result.status, 'built');
   assert.equal(game.tokens, 1000 - 100 * WALL.costPerUnit);
+
+  result.wall.finish();
   game.removeWallAt({ x: 150, y: 0 });
   assert.equal(game.walls.length, 0);
   assert.equal(game.tokens, 1000 - 100 * WALL.costPerUnit + 100);
+});
+
+test('a new section starts as a foundation and rises to full strength', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 1000;
+  const wall = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall;
+  assert.equal(wall.built, WALL.initialFraction);
+  assert.equal(wall.isComplete, false);
+
+  stepSeconds(game, WALL.buildSeconds / 2);
+  assert.ok(wall.built > 0.5 && wall.built < 0.7, `half way up, got ${wall.built}`);
+
+  // A frame of slack: the per-frame increments do not land exactly on 1.
+  stepSeconds(game, WALL.buildSeconds / 2 + 1);
+  assert.equal(wall.isComplete, true);
+  assert.equal(wall.health, WALL.maxHealth);
+});
+
+test('an unfinished wall keeps rising after being attacked', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 1000;
+  const wall = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall;
+  wall.takeHit(20);
+  const wounded = wall.health;
+  stepSeconds(game, 1);
+  assert.ok(wall.health > wounded, 'construction makes good the damage');
 });
 
 test('a damaged wall refunds less than an intact one', () => {
@@ -100,7 +128,7 @@ test('wall ends snap onto a nearby node so junctions share a point', () => {
 test('undo returns the last wall and its refund', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 1000;
-  game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 });
+  game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall.finish();
   const before = game.tokens;
   assert.equal(game.undoLastWall(), true);
   assert.equal(game.walls.length, 0);

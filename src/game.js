@@ -98,6 +98,9 @@ export class Game {
     if (this.advanceClock()) {
       this.onSecondElapsed();
     }
+    for (const wall of this.walls) {
+      wall.raise(1 / FPS);
+    }
     this.moveRaiders();
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
     this.walls = this.walls.filter((wall) => wall.health >= 0);
@@ -268,7 +271,7 @@ export class Game {
       return { status: 'poor' };
     }
     this.tokens -= cost;
-    wall.health = WALL.maxHealth;
+    wall.finish();
     return { status: 'repaired', wall, cost };
   }
 
@@ -287,7 +290,7 @@ export class Game {
     if (this.crossesCity(start, end)) {
       return { status: 'blocked', start, end };
     }
-    const wall = new Wall(start, end);
+    const wall = new Wall(start, end, WALL.initialFraction);
     if (wall.length <= 1) {
       return { status: 'short', start, end };
     }

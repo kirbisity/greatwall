@@ -22,7 +22,7 @@ already have.
 
 | Control | Action |
 |---|---|
-| Drag | Pan the map |
+| Drag | Pan the map. Release to let it glide |
 | Scroll wheel | Zoom in and out |
 | Bottom-left buttons | Build wall, remove wall, repair (unimplemented), upgrade castle |
 | Ctrl+Z | Undo the last wall section |
@@ -32,6 +32,9 @@ Settings has an **Atmosphere** toggle (distance haze and drifting cloud layers),
 default, and a **Show Routes** toggle that draws the gateways raiders navigate by. Both
 choices are remembered.
 | Esc | Menu |
+
+A new section goes up as a foundation course and rises to full strength over about ten
+seconds. It is shorter and weaker the whole time, and raiders can attack it as it rises.
 
 Drag with the build tool to lay wall sections. Ends snap to other wall ends and to the
 edge of a city, so a wall can be anchored flush against the settlement. Redrawing over an

@@ -102,12 +102,13 @@ test('the app boots, plays frames and reacts to input without touching a missing
   assert.match(dom.elements.get('season0').innerText, /Autumn|Winter|Spring|Summer/);
 
   // A drag that starts without a prior mousemove must not jump the map.
-  const originBefore = { x: app.camera.offsetX, y: app.camera.offsetY };
+  const focusBefore = { ...app.camera.focus };
   dom.documentListeners.get('mousedown')({ clientX: 600, clientY: 300 });
   dom.documentListeners.get('mousemove')({ clientX: 600, clientY: 300 });
   dom.documentListeners.get('mouseup')({ clientX: 600, clientY: 300 });
-  assert.equal(app.camera.offsetX, originBefore.x, 'no pan jump on first drag');
-  assert.equal(app.camera.offsetY, originBefore.y, 'no pan jump on first drag');
+  app.camera.update(1 / 60);
+  assert.equal(app.camera.focus.x, focusBefore.x, 'no pan jump on first drag');
+  assert.equal(app.camera.focus.y, focusBefore.y, 'no pan jump on first drag');
 
   // Every tool button, then a build drag and a wheel zoom.
   for (const id of ['buildTool', 'destroyTool', 'upgradeTool', 'zoom', 'move', 'menuBtn']) {
@@ -124,13 +125,19 @@ test('the app boots, plays frames and reacts to input without touching a missing
   const builtWalls = app.game.walls.length;
   dom.documentListeners.get('keydown')({ key: 'z', code: 'KeyZ', ctrlKey: true });
   assert.equal(app.game.walls.length, builtWalls - 1, 'ctrl+z removed one section');
-  // Zooming in pulls the camera closer, so distance falls.
+  // Zooming in pulls the camera closer, and the glide settles over a few frames.
   const distanceBefore = app.camera.distance;
   dom.documentListeners.get('wheel')({ clientX: 400, clientY: 400, deltaY: -1 });
+  for (let step = 0; step < 60; step += 1) {
+    app.camera.update(1 / 60);
+  }
   assert.ok(app.camera.distance < distanceBefore, 'scrolling up zooms in');
 
   const tiltBefore = app.camera.elevation;
   dom.documentListeners.get('keydown')({ key: '[' });
+  for (let step = 0; step < 60; step += 1) {
+    app.camera.update(1 / 60);
+  }
   assert.ok(app.camera.elevation < tiltBefore, 'bracket keys tilt the camera');
 
   dom.documentListeners.get('keydown')({ key: 'Escape' });

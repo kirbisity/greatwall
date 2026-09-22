@@ -31,6 +31,8 @@ const CULL_MARGIN = 80;
 const MIN_FLANK_PIXELS = 2.5;
 // Towers this small on screen are indistinguishable from the wall they sit on.
 const MIN_TOWER_PIXELS = 1.5;
+// A wrecked section still stands this much of its raised height.
+const DAMAGE_SLUMP = 0.55;
 
 const CASTLE_BAR = { minWidth: 44, maxWidth: 120, height: 7, gap: 7 };
 const RAIDER_BAR = { minWidth: 14, maxWidth: 44, height: 4, gap: 4 };
@@ -56,10 +58,18 @@ function shade(tint, light) {
   return `rgb(${Math.round(tint[0] * light)},${Math.round(tint[1] * light)},${Math.round(tint[2] * light)})`;
 }
 
+/**
+ * How battered a section is, judged against how much of it stands rather than
+ * against a finished wall. A section still going up is sound, not ruined.
+ */
+function wallCondition(wall) {
+  const raised = WALL.maxHealth * Math.max(wall.built, 0.01);
+  return Math.max(0, Math.min(1, wall.health / raised));
+}
+
 /** Damaged masonry darkens towards scorched red. */
-function wallTint(wall) {
-  const health = Math.max(0, wall.health) / WALL.maxHealth;
-  return STONE.map((channel, index) => channel * health + RUINED[index] * (1 - health));
+function wallTint(condition) {
+  return STONE.map((channel, index) => channel * condition + RUINED[index] * (1 - condition));
 }
 
 /**
@@ -255,7 +265,9 @@ export class Renderer {
   collectWalls(items, view, walls) {
     const halfWidth = WALL_THICKNESS_UNITS / 2;
     for (const wall of walls) {
-      const height = WALL_HEIGHT_UNITS * Math.max(0.35, wall.health / WALL.maxHealth);
+      // Height is how much has been raised; damage slumps what is standing.
+      const condition = wallCondition(wall);
+      const height = WALL_HEIGHT_UNITS * wall.built * (DAMAGE_SLUMP + (1 - DAMAGE_SLUMP) * condition);
       if (!this.isOnScreen(view, [
         wall.start, wall.end,
         { x: wall.start.x, y: wall.start.y, z: height },
@@ -265,7 +277,7 @@ export class Renderer {
       }
       const quads = wallPrism(wall.start, wall.end, halfWidth, height);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
-      this.collectPrism(items, view, flat ? [quads[0]] : quads, wallTint(wall));
+      this.collectPrism(items, view, flat ? [quads[0]] : quads, wallTint(condition));
     }
   }
 

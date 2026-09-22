@@ -42,7 +42,7 @@ export const SIDE_BAR_WIDTH = 0;
 export const STARTING_TOKENS = 100;
 export const INCOME_INTERVAL_SECONDS = 2;
 export const REGEN_FRACTION_PER_PAYOUT = 0.0005;
-export const RAIDER_SPAWN_INTERVAL_SECONDS = 4;
+export const RAIDER_SPAWN_INTERVAL_SECONDS = 2;
 export const SEASON_LENGTH_SECONDS = 60;
 
 export const HARVEST_MULTIPLIER = 2;
@@ -71,8 +71,15 @@ export const WALL = {
  * referenced by name outside this block, so it can all be moved freely.
  * ========================================================================== */
 
-/** Radians a company can turn per frame. Higher turns tighter. */
-export const RAIDER_STEERING_RADIANS = 0.055;
+/** Most a company may turn in one frame. Higher turns tighter. */
+export const RAIDER_STEERING_RADIANS = 0.032;
+
+/**
+ * How much of the remaining turn is taken each frame, before the cap above.
+ * Low values ease into a new heading instead of snapping onto it, which is
+ * what keeps a company from sawing back and forth around its aim.
+ */
+export const TURN_EASE = 0.1;
 
 /** How companies treat walls. */
 export const AVOIDANCE = {
@@ -82,13 +89,27 @@ export const AVOIDANCE = {
   // Inside this distance a wall actively pushes a company away, which is what
   // makes them arc around an obstacle rather than scrape along it.
   repelDistance: 26,
-  repelStrength: 1.4,
+  repelStrength: 0.7,
+  // The push may only bend the aim this far off the waypoint. Without a cap it
+  // can overpower the waypoint entirely and walk the company round in circles.
+  maxShoveFraction: 0.55,
+
+  // Giving up: a company that has not closed on its destination by
+  // `progressEpsilon` within `patienceSeconds` stops hunting for a way round
+  // and attacks whatever is in its way.
+  patienceSeconds: 8,
+  progressEpsilon: 8,
 };
 
 /** Melee: what happens when the two sides meet. */
 export const MELEE = {
   // Companies lock together once their centres are this close.
-  engageDistance: 26,
+  engageDistance: 32,
+  // Once locked they close right up and interleave, rather than trading blows
+  // at arm's length. This is the separation they settle at.
+  lockedGap: 4,
+  // How fast they close that last distance, in world units a second.
+  closeRate: 26,
   // Damage is scaled so a typical pairing resolves in about five seconds.
   damageRate: 1.7,
   // A fight that has not resolved by now breaks off, so nothing locks forever.

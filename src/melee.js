@@ -28,6 +28,34 @@ export function lockEngagements(guards, raiders) {
   }
 }
 
+/**
+ * Draw locked companies into each other so the ranks interleave. Fighting at
+ * arm's length reads as two blocks standing apart; overlapping reads as a
+ * melee.
+ */
+function closeIn(companies, seconds) {
+  for (const company of companies) {
+    if (company.foes.size === 0) {
+      continue;
+    }
+    let pullX = 0;
+    let pullY = 0;
+    for (const foe of company.foes) {
+      const dx = foe.position.x - company.position.x;
+      const dy = foe.position.y - company.position.y;
+      const gap = Math.hypot(dx, dy);
+      if (gap <= MELEE.lockedGap || gap === 0) {
+        continue;
+      }
+      const step = Math.min(MELEE.closeRate * seconds, (gap - MELEE.lockedGap) / 2);
+      pullX += dx / gap * step;
+      pullY += dy / gap * step;
+    }
+    company.position.x += pullX / Math.max(1, company.foes.size);
+    company.position.y += pullY / Math.max(1, company.foes.size);
+  }
+}
+
 /** Everything locked with this company that is still standing and still close. */
 function prunedFoes(company) {
   const reach = (MELEE.engageDistance * 1.6) ** 2;
@@ -54,6 +82,8 @@ export function resolveMelee(companies, seconds) {
     }
     prunedFoes(company);
   }
+
+  closeIn(companies, seconds);
 
   const struck = new Map();
   for (const company of companies) {

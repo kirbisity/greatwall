@@ -12,6 +12,7 @@ import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
 import { lockEngagements, resolveMelee } from './melee.js';
 import {
+  AVOIDANCE,
   FEAR,
   FPS,
   GUARD_TYPE,
@@ -183,6 +184,21 @@ export class Game {
     return this.navigationCache;
   }
 
+  /**
+   * Watch whether a company is actually closing on where it is going. A
+   * company weaving around an obstacle makes no headway, and this is what
+   * eventually tells it to stop trying and attack.
+   */
+  trackProgress(company, seconds) {
+    const reach = Math.sqrt(distanceSquared(company.position, company.destination));
+    if (reach < company.closestApproach - AVOIDANCE.progressEpsilon) {
+      company.closestApproach = reach;
+      company.stuckSeconds = 0;
+      return;
+    }
+    company.stuckSeconds += seconds;
+  }
+
   moveRaiders() {
     const target = this.castles[0];
     const navigation = this.navigation();
@@ -191,6 +207,7 @@ export class Game {
         continue;
       }
       raider.destination = this.raiderDestination(raider, target);
+      this.trackProgress(raider, 1 / FPS);
       steerCompany(raider, navigation);
       this.advanceAgainstWalls(navigation, raider);
       this.resolveWallContact(navigation, raider);
@@ -277,6 +294,12 @@ export class Game {
     if (guard.quarry && !guard.quarry.isAlive) {
       guard.quarry = null;
     }
+    // A company that cannot reach what it is chasing picks something else.
+    if (guard.stuckSeconds >= AVOIDANCE.patienceSeconds) {
+      guard.quarry = null;
+      guard.stuckSeconds = 0;
+      guard.closestApproach = Infinity;
+    }
     const strayed = distanceSquared(guard.position, guard.home) > IMPERIAL.leashRadius ** 2;
     if (strayed) {
       guard.quarry = null;
@@ -301,6 +324,7 @@ export class Game {
         continue;
       }
       guard.destination = this.guardDestination(guard);
+      this.trackProgress(guard, 1 / FPS);
       steerCompany(guard, navigation);
       this.advanceAgainstWalls(navigation, guard);
     }

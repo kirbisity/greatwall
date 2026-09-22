@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Castle, Raider, Wall } from '../src/entities.js';
-import { FPS, RAIDER_TYPES, STARTING_TOKENS, WALL } from '../src/config.js';
+import { FPS, RAIDER_SPAWN_INTERVAL_SECONDS, RAIDER_TYPES, STARTING_TOKENS, WALL } from '../src/config.js';
 
 function fixedRandom(value = 0) {
   return () => value;
@@ -40,7 +40,7 @@ test('income arrives on odd seconds and applies the autumn harvest bonus', () =>
 
 test('a raider spawns every spawn interval, outside the safe radius', () => {
   const game = new Game({ random: fixedRandom(0.99) });
-  stepSeconds(game, 3);
+  stepSeconds(game, RAIDER_SPAWN_INTERVAL_SECONDS);
   assert.equal(game.raiders.length, 1);
   const raider = game.raiders[0];
   assert.ok(Math.abs(raider.position.x) >= 200 || Math.abs(raider.position.y) >= 200);

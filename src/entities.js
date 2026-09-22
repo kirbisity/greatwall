@@ -91,6 +91,9 @@ class Company {
     this.recoverySeconds = 0;
     // Only raiders batter walls; the imperial army walks round its own.
     this.besieges = false;
+    // Progress watch, so a company that is going nowhere can give up.
+    this.closestApproach = Infinity;
+    this.stuckSeconds = 0;
     // Navigation state, so a company thinks a few times a second rather than
     // every frame.
     this.planVersion = null;

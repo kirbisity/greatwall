@@ -2,6 +2,7 @@ import { Castle, Guard, Raider, Wall } from './entities.js';
 import {
   closestPointOnSquare,
   distance,
+  pointToLineDistance,
   distanceSquared,
   distanceToSquare,
   isWithinSegmentBand,
@@ -300,8 +301,17 @@ export class Game {
       guard.stuckSeconds = 0;
       guard.closestApproach = Infinity;
     }
-    const strayed = distanceSquared(guard.position, guard.home) > IMPERIAL.leashRadius ** 2;
-    if (strayed) {
+
+    // Once past the leash it heads home and stays deaf to the hunt until it
+    // is well back, otherwise it turns round the moment it clears the line
+    // and yo-yos on the spot.
+    const fromHome = distanceSquared(guard.position, guard.home);
+    if (fromHome > IMPERIAL.leashRadius ** 2) {
+      guard.recalled = true;
+    } else if (guard.recalled && fromHome < IMPERIAL.returnRadius ** 2) {
+      guard.recalled = false;
+    }
+    if (guard.recalled) {
       guard.quarry = null;
       return guard.home;
     }
@@ -317,6 +327,23 @@ export class Game {
     return arrived ? guard.home : guard.orders;
   }
 
+  /**
+   * Imperial companies go through walls rather than round them. Near one they
+   * file into a column and slow right down, which is the squeeze; clear of it
+   * they spread back out.
+   */
+  updateCrossing(navigation, guard) {
+    let nearest = Infinity;
+    for (const wall of wallsNear(navigation.grid, guard.position, IMPERIAL.crossDistance)) {
+      nearest = Math.min(nearest, pointToLineDistance(guard.position, wall.start, wall.end));
+    }
+    const target = nearest >= IMPERIAL.crossDistance
+      ? 0
+      : 1 - nearest / IMPERIAL.crossDistance;
+    // Ease, so the ranks flow into line instead of snapping into it.
+    guard.crossing += (target - guard.crossing) * 0.08;
+  }
+
   moveGuards() {
     const navigation = this.navigation();
     for (const guard of this.guards) {
@@ -326,7 +353,10 @@ export class Game {
       guard.destination = this.guardDestination(guard);
       this.trackProgress(guard, 1 / FPS);
       steerCompany(guard, navigation);
-      this.advanceAgainstWalls(navigation, guard);
+      this.updateCrossing(navigation, guard);
+      // Walls do not stop them, but squeezing past one does slow them.
+      const pace = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
+      guard.advance(pace / FPS);
     }
   }
 
@@ -347,6 +377,10 @@ export class Game {
    * given up and is besieging plants itself and swings instead.
    */
   advanceAgainstWalls(navigation, raider) {
+    if (!raider.avoidsWalls) {
+      raider.advance(1 / FPS);
+      return;
+    }
     const step = { x: raider.velocity.x / FPS, y: raider.velocity.y / FPS };
     const ahead = { x: raider.position.x + step.x, y: raider.position.y + step.y };
     const blocking = this.wallAcross(navigation, raider.position, ahead);

@@ -15,6 +15,10 @@ function midpointOf(wall) {
  */
 function chooseWaypoint(raider, navigation) {
   const castle = raider.destination;
+  // Companies that pass through walls have nothing to route around.
+  if (!raider.avoidsWalls) {
+    return castle;
+  }
   if (navigation.barriers.length === 0 || !isBlocked(raider.position, castle, navigation.barriers)) {
     raider.siegeTarget = null;
     return castle;
@@ -120,7 +124,7 @@ export function steerCompany(raider, navigation) {
     raider.planVersion = navigation.version;
     raider.replanCountdown = NAVIGATION.replanFrames;
   }
-  const aim = raider.siegeTarget
+  const aim = raider.siegeTarget || !raider.avoidsWalls
     ? raider.waypoint
     : shoveOffWalls(raider, raider.waypoint, navigation);
   turnTowards(raider, aim);

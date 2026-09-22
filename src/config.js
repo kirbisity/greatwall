@@ -50,8 +50,13 @@ export const WINTER_BUILD_MULTIPLIER = 8;
 
 export const WALL = {
   maxHealth: 100,
-  // A new section is a foundation course that rises to full strength over
-  // `buildSeconds`. It can be attacked the whole time.
+  // A section is pegged out for `planSeconds` before any stone is laid. While
+  // it is only marked out it is not a wall at all: nothing is blocked by it,
+  // nothing routes around it, and it cannot be attacked. That stops a wall
+  // being thrown up in the face of a breach.
+  planSeconds: 3,
+  // Once building starts it rises to full strength over `buildSeconds`, and
+  // can be attacked the whole way up.
   buildSeconds: 10,
   initialFraction: 0.2,
   // How close a wall end must come to a city edge before it snaps onto it.
@@ -132,11 +137,11 @@ export const IMPERIAL = {
   leashRadius: 380,
   returnRadius: 170,
 
-  // Imperial companies walk through walls rather than round them. Within
-  // `crossDistance` of one they file into a column and slow to `crossSpeed`
-  // of their pace, then spread back out on the far side.
-  crossDistance: 38,
-  crossSpeed: 0.4,
+  // Imperial companies walk through walls rather than round them, holding
+  // their formation, but they pick their way over the stone: within
+  // `crossDistance` of a section they slow to `crossSpeed` of their pace.
+  crossDistance: 34,
+  crossSpeed: 0.45,
 };
 
 /**
@@ -181,22 +186,38 @@ export const CASTLE_TYPES = {
   },
 };
 
+/** Portraits shown over a company. Any type may override its own. */
+export const AVATARS = {
+  steppe: 'images/unit_avatar/avatar_mongol_regular.png',
+  steppeElite: 'images/unit_avatar/avatar_mongol_elite.png',
+  imperial: 'images/unit_avatar/avatar_chinese_regular.png',
+};
+
+export const AVATAR = {
+  // Drawn at this many pixels wide, within these bounds as the view zooms.
+  width: 38,
+  minWidth: 22,
+  maxWidth: 64,
+  // Clear of the health bar beneath it.
+  gap: 5,
+};
+
 export const RAIDER_TYPES = {
   CR0: {
     name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
-    defense: 2, range: 5, lineOfSight: 40,
+    defense: 2, range: 5, lineOfSight: 40, avatar: AVATARS.steppe,
   },
   IR0: {
     name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
-    defense: 3, range: 2, lineOfSight: 30,
+    defense: 3, range: 2, lineOfSight: 30, avatar: AVATARS.steppe,
   },
   IR1: {
     name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
-    defense: 5, range: 2, lineOfSight: 30,
+    defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeElite,
   },
   CR1: {
     name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 10,
-    defense: 2, range: 6, lineOfSight: 50,
+    defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeElite,
   },
 };
 
@@ -206,7 +227,7 @@ export const STARTING_CASTLE_TYPE = 'CC0';
 export const GUARD_TYPES = {
   IG0: {
     name: 'Imperial Guardsman', speed: 11, maxHealth: 46, attack: 7,
-    defense: 4, range: 4,
+    defense: 4, range: 4, avatar: AVATARS.imperial,
   },
 };
 

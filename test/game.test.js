@@ -76,6 +76,23 @@ test('building a wall charges for its length and refunds half when removed', () 
   assert.equal(game.tokens, 1000 - 100 * WALL.costPerUnit + 100);
 });
 
+test('a new section is only pegged out at first, and is no wall at all', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 1000;
+  const wall = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall;
+  assert.equal(wall.isPlanned, true);
+
+  // Nothing is laid while it is only marked out.
+  stepSeconds(game, WALL.planSeconds - 1);
+  assert.equal(wall.built, WALL.initialFraction, 'no stone yet');
+  assert.equal(wall.isPlanned, true);
+  assert.equal(game.navigation().barriers.length, 0, 'and it blocks nothing');
+
+  stepSeconds(game, 2);
+  assert.equal(wall.isPlanned, false, 'building has begun');
+  assert.equal(game.navigation().barriers.length, 1, 'and now it is a wall');
+});
+
 test('a new section starts as a foundation and rises to full strength', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 1000;
@@ -83,7 +100,7 @@ test('a new section starts as a foundation and rises to full strength', () => {
   assert.equal(wall.built, WALL.initialFraction);
   assert.equal(wall.isComplete, false);
 
-  stepSeconds(game, WALL.buildSeconds / 2);
+  stepSeconds(game, WALL.planSeconds + WALL.buildSeconds / 2);
   assert.ok(wall.built > 0.5 && wall.built < 0.7, `half way up, got ${wall.built}`);
 
   // A frame of slack: the per-frame increments do not land exactly on 1.
@@ -96,6 +113,7 @@ test('an unfinished wall keeps rising after being attacked', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 1000;
   const wall = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall;
+  stepSeconds(game, WALL.planSeconds + 1);
   wall.takeHit(20);
   const wounded = wall.health;
   stepSeconds(game, 1);

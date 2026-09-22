@@ -1,5 +1,6 @@
 import {
   AMBIENT_LIGHT,
+  AVATAR,
   HEALTH_COLORS,
   PALETTE,
   SEASONS,
@@ -60,6 +61,9 @@ const ROUTE_SIEGE = '#ff8a5c';
 // distance. Stops a low tilt asking for half the world.
 const GROUND_SPAN = 1.05;
 const TRUNK_DISTANCE = 420;
+const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
+const PLAN_TOOL = 'images/buildBtn.png';
+const PLAN_TOOL_SIZE = 22;
 const TRUNK_FILL = 'rgb(84,62,42)';
 const CANOPY_FILL = 'rgb(74,96,58)';
 
@@ -156,10 +160,22 @@ export class Renderer {
     this.camera = camera;
     this.paintedGround = null;
     this.units = new Map();
+    this.images = new Map();
     this.startedAt = performance.now();
     this.atmosphere = new Atmosphere(camera);
     // Building geometry never changes, so each type is compiled and shaded once.
     this.structures = new Map();
+  }
+
+  /** Bitmaps are loaded once and drawn only when they have arrived. */
+  imageFor(path) {
+    let image = this.images.get(path);
+    if (!image) {
+      image = new Image();
+      image.src = path;
+      this.images.set(path, image);
+    }
+    return image.naturalWidth > 0 ? image : null;
   }
 
   /** Seconds of animation time, shared by every company on the field. */
@@ -224,11 +240,11 @@ export class Renderer {
     const view = this.camera.view;
     const items = [];
     const paving = [];
-    this.collectCastles(items, paving, view, game.castles);
+    this.collectCastles(items, paving, view, game.castles, game.terrain);
     this.collectWalls(items, view, game.walls, game.terrain);
     this.collectTowers(items, view, game.walls, game.terrain);
-    this.collectRaiders(items, view, game.raiders);
-    this.collectRaiders(items, view, game.guards);
+    this.collectRaiders(items, view, game.raiders, game.terrain);
+    this.collectRaiders(items, view, game.guards, game.terrain);
     items.sort((a, b) => b.depth - a.depth);
     this.paint(paving);
     this.paint(items);
@@ -238,6 +254,7 @@ export class Renderer {
       this.atmosphere.drawFog(this.overlay, game.season);
       this.atmosphere.drawClouds(this.overlay);
     }
+    this.drawPeggedWalls(view, game);
     if (settings.showRoutes) {
       this.drawRoutes(view, game);
     }
@@ -443,6 +460,9 @@ export class Renderer {
   collectWalls(items, view, walls, terrain) {
     const halfWidth = WALL_THICKNESS_UNITS / 2;
     for (const wall of walls) {
+      if (wall.isPlanned) {
+        continue;
+      }
       // Height is how much has been raised; damage slumps what is standing.
       const condition = wallCondition(wall);
       const height = WALL_HEIGHT_UNITS * wall.built * (DAMAGE_SLUMP + (1 - DAMAGE_SLUMP) * condition);
@@ -468,6 +488,9 @@ export class Renderer {
   collectTowers(items, view, walls, terrain) {
     const nodes = new Set();
     for (const wall of walls) {
+      if (wall.isPlanned) {
+        continue;
+      }
       nodes.add(wall.start);
       nodes.add(wall.end);
     }
@@ -486,7 +509,7 @@ export class Renderer {
     }
   }
 
-  collectCastles(items, paving, view, castles) {
+  collectCastles(items, paving, view, castles, terrain) {
     for (const castle of castles) {
       const definition = BUILDINGS[castle.typeId];
       if (!definition) {
@@ -500,17 +523,18 @@ export class Renderer {
       ])) {
         continue;
       }
+      const ground = terrain.heightAt(x, y);
       for (const face of this.structureFor(castle.typeId)) {
-        this.collectStructureFace(face.ground ? paving : items, view, face, castle.position);
+        this.collectStructureFace(face.ground ? paving : items, view, face, castle.position, ground);
       }
     }
   }
 
-  collectStructureFace(items, view, face, offset) {
+  collectStructureFace(items, view, face, offset, ground = 0) {
     const centre = {
       x: face.centre.x + offset.x,
       y: face.centre.y + offset.y,
-      z: face.centre.z,
+      z: face.centre.z + ground,
     };
     if (!facesCamera(view, face.normal, centre)) {
       return;
@@ -518,7 +542,7 @@ export class Renderer {
     const points = [];
     let depth = 0;
     for (const corner of face.points) {
-      const screen = projectPoint(view, corner.x + offset.x, corner.y + offset.y, corner.z);
+      const screen = projectPoint(view, corner.x + offset.x, corner.y + offset.y, corner.z + ground);
       if (!screen) {
         return;
       }
@@ -528,7 +552,7 @@ export class Renderer {
     items.push({ kind: 'face', depth: depth / points.length, points, fill: face.fill });
   }
 
-  collectRaiders(items, view, raiders) {
+  collectRaiders(items, view, raiders, terrain) {
     const seconds = this.clock;
     for (const raider of raiders) {
       const model = this.unitFor(raider.typeId);
@@ -559,18 +583,15 @@ export class Renderer {
       const fighting = raider.inMelee;
       const shake = fighting ? MELEE_SHAKE : 1;
       const rate = fighting ? MELEE_RATE : 1;
-      // A company squeezing past a wall files into a column and back out again.
-      const column = raider.crossing ?? 0;
       const faces = model.geometry[build];
 
+      const ground = terrain.heightAt(x, y);
       for (const figure of model.figures) {
-        const standX = figure.place.x + (figure.column.x - figure.place.x) * column;
-        const standY = figure.place.y + (figure.column.y - figure.place.y) * column;
-        const swayX = standX + Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
-        const swayY = standY + Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
+        const swayX = figure.place.x + Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
+        const swayY = figure.place.y + Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
         const bob = Math.abs(Math.sin(seconds * 3.1 * rate + figure.phase)) * UNIT_BOB * shake;
         for (const face of faces) {
-          this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob });
+          this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob: bob + ground });
         }
       }
     }
@@ -665,6 +686,66 @@ export class Renderer {
     context.restore();
   }
 
+  /**
+   * Sections that have been paid for but not begun: a marked line on the
+   * ground with a tool over it. Nothing is standing there yet, which is the
+   * point — a wall cannot be conjured in front of a breach.
+   */
+  drawPeggedWalls(view, game) {
+    const context = this.overlay;
+    const tool = this.imageFor(PLAN_TOOL);
+    context.save();
+    context.lineWidth = 2;
+    context.setLineDash([9, 7]);
+    context.strokeStyle = PLAN_LINE;
+
+    for (const wall of game.walls) {
+      if (!wall.isPlanned) {
+        continue;
+      }
+      const from = projectPoint(view, wall.start.x, wall.start.y,
+        game.terrain.heightAt(wall.start.x, wall.start.y));
+      const to = projectPoint(view, wall.end.x, wall.end.y,
+        game.terrain.heightAt(wall.end.x, wall.end.y));
+      if (!from || !to) {
+        continue;
+      }
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+
+      if (tool) {
+        // Fade the tool in and out so a pegged line reads as pending work.
+        const pulse = 0.55 + 0.45 * Math.sin(this.clock * 4);
+        const size = PLAN_TOOL_SIZE;
+        context.globalAlpha = pulse;
+        context.drawImage(tool, (from.x + to.x) / 2 - size / 2,
+          (from.y + to.y) / 2 - size, size, size);
+        context.globalAlpha = 1;
+      }
+    }
+    context.restore();
+  }
+
+  /** The portrait a company carries, over its head. */
+  drawAvatar(company, centreX, bottomY) {
+    const path = company.type.avatar;
+    if (!path) {
+      return bottomY;
+    }
+    const image = this.imageFor(path);
+    if (!image) {
+      return bottomY;
+    }
+    const scale = Math.hypot(this.camera.view.focal / this.camera.distance, 0);
+    const width = Math.min(AVATAR.maxWidth, Math.max(AVATAR.minWidth, AVATAR.width * scale / 2));
+    const height = width * image.naturalHeight / image.naturalWidth;
+    const top = bottomY - height;
+    this.overlay.drawImage(image, centreX - width / 2, top, width, height);
+    return top - AVATAR.gap;
+  }
+
   drawBars(view, game) {
     for (const castle of game.castles) {
       const definition = BUILDINGS[castle.typeId];
@@ -673,13 +754,14 @@ export class Renderer {
       }
     }
     for (const company of [...game.raiders, ...game.guards]) {
-      const fraction = company.health / company.type.maxHealth;
-      if (fraction >= 1) {
+      const model = this.unitFor(company.typeId);
+      if (!model) {
         continue;
       }
-      const model = this.unitFor(company.typeId);
-      if (model) {
-        this.drawRaiderBar(view, company.position, model.radius, fraction);
+      const fraction = company.health / company.type.maxHealth;
+      const top = this.drawCompanyBar(view, game, company, model.radius, fraction);
+      if (top !== null) {
+        this.drawAvatar(company, top.x, top.y);
       }
     }
   }
@@ -697,16 +779,26 @@ export class Renderer {
       castle.healthFraction);
   }
 
-  /** Above the formation's far edge, sized to how wide it is on screen. */
-  drawRaiderBar(view, position, radius, fraction) {
-    const anchor = projectPoint(view, position.x, position.y + radius, 0);
-    const jacobian = this.camera.jacobianAt(position);
+  /**
+   * Above the formation's far edge, sized to how wide it is on screen. A full
+   * strength company shows no bar, but still carries its portrait.
+   */
+  drawCompanyBar(view, game, company, radius, fraction) {
+    const { x, y } = company.position;
+    const ground = game.terrain.heightAt(x, y);
+    const anchor = projectPoint(view, x, y + radius, ground);
+    const jacobian = this.camera.jacobianAt(company.position);
     if (!anchor || !jacobian) {
-      return;
+      return null;
     }
-    const across = Math.hypot(jacobian.east.x, jacobian.east.y) * radius * 2;
-    const width = Math.min(Math.max(across * 0.5, RAIDER_BAR.minWidth), RAIDER_BAR.maxWidth);
-    this.drawBar(anchor.x, anchor.y - RAIDER_BAR.height - RAIDER_BAR.gap, width, RAIDER_BAR.height, fraction);
+    let top = anchor.y - RAIDER_BAR.gap;
+    if (fraction < 1) {
+      const across = Math.hypot(jacobian.east.x, jacobian.east.y) * radius * 2;
+      const width = Math.min(Math.max(across * 0.5, RAIDER_BAR.minWidth), RAIDER_BAR.maxWidth);
+      top = anchor.y - RAIDER_BAR.height - RAIDER_BAR.gap;
+      this.drawBar(anchor.x, top, width, RAIDER_BAR.height, fraction);
+    }
+    return { x: anchor.x, y: top - AVATAR.gap };
   }
 
   drawBar(centreX, top, width, height, fraction) {

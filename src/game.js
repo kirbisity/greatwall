@@ -217,9 +217,21 @@ export class Game {
    * the only thing that opens a new way through is one of them falling.
    */
   navigation() {
-    const version = `${this.walls.length}`;
+    // Only sections that have actually been begun are walls, so the count of
+    // those is what the route graph turns on.
+    let standing = 0;
+    for (const wall of this.walls) {
+      if (!wall.isPlanned) {
+        standing += 1;
+      }
+    }
+    const version = `${this.walls.length}:${standing}`;
     if (this.navigationCache?.version !== version) {
-      this.navigationCache = buildNavigation(this.walls, this.castles[0]?.position, version);
+      this.navigationCache = buildNavigation(
+        this.walls.filter((wall) => !wall.isPlanned),
+        this.castles[0]?.position,
+        version,
+      );
     }
     return this.navigationCache;
   }
@@ -367,9 +379,9 @@ export class Game {
   }
 
   /**
-   * Imperial companies go through walls rather than round them. Near one they
-   * file into a column and slow right down, which is the squeeze; clear of it
-   * they spread back out.
+   * Imperial companies go through walls rather than round them. They hold
+   * their formation doing it, but squeezing over the stone slows them; clear
+   * of the wall they pick their pace back up.
    */
   updateCrossing(navigation, guard) {
     let nearest = Infinity;
@@ -544,7 +556,7 @@ export class Game {
     if (this.crossesCity(start, end)) {
       return { status: 'blocked', start, end };
     }
-    const wall = new Wall(start, end, WALL.initialFraction);
+    const wall = new Wall(start, end, WALL.initialFraction, WALL.planSeconds);
     if (wall.length <= 1) {
       return { status: 'short', start, end };
     }
@@ -562,7 +574,8 @@ export class Game {
     const standing = [];
     let cleared = 0;
     for (const wall of this.walls) {
-      if (segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
+      if (!wall.isPlanned
+        && segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
         this.tokens += wall.refundValue;
         cleared += 1;
       } else {

@@ -7,12 +7,19 @@ export class Wall {
    * finished rampart. Health is capped by it, so a wall under construction is
    * both shorter and weaker, and can be attacked the whole way up.
    */
-  constructor(start, end, built = 1) {
+  constructor(start, end, built = 1, planSeconds = 0) {
     this.start = start;
     this.end = end;
     this.length = distance(start, end);
     this.built = built;
     this.health = WALL.maxHealth * built;
+    // Pegged out but not yet begun. Until this runs down the section is not a
+    // wall: it blocks nothing, diverts nothing, and cannot be attacked.
+    this.planSeconds = planSeconds;
+  }
+
+  get isPlanned() {
+    return this.planSeconds > 0;
   }
 
   get isComplete() {
@@ -21,6 +28,10 @@ export class Wall {
 
   /** Raise the section, making good any damage taken while it went up. */
   raise(seconds) {
+    if (this.planSeconds > 0) {
+      this.planSeconds = Math.max(0, this.planSeconds - seconds);
+      return;
+    }
     if (this.built >= 1) {
       return;
     }
@@ -32,6 +43,7 @@ export class Wall {
 
   /** Pay off the remaining construction as well as the damage. */
   finish() {
+    this.planSeconds = 0;
     this.built = 1;
     this.health = WALL.maxHealth;
   }
@@ -96,7 +108,7 @@ class Company {
     // Progress watch, so a company that is going nowhere can give up.
     this.closestApproach = Infinity;
     this.stuckSeconds = 0;
-    // 0 in open order, 1 filed into a column to squeeze past a wall.
+    // 0 in the clear, 1 astride a wall and slowed to a crawl by it.
     this.crossing = 0;
     // Navigation state, so a company thinks a few times a second rather than
     // every frame.

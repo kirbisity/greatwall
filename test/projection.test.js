@@ -114,15 +114,23 @@ test('the camera keeps the anchor under the cursor throughout a zoom', () => {
   }
 });
 
-test('panning drags the ground point under the cursor', () => {
+test('panning brings the grabbed ground point under the cursor, trailing it there', () => {
   const camera = new Camera(1200, 800);
   const from = { x: 400, y: 500 };
   const to = { x: 700, y: 420 };
   const grabbed = camera.toWorld(from);
   camera.panFrom(from, to);
+
   camera.update(1 / 60);
-  const released = camera.toWorld(to);
-  assert.ok(Math.hypot(released.x - grabbed.x, released.y - grabbed.y) < 1e-6);
+  const afterOneFrame = camera.toWorld(to);
+  const lag = Math.hypot(afterOneFrame.x - grabbed.x, afterOneFrame.y - grabbed.y);
+  assert.ok(lag > 0, 'the view trails the cursor rather than snapping to it');
+
+  // Still holding, so no throw is added: the view simply catches up.
+  settle(camera);
+  const settled = camera.toWorld(to);
+  assert.ok(Math.hypot(settled.x - grabbed.x, settled.y - grabbed.y) < 1e-6,
+    'and closes the gap once it catches up');
 });
 
 test('a released drag carries on and then stops', () => {

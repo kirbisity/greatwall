@@ -28,9 +28,12 @@ already have.
 | Ctrl+Z | Undo the last wall section |
 | `[` and `]` | Tilt the camera |
 
-Settings has an **Atmosphere** toggle (distance haze and drifting cloud layers), on by
-default, and a **Show Routes** toggle that draws the gateways raiders navigate by. Both
-choices are remembered.
+Settings has an **Atmosphere** toggle (distance haze and drifting cloud decks), on by
+default and costing around a millisecond a frame, and a **Show Routes** toggle that draws
+the gateways raiders navigate by. Both choices are remembered.
+
+The clouds sit at real altitudes, so they slide past faster than the ground when the view
+pans and swell faster as it zooms in.
 | Esc | Menu |
 
 A new section goes up as a foundation course and rises to full strength over about ten

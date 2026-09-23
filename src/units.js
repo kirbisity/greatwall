@@ -15,9 +15,9 @@ const SCALE = 1.28;
 const at = (value) => value * SCALE;
 
 const MATERIALS = {
-  imperialMail: [212, 220, 230],
-  imperialTrim: [214, 178, 96],
-  brightSteel: [238, 242, 246],
+  imperialGold: [214, 172, 72],
+  imperialTrim: [240, 214, 130],
+  imperialDeep: [168, 128, 48],
   tanCloth: [186, 158, 112],
   tanSkin: [201, 172, 137],
   darkMail: [92, 96, 104],
@@ -242,6 +242,9 @@ function wedge(rows, spread, depth) {
   return places;
 }
 
+/** Spacing between troops when a company files into a column. */
+const COLUMN_SPACING = 1.5;
+
 /** Deterministic jitter, so a formation looks the same every time it spawns. */
 function seededRandom(seed) {
   let state = seed;
@@ -277,18 +280,23 @@ const FORMATIONS = {
     figure: horseman({ weapon: shaft({ x: at(0.34), y: 0, z: at(0.4) }, at(2.4), at(0.09), 0.05, MATERIALS.shaft) }),
   }),
   IG0: () => ({
-    places: grid(5, 4, at(1.4)),
+    places: grid(6, 4, at(1.35)),
     figure: footSoldier({
-      cloth: MATERIALS.imperialMail,
-      skin: MATERIALS.brightSteel,
-      weapon: swordArm(MATERIALS.imperialTrim),
+      cloth: MATERIALS.imperialGold,
+      skin: MATERIALS.imperialTrim,
+      weapon: swordArm(MATERIALS.imperialDeep),
     }),
   }),
 };
 
 /**
- * Build a type's formation. Each figure gets its own phase so the company
- * shifts out of step, which is what stops it looking like one rigid object.
+ * Build a type's formation.
+ *
+ * The figure is modelled once at the origin and shared; each place in the
+ * formation only carries where it stands and its own phase. That keeps one
+ * copy of the geometry per type rather than one per figure, and it lets a
+ * company change shape — closing into a column to pass a wall — by moving
+ * offsets rather than rebuilding anything.
  */
 export function compileUnit(typeId) {
   const build = FORMATIONS[typeId];
@@ -297,16 +305,18 @@ export function compileUnit(typeId) {
   }
   const { places, figure } = build();
   const jitter = seededRandom(typeId.charCodeAt(2) * 37 + 11);
+  const spacing = COLUMN_SPACING * SCALE;
+  const middle = (places.length - 1) / 2;
   let radius = 0;
 
-  const figures = places.map((place) => {
+  const figures = places.map((place, index) => {
     radius = Math.max(radius, Math.hypot(place.x, place.y));
     return {
       phase: jitter() * Math.PI * 2,
-      detail: shift(figure.detail, place),
-      plain: shift(figure.plain, place),
-      speck: shift(figure.speck, place),
+      place,
+      // Single file along the line of march, for squeezing through a gap.
+      column: { x: 0, y: (index - middle) * spacing },
     };
   });
-  return { figures, radius: radius + 1.5 };
+  return { figures, geometry: figure, radius: radius + 1.5 };
 }

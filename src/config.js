@@ -11,10 +11,10 @@ export const CAMERA = {
   focalLength: 900,
   initialDistance: 380,
   minDistance: 110,
-  maxDistance: 1600,
+  maxDistance: 800,
   initialElevation: 52,
   minElevation: 35,
-  maxElevation: 85,
+  maxElevation: 55,
   elevationStep: 4,
   nearPlane: 1,
 
@@ -127,8 +127,16 @@ export const IMPERIAL = {
   rehuntRadius: 260,
   // How close to its ordered ground counts as having arrived.
   arriveRadius: 30,
-  // Companies are recalled if they stray this far from the city.
-  leashRadius: 900,
+  // Companies are recalled if they stray this far from the city, and will not
+  // take up the hunt again until they are back inside `returnRadius`.
+  leashRadius: 380,
+  returnRadius: 170,
+
+  // Imperial companies walk through walls rather than round them. Within
+  // `crossDistance` of one they file into a column and slow to `crossSpeed`
+  // of their pace, then spread back out on the far side.
+  crossDistance: 38,
+  crossSpeed: 0.4,
 };
 
 /**

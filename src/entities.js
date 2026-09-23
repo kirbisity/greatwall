@@ -89,11 +89,15 @@ class Company {
     this.foes = new Set();
     this.meleeSeconds = 0;
     this.recoverySeconds = 0;
-    // Only raiders batter walls; the imperial army walks round its own.
+    // Only raiders are stopped by walls: they batter them or find a way
+    // round. Imperial companies file through their own stonework.
     this.besieges = false;
+    this.avoidsWalls = false;
     // Progress watch, so a company that is going nowhere can give up.
     this.closestApproach = Infinity;
     this.stuckSeconds = 0;
+    // 0 in open order, 1 filed into a column to squeeze past a wall.
+    this.crossing = 0;
     // Navigation state, so a company thinks a few times a second rather than
     // every frame.
     this.planVersion = null;
@@ -149,6 +153,7 @@ export class Raider extends Company {
     }
     super(typeId, type, position);
     this.besieges = true;
+    this.avoidsWalls = true;
     // Which section to batter when walled in.
     this.siegeTarget = null;
   }
@@ -165,5 +170,7 @@ export class Guard extends Company {
     this.orders = { ...position };
     this.quarry = null;
     this.home = { ...position };
+    // Set once it has wandered past its leash, cleared once it is back.
+    this.recalled = false;
   }
 }

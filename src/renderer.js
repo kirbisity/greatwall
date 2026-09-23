@@ -156,13 +156,11 @@ export class Renderer {
     if (!model) {
       return null;
     }
-    for (const figure of model.figures) {
-      for (const faces of [figure.detail, figure.plain, figure.speck]) {
-        for (const face of faces) {
-          face.shades = Array.from({ length: LIGHT_BANDS + 1 }, (unused, band) => (
-            shade(face.material, AMBIENT_LIGHT + (1 - AMBIENT_LIGHT) * (band / LIGHT_BANDS))
-          ));
-        }
+    for (const faces of [model.geometry.detail, model.geometry.plain, model.geometry.speck]) {
+      for (const face of faces) {
+        face.shades = Array.from({ length: LIGHT_BANDS + 1 }, (unused, band) => (
+          shade(face.material, AMBIENT_LIGHT + (1 - AMBIENT_LIGHT) * (band / LIGHT_BANDS))
+        ));
       }
     }
     this.units.set(typeId, model);
@@ -419,12 +417,17 @@ export class Renderer {
       const fighting = raider.inMelee;
       const shake = fighting ? MELEE_SHAKE : 1;
       const rate = fighting ? MELEE_RATE : 1;
+      // A company squeezing past a wall files into a column and back out again.
+      const column = raider.crossing ?? 0;
+      const faces = model.geometry[build];
 
       for (const figure of model.figures) {
-        const swayX = Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
-        const swayY = Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
+        const standX = figure.place.x + (figure.column.x - figure.place.x) * column;
+        const standY = figure.place.y + (figure.column.y - figure.place.y) * column;
+        const swayX = standX + Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
+        const swayY = standY + Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
         const bob = Math.abs(Math.sin(seconds * 3.1 * rate + figure.phase)) * UNIT_BOB * shake;
-        for (const face of figure[build]) {
+        for (const face of faces) {
           this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob });
         }
       }

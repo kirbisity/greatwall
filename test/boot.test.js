@@ -14,7 +14,7 @@ const pageIds = new Set(
 const CONTEXT_METHODS = [
   'clearRect', 'fillRect', 'strokeRect', 'beginPath', 'moveTo', 'lineTo', 'closePath',
   'stroke', 'arc', 'fill', 'drawImage', 'save', 'translate', 'rotate', 'restore',
-  'fillText', 'setTransform',
+  'fillText', 'setTransform', 'setLineDash',
 ];
 
 function stubContext() {

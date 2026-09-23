@@ -1,5 +1,5 @@
 import { distance } from './geometry.js';
-import { CASTLE_TYPES, GUARD_TYPES, RAIDER_TYPES, WALL } from './config.js';
+import { CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, RAIDER_TYPES, WALL } from './config.js';
 
 export class Wall {
   /**
@@ -7,12 +7,19 @@ export class Wall {
    * finished rampart. Health is capped by it, so a wall under construction is
    * both shorter and weaker, and can be attacked the whole way up.
    */
-  constructor(start, end, built = 1) {
+  constructor(start, end, built = 1, planSeconds = 0) {
     this.start = start;
     this.end = end;
     this.length = distance(start, end);
     this.built = built;
     this.health = WALL.maxHealth * built;
+    // Pegged out but not yet begun. Until this runs down the section is not a
+    // wall: it blocks nothing, diverts nothing, and cannot be attacked.
+    this.planSeconds = planSeconds;
+  }
+
+  get isPlanned() {
+    return this.planSeconds > 0;
   }
 
   get isComplete() {
@@ -21,6 +28,10 @@ export class Wall {
 
   /** Raise the section, making good any damage taken while it went up. */
   raise(seconds) {
+    if (this.planSeconds > 0) {
+      this.planSeconds = Math.max(0, this.planSeconds - seconds);
+      return;
+    }
     if (this.built >= 1) {
       return;
     }
@@ -32,6 +43,7 @@ export class Wall {
 
   /** Pay off the remaining construction as well as the damage. */
   finish() {
+    this.planSeconds = 0;
     this.built = 1;
     this.health = WALL.maxHealth;
   }
@@ -47,7 +59,12 @@ export class Wall {
 }
 
 export class Castle {
-  constructor(typeId, position = { x: 0, y: 0 }) {
+  /**
+   * `options.previousTypeId`/`previousType` start a rebuild: the shape on the
+   * ground changes at once, but combat and income keep running off the old
+   * stats until the new structure has actually finished rising.
+   */
+  constructor(typeId, position = { x: 0, y: 0 }, options = {}) {
     const type = CASTLE_TYPES[typeId];
     if (!type) {
       throw new Error(`Unknown castle type: ${typeId}`);
@@ -55,19 +72,60 @@ export class Castle {
     this.typeId = typeId;
     this.type = type;
     this.position = { ...position };
-    this.health = type.maxHealth;
+    this.health = options.health ?? type.maxHealth;
+    this.rebuild = options.previousTypeId ? {
+      fromTypeId: options.previousTypeId,
+      fromType: options.previousType ?? CASTLE_TYPES[options.previousTypeId],
+      demolishSeconds: CASTLE_REBUILD.demolishSeconds,
+      demolishTotal: CASTLE_REBUILD.demolishSeconds,
+      buildElapsed: 0,
+      buildTotal: CASTLE_REBUILD.buildSeconds,
+    } : null;
+  }
+
+  /** The stats in effect right now: the old tier's, while still under construction. */
+  get effectiveType() {
+    return this.rebuild ? this.rebuild.fromType : this.type;
   }
 
   get healthFraction() {
-    return this.health / this.type.maxHealth;
+    return this.health / this.effectiveType.maxHealth;
   }
 
   takeHit(attackPower) {
-    this.health -= attackPower / this.type.defense;
+    this.health -= attackPower / this.effectiveType.defense;
   }
 
   regenerate(fraction) {
-    this.health = Math.min(this.type.maxHealth, this.health + fraction * this.type.maxHealth);
+    this.health = Math.min(this.effectiveType.maxHealth, this.health + fraction * this.effectiveType.maxHealth);
+  }
+
+  /** 1 while the old structure still stands, falling to 0 as it is cleared away. */
+  get demolishProgress() {
+    return this.rebuild ? this.rebuild.demolishSeconds / this.rebuild.demolishTotal : 0;
+  }
+
+  /** 0 before the new structure has broken ground, 1 once it has fully risen. */
+  get buildProgress() {
+    if (!this.rebuild || this.rebuild.demolishSeconds > 0) {
+      return 0;
+    }
+    return this.rebuild.buildElapsed / this.rebuild.buildTotal;
+  }
+
+  /** Advance the demolish-then-rise sequence, clearing it once complete. */
+  advanceRebuild(seconds) {
+    if (!this.rebuild) {
+      return;
+    }
+    if (this.rebuild.demolishSeconds > 0) {
+      this.rebuild.demolishSeconds = Math.max(0, this.rebuild.demolishSeconds - seconds);
+      return;
+    }
+    this.rebuild.buildElapsed = Math.min(this.rebuild.buildTotal, this.rebuild.buildElapsed + seconds);
+    if (this.rebuild.buildElapsed >= this.rebuild.buildTotal) {
+      this.rebuild = null;
+    }
   }
 }
 
@@ -96,7 +154,7 @@ class Company {
     // Progress watch, so a company that is going nowhere can give up.
     this.closestApproach = Infinity;
     this.stuckSeconds = 0;
-    // 0 in open order, 1 filed into a column to squeeze past a wall.
+    // 0 in the clear, 1 astride a wall and slowed to a crawl by it.
     this.crossing = 0;
     // Navigation state, so a company thinks a few times a second rather than
     // every frame.

@@ -167,6 +167,42 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 .toolButton.is-disabled { opacity: .35; cursor: not-allowed; }
 .toolButton.is-disabled:hover { border-color: transparent; transform: none; }
 
+/* --- dispatch menu ------------------------------------------------------ */
+
+.dispatchMenu {
+	position: fixed;
+	display: none;
+	z-index: 7;
+	gap: 6px;
+	transform: translate(-50%, -120%);
+	pointer-events: none;
+}
+
+.dispatchButton {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	min-width: 96px;
+	padding: 8px 10px;
+	font-family: var(--display);
+	font-size: 11px;
+	letter-spacing: .04em;
+	line-height: 1.5;
+	text-align: center;
+	white-space: pre-line;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 3px;
+	box-shadow: var(--lift);
+	transition: var(--ease);
+	pointer-events: auto;
+}
+
+.dispatchButton:hover { border-color: var(--bronze); box-shadow: var(--glow); transform: translateY(-2px); }
+
 /* --- full screen overlays ---------------------------------------------- */
 
 .overlay {

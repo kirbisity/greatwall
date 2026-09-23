@@ -1,4 +1,4 @@
-import { CAMERA, IMPERIAL, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
+import { CAMERA, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
 import { distance } from './geometry.js';
 
 const CURSORS = {
@@ -11,7 +11,7 @@ const CURSORS = {
 };
 
 // Outcomes that leave a usable end to keep drawing from.
-const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact']);
+const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact', 'planning']);
 
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
@@ -30,6 +30,9 @@ export class Input {
     this.pointer = { x: 0, y: 0 };
     this.zoomAnchor = null;
     this.chainPoint = null;
+    // Which guard tier the dispatch menu last picked. Sticky across sends,
+    // so repeat orders of the same company do not reopen the menu.
+    this.selectedGuardType = null;
   }
 
   listen() {
@@ -53,11 +56,32 @@ export class Input {
   selectTool(tool) {
     this.tool = this.tool === tool ? 'move' : tool;
     this.applyTool();
+    if (this.tool === 'attack') {
+      this.openDispatchMenu();
+    } else {
+      this.hud.hideDispatchMenu();
+    }
   }
 
   resetTool() {
     this.tool = 'move';
     this.applyTool();
+    this.hud.hideDispatchMenu();
+  }
+
+  /** Show the tier picker above the castle, so an order carries a company. */
+  openDispatchMenu() {
+    const castle = this.game.castles[0];
+    const options = this.game.dispatchOptions();
+    if (!castle || options.length === 0) {
+      return;
+    }
+    const screen = this.camera.toScreen({ ...castle.position, z: 0 })
+      ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
+    this.hud.showDispatchMenu(options, screen, (typeId) => {
+      this.selectedGuardType = typeId;
+      this.hud.hideDispatchMenu();
+    });
   }
 
   applyTool() {
@@ -96,9 +120,14 @@ export class Input {
   }
 
   orderAttack(target) {
-    const result = this.game.sendGuard(target);
+    const options = this.game.dispatchOptions();
+    const chosen = options.find((option) => option.id === this.selectedGuardType) ?? options[0];
+    if (!chosen) {
+      return;
+    }
+    const result = this.game.sendGuard(chosen.id, target);
     if (result.status === 'poor') {
-      this.hud.showMessage(`A company costs $${IMPERIAL.cost} to muster`);
+      this.hud.showMessage(`${chosen.name} costs $${chosen.cost} to muster`);
     }
   }
 

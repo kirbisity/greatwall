@@ -78,7 +78,14 @@ class App {
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
-    bind('attackTool', () => this.input.selectTool('attack'));
+    bind('attackTool', (event) => {
+      // Without this, the same click bubbles to the map's own click handler,
+      // which reads the tool as already 'attack' and fires an order at
+      // wherever this button happens to sit on screen — before the tier
+      // picker it just opened has had a chance to be used.
+      event.stopPropagation();
+      this.input.selectTool('attack');
+    });
   }
 
   toggleAtmosphere() {
@@ -160,7 +167,10 @@ class App {
       this.needsDraw = false;
       this.draw();
     }
-    if (this.running && this.game.isDefeated) {
+    // The city keeps burning on screen for BREACH.collapseSeconds before the
+    // game actually ends — game.step() freezes the field the moment it falls,
+    // but drawing carries on so the fire and the blackening play out.
+    if (this.running && this.game.breachComplete) {
       this.gameOver();
     }
     window.requestAnimationFrame(() => this.frame());

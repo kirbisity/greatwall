@@ -15,10 +15,12 @@ import { lockEngagements, resolveMelee } from './melee.js';
 import { Terrain } from './terrain.js';
 import {
   AVOIDANCE,
+  BREACH,
+  CASTLE_GUARD_TIERS,
   FEAR,
   FPS,
   TERRAIN,
-  GUARD_TYPE,
+  GUARD_TYPES,
   IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
@@ -76,6 +78,9 @@ export class Game {
     this.season = 0;
     this.seconds = 0;
     this.frame = 0;
+    // Set once the last castle falls; counts up to BREACH.collapseSeconds
+    // while the city burns, before the game actually ends.
+    this.breachSeconds = null;
   }
 
   /** Settlements stand on levelled ground, and clear the wood around them. */
@@ -116,6 +121,16 @@ export class Game {
     return this.castles.some((castle) => castle.health < 0);
   }
 
+  /** How far through its burning the city is, 0 to 1. */
+  get breachFraction() {
+    return this.breachSeconds === null ? 0 : this.breachSeconds / BREACH.collapseSeconds;
+  }
+
+  /** Once true, the game is actually over — the burn has run its course. */
+  get breachComplete() {
+    return this.breachSeconds !== null && this.breachSeconds >= BREACH.collapseSeconds;
+  }
+
   get buildMultiplier() {
     return this.season % SEASONS_PER_YEAR === WINTER ? WINTER_BUILD_MULTIPLIER : 1;
   }
@@ -145,6 +160,9 @@ export class Game {
     if (this.advanceClock()) {
       this.onSecondElapsed();
     }
+    for (const castle of this.castles) {
+      castle.advanceRebuild(1 / FPS);
+    }
     for (const wall of this.walls) {
       wall.raise(1 / FPS);
     }
@@ -155,6 +173,11 @@ export class Game {
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
     this.guards = this.guards.filter((guard) => guard.isAlive);
     this.walls = this.walls.filter((wall) => wall.health >= 0);
+    // Once the city is lost the field keeps animating, but this is the clock
+    // the game-over screen actually waits on: see BREACH.collapseSeconds.
+    if (this.isDefeated) {
+      this.breachSeconds = Math.min(BREACH.collapseSeconds, (this.breachSeconds ?? 0) + 1 / FPS);
+    }
   }
 
   onSecondElapsed() {
@@ -185,7 +208,9 @@ export class Game {
     let productivity = 0;
     for (const castle of this.castles) {
       castle.regenerate(REGEN_FRACTION_PER_PAYOUT);
-      productivity += castle.type.wealth;
+      // A castle under construction still earns at its old rate — the new
+      // income only starts once the new buildings have actually risen.
+      productivity += castle.effectiveType.wealth;
     }
     this.tokens += productivity * this.harvestMultiplier;
   }
@@ -217,9 +242,21 @@ export class Game {
    * the only thing that opens a new way through is one of them falling.
    */
   navigation() {
-    const version = `${this.walls.length}`;
+    // Only sections that have actually been begun are walls, so the count of
+    // those is what the route graph turns on.
+    let standing = 0;
+    for (const wall of this.walls) {
+      if (!wall.isPlanned) {
+        standing += 1;
+      }
+    }
+    const version = `${this.walls.length}:${standing}`;
     if (this.navigationCache?.version !== version) {
-      this.navigationCache = buildNavigation(this.walls, this.castles[0]?.position, version);
+      this.navigationCache = buildNavigation(
+        this.walls.filter((wall) => !wall.isPlanned),
+        this.castles[0]?.position,
+        version,
+      );
     }
     return this.navigationCache;
   }
@@ -290,17 +327,34 @@ export class Game {
 
   // --- the imperial army --------------------------------------------------
 
-  /** Send a company to hold a patch of ground. Returns why it could not go. */
-  sendGuard(target) {
+  /**
+   * The guard tiers this castle can currently field, richest last. A city
+   * fields only its light company until it has grown enough to unlock more.
+   */
+  dispatchOptions() {
+    const castle = this.castles[0];
+    if (!castle) {
+      return [];
+    }
+    const tierIds = CASTLE_GUARD_TIERS[castle.typeId] ?? [];
+    return tierIds.map((id) => ({ id, ...GUARD_TYPES[id] }));
+  }
+
+  /** Send a company of the given tier to hold a patch of ground. */
+  sendGuard(typeId, target) {
     const home = this.castles[0];
     if (!home) {
       return { sent: false, status: 'nocity' };
     }
-    if (this.tokens < IMPERIAL.cost) {
+    const type = GUARD_TYPES[typeId];
+    if (!type) {
+      return { sent: false, status: 'unknown' };
+    }
+    if (this.tokens < type.cost) {
       return { sent: false, status: 'poor' };
     }
-    this.tokens -= IMPERIAL.cost;
-    const guard = new Guard(GUARD_TYPE, home.position);
+    this.tokens -= type.cost;
+    const guard = new Guard(typeId, home.position);
     guard.home = { ...home.position };
     guard.orders = { ...target };
     guard.aimAt(target);
@@ -367,9 +421,9 @@ export class Game {
   }
 
   /**
-   * Imperial companies go through walls rather than round them. Near one they
-   * file into a column and slow right down, which is the squeeze; clear of it
-   * they spread back out.
+   * Imperial companies go through walls rather than round them. They hold
+   * their formation doing it, but squeezing over the stone slows them; clear
+   * of the wall they pick their pace back up.
    */
   updateCrossing(navigation, guard) {
     let nearest = Infinity;
@@ -516,6 +570,12 @@ export class Game {
 
   /** Restore a damaged wall, charging only for the stonework replaced. */
   repairWall(wall) {
+    // A section still pegged out has nothing to repair, and letting a redraw
+    // finish it would be a way to buy back the three seconds it is meant to
+    // cost. The masons have to mark it out first.
+    if (wall.isPlanned) {
+      return { status: 'planning', wall };
+    }
     const missing = WALL.maxHealth - wall.health;
     if (missing <= 0) {
       return { status: 'intact', wall };
@@ -544,7 +604,7 @@ export class Game {
     if (this.crossesCity(start, end)) {
       return { status: 'blocked', start, end };
     }
-    const wall = new Wall(start, end, WALL.initialFraction);
+    const wall = new Wall(start, end, WALL.initialFraction, WALL.planSeconds);
     if (wall.length <= 1) {
       return { status: 'short', start, end };
     }
@@ -562,7 +622,8 @@ export class Game {
     const standing = [];
     let cleared = 0;
     for (const wall of this.walls) {
-      if (segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
+      if (!wall.isPlanned
+        && segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
         this.tokens += wall.refundValue;
         cleared += 1;
       } else {
@@ -615,7 +676,14 @@ export class Game {
       this.onMessage('Cannot upgrade further');
       return false;
     }
-    const upgraded = new Castle(nextTypeId, current.position);
+    // The footprint changes at once — walls under it are cleared immediately
+    // — but combat and income keep running off the old stats (and the health
+    // bar keeps its old scale) until the new structure has actually risen.
+    const upgraded = new Castle(nextTypeId, current.position, {
+      health: current.health,
+      previousTypeId: current.typeId,
+      previousType: current.effectiveType,
+    });
     if (this.tokens < upgraded.type.cost) {
       this.onMessage(`You need $${upgraded.type.cost} to upgrade the castle.`);
       return false;

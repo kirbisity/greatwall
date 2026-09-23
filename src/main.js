@@ -78,6 +78,7 @@ class App {
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
+    bind('attackTool', () => this.input.selectTool('attack'));
   }
 
   toggleAtmosphere() {

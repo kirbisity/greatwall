@@ -1,4 +1,4 @@
-import { Castle, Raider, Wall } from './entities.js';
+import { Castle, Guard, Raider, Wall } from './entities.js';
 import {
   closestPointOnSquare,
   distance,
@@ -8,10 +8,14 @@ import {
   segmentEntersSquare,
   segmentsIntersect,
 } from './geometry.js';
-import { steerRaider } from './pathfinding.js';
-import { buildNavigation } from './navigation.js';
+import { steerCompany } from './pathfinding.js';
+import { buildNavigation, wallsNear } from './navigation.js';
+import { lockEngagements, resolveMelee } from './melee.js';
 import {
+  FEAR,
   FPS,
+  GUARD_TYPE,
+  IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
   RAIDER_SPAWN_INTERVAL_SECONDS,
@@ -57,6 +61,7 @@ export class Game {
 
   restart() {
     this.navigationCache = null;
+    this.guards = [];
     this.walls = [];
     this.castles = [new Castle(STARTING_CASTLE_TYPE)];
     this.raiders = [];
@@ -102,8 +107,12 @@ export class Game {
     for (const wall of this.walls) {
       wall.raise(1 / FPS);
     }
+    lockEngagements(this.guards, this.raiders);
+    resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     this.moveRaiders();
+    this.moveGuards();
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
+    this.guards = this.guards.filter((guard) => guard.isAlive);
     this.walls = this.walls.filter((wall) => wall.health >= 0);
   }
 
@@ -178,18 +187,129 @@ export class Game {
     const target = this.castles[0];
     const navigation = this.navigation();
     for (const raider of this.raiders) {
-      steerRaider(raider, navigation);
-      this.advanceAgainstWalls(raider);
-      this.resolveWallContact(raider);
+      if (raider.isHeld) {
+        continue;
+      }
+      raider.destination = this.raiderDestination(raider, target);
+      steerCompany(raider, navigation);
+      this.advanceAgainstWalls(navigation, raider);
+      this.resolveWallContact(navigation, raider);
       if (raider.isAlive && target) {
         this.resolveCastleContact(raider, target);
       }
     }
   }
 
+  /**
+   * Raiders make for the city, but lean away from imperial companies they can
+   * see. A negative FEAR.weight draws them in instead.
+   */
+  raiderDestination(raider, castle) {
+    const city = castle ? castle.position : { x: 0, y: 0 };
+    if (FEAR.weight === 0 || this.guards.length === 0) {
+      return city;
+    }
+    const notice = FEAR.noticeRadius * FEAR.noticeRadius;
+    let shiftX = 0;
+    let shiftY = 0;
+    for (const guard of this.guards) {
+      const gap = distanceSquared(raider.position, guard.position);
+      if (gap > notice || gap === 0) {
+        continue;
+      }
+      // Nearer companies pull harder, falling off with distance.
+      const pull = 1 - Math.sqrt(gap) / FEAR.noticeRadius;
+      shiftX += (raider.position.x - guard.position.x) * pull;
+      shiftY += (raider.position.y - guard.position.y) * pull;
+    }
+    if (shiftX === 0 && shiftY === 0) {
+      return city;
+    }
+    return {
+      x: city.x + shiftX * FEAR.weight,
+      y: city.y + shiftY * FEAR.weight,
+    };
+  }
+
+  // --- the imperial army --------------------------------------------------
+
+  /** Send a company to hold a patch of ground. Returns why it could not go. */
+  sendGuard(target) {
+    const home = this.castles[0];
+    if (!home) {
+      return { sent: false, status: 'nocity' };
+    }
+    if (this.tokens < IMPERIAL.cost) {
+      return { sent: false, status: 'poor' };
+    }
+    this.tokens -= IMPERIAL.cost;
+    const guard = new Guard(GUARD_TYPE, home.position);
+    guard.home = { ...home.position };
+    guard.orders = { ...target };
+    guard.aimAt(target);
+    this.guards.push(guard);
+    return { sent: true, guard };
+  }
+
+  /** The nearest live raider within `radius`, or null. */
+  nearestRaider(from, radius, ignore = null) {
+    const reach = radius * radius;
+    let closest = null;
+    let closestGap = Infinity;
+    for (const raider of this.raiders) {
+      if (raider === ignore) {
+        continue;
+      }
+      const gap = distanceSquared(from, raider.position);
+      if (gap < reach && gap < closestGap) {
+        closest = raider;
+        closestGap = gap;
+      }
+    }
+    return closest;
+  }
+
+  /**
+   * A company runs down the nearest raider it can see, falls back on its
+   * ordered ground, and goes home when there is nothing left to do.
+   */
+  guardDestination(guard) {
+    if (guard.quarry && !guard.quarry.isAlive) {
+      guard.quarry = null;
+    }
+    const strayed = distanceSquared(guard.position, guard.home) > IMPERIAL.leashRadius ** 2;
+    if (strayed) {
+      guard.quarry = null;
+      return guard.home;
+    }
+    // Re-check every plan, so it switches to a nearer threat as one appears.
+    const hunting = guard.quarry
+      ? IMPERIAL.rehuntRadius
+      : IMPERIAL.huntRadius;
+    guard.quarry = this.nearestRaider(guard.position, hunting) ?? guard.quarry;
+    if (guard.quarry) {
+      return guard.quarry.position;
+    }
+    const arrived = distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2;
+    return arrived ? guard.home : guard.orders;
+  }
+
+  moveGuards() {
+    const navigation = this.navigation();
+    for (const guard of this.guards) {
+      if (guard.isHeld) {
+        continue;
+      }
+      guard.destination = this.guardDestination(guard);
+      steerCompany(guard, navigation);
+      this.advanceAgainstWalls(navigation, guard);
+    }
+  }
+
   /** The first standing section a step would cross, or null if the way is clear. */
-  wallAcross(from, to) {
-    for (const wall of this.walls) {
+  wallAcross(navigation, from, to) {
+    const reach = Math.hypot(to.x - from.x, to.y - from.y) + WALL.reachMargin;
+    for (const wall of wallsNear(navigation.grid, from, reach)) {
       if (segmentsIntersect(from, to, wall.start, wall.end)) {
         return wall;
       }
@@ -202,15 +322,15 @@ export class Game {
    * face it meets, which is what carries it to the nearest gap; one that has
    * given up and is besieging plants itself and swings instead.
    */
-  advanceAgainstWalls(raider) {
+  advanceAgainstWalls(navigation, raider) {
     const step = { x: raider.velocity.x / FPS, y: raider.velocity.y / FPS };
     const ahead = { x: raider.position.x + step.x, y: raider.position.y + step.y };
-    const blocking = this.wallAcross(raider.position, ahead);
+    const blocking = this.wallAcross(navigation, raider.position, ahead);
     if (!blocking) {
       raider.position = ahead;
       return;
     }
-    if (raider.siegeTarget) {
+    if (raider.besieges && raider.siegeTarget) {
       return;
     }
 
@@ -223,14 +343,14 @@ export class Game {
       x: raider.position.x + dx / length * along,
       y: raider.position.y + dy / length * along,
     };
-    if (!this.wallAcross(raider.position, slid)) {
+    if (!this.wallAcross(navigation, raider.position, slid)) {
       raider.position = slid;
     }
   }
 
-  resolveWallContact(raider) {
+  resolveWallContact(navigation, raider) {
     const reachMargin = WALL.reachMargin;
-    for (const wall of this.walls) {
+    for (const wall of wallsNear(navigation.grid, raider.position, raider.type.range + reachMargin)) {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
         wall.takeHit(raider.type.attack);

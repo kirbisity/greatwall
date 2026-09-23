@@ -65,7 +65,60 @@ export const WALL = {
   reachMargin: 2,
 };
 
-export const RAIDER_STEERING_RADIANS = 0.01;
+/* ==========================================================================
+ * AI TUNING
+ * Everything that governs how the two sides move and fight. Nothing here is
+ * referenced by name outside this block, so it can all be moved freely.
+ * ========================================================================== */
+
+/** Radians a company can turn per frame. Higher turns tighter. */
+export const RAIDER_STEERING_RADIANS = 0.055;
+
+/** How companies treat walls. */
+export const AVOIDANCE = {
+  // Walls are treated as this much wider than they are when planning, so a
+  // company aims well clear of the stone instead of grazing it.
+  wallStandoff: 16,
+  // Inside this distance a wall actively pushes a company away, which is what
+  // makes them arc around an obstacle rather than scrape along it.
+  repelDistance: 26,
+  repelStrength: 1.4,
+};
+
+/** Melee: what happens when the two sides meet. */
+export const MELEE = {
+  // Companies lock together once their centres are this close.
+  engageDistance: 26,
+  // Damage is scaled so a typical pairing resolves in about five seconds.
+  damageRate: 1.7,
+  // A fight that has not resolved by now breaks off, so nothing locks forever.
+  maxSeconds: 9,
+  // Both sides are held still for this long after a fight before moving on.
+  recoverySeconds: 0.6,
+};
+
+/** How the imperial army behaves once ordered out. */
+export const IMPERIAL = {
+  cost: 450,
+  // A company will break off towards any raider inside this range.
+  huntRadius: 320,
+  // Having won, it looks this far for another fight before going home.
+  rehuntRadius: 260,
+  // How close to its ordered ground counts as having arrived.
+  arriveRadius: 30,
+  // Companies are recalled if they stray this far from the city.
+  leashRadius: 900,
+};
+
+/**
+ * How raiders react to imperial companies. Positive keeps them away, negative
+ * draws them in, zero means they ignore them and press on for the city.
+ */
+export const FEAR = {
+  weight: 0.45,
+  // Only companies inside this range are noticed at all.
+  noticeRadius: 220,
+};
 
 /**
  * Raiders route by a graph of the ways past the wall network. It is rebuilt
@@ -74,11 +127,11 @@ export const RAIDER_STEERING_RADIANS = 0.01;
  */
 export const NAVIGATION = {
   // How far past a wall's tip a gateway sits, clear of the longest weapon reach.
-  gatewayClearance: 12,
+  gatewayClearance: 22,
   // Rebuild cost grows with the square of this, and a build drag rebuilds per
   // section, so it is capped well below what a sane wall layout ever produces.
   maxGateways: 32,
-  replanFrames: 20,
+  replanFrames: 10,
   arriveRadius: 10,
 };
 export const SPAWN_MIN_DISTANCE = 200;
@@ -119,6 +172,16 @@ export const RAIDER_TYPES = {
 };
 
 export const STARTING_CASTLE_TYPE = 'CC0';
+
+/** The one company the player can field. Slow, but it can take a beating. */
+export const GUARD_TYPES = {
+  IG0: {
+    name: 'Imperial Guardsman', speed: 11, maxHealth: 46, attack: 7,
+    defense: 4, range: 4,
+  },
+};
+
+export const GUARD_TYPE = 'IG0';
 
 // One row per season; the last row repeats once the seasons run past it.
 export const SEASON_RAIDER_MIX = [

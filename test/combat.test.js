@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Raider, Wall } from '../src/entities.js';
-import { steerRaider } from '../src/pathfinding.js';
+import { steerCompany } from '../src/pathfinding.js';
 import { buildNavigation } from '../src/navigation.js';
 import { FPS, WALL } from '../src/config.js';
 
@@ -56,7 +56,7 @@ const CITY = { x: 0, y: 0 };
 
 function navigate(raider, walls) {
   const navigation = buildNavigation(walls, CITY, `${walls.length}`);
-  steerRaider(raider, navigation);
+  steerCompany(raider, navigation);
   return navigation;
 }
 

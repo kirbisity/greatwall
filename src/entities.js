@@ -1,5 +1,5 @@
 import { distance } from './geometry.js';
-import { CASTLE_TYPES, RAIDER_TYPES, WALL } from './config.js';
+import { CASTLE_TYPES, GUARD_TYPES, RAIDER_TYPES, WALL } from './config.js';
 
 export class Wall {
   /**
@@ -71,12 +71,13 @@ export class Castle {
   }
 }
 
-export class Raider {
-  constructor(typeId, position = { x: 0, y: 0 }) {
-    const type = RAIDER_TYPES[typeId];
-    if (!type) {
-      throw new Error(`Unknown raider type: ${typeId}`);
-    }
+/**
+ * A body of troops on the map: raiders coming for the city, or the imperial
+ * companies sent out to meet them. Both move the same way and fight the same
+ * way, so both are this.
+ */
+class Company {
+  constructor(typeId, type, position) {
     this.typeId = typeId;
     this.type = type;
     this.position = { ...position };
@@ -84,9 +85,14 @@ export class Raider {
     this.destination = { x: 0, y: 0 };
     this.waypoint = { x: 0, y: 0 };
     this.health = type.maxHealth;
-    // Navigation state: which section to batter when walled in, and when to
-    // think again rather than re-planning every frame.
-    this.siegeTarget = null;
+    // Melee state: who this company is locked with, and how long it has been.
+    this.foes = new Set();
+    this.meleeSeconds = 0;
+    this.recoverySeconds = 0;
+    // Only raiders batter walls; the imperial army walks round its own.
+    this.besieges = false;
+    // Navigation state, so a company thinks a few times a second rather than
+    // every frame.
     this.planVersion = null;
     this.replanCountdown = 0;
   }
@@ -95,8 +101,21 @@ export class Raider {
     return this.health >= 0;
   }
 
+  get healthFraction() {
+    return this.health / this.type.maxHealth;
+  }
+
   get heading() {
     return Math.atan2(this.velocity.y, this.velocity.x);
+  }
+
+  get inMelee() {
+    return this.foes.size > 0;
+  }
+
+  /** Locked in a fight, or catching its breath after one. */
+  get isHeld() {
+    return this.inMelee || this.recoverySeconds > 0;
   }
 
   takeHit(attackPower) {
@@ -116,5 +135,32 @@ export class Raider {
   advance(seconds) {
     this.position.x += this.velocity.x * seconds;
     this.position.y += this.velocity.y * seconds;
+  }
+}
+
+export class Raider extends Company {
+  constructor(typeId, position = { x: 0, y: 0 }) {
+    const type = RAIDER_TYPES[typeId];
+    if (!type) {
+      throw new Error(`Unknown raider type: ${typeId}`);
+    }
+    super(typeId, type, position);
+    this.besieges = true;
+    // Which section to batter when walled in.
+    this.siegeTarget = null;
+  }
+}
+
+export class Guard extends Company {
+  constructor(typeId, position = { x: 0, y: 0 }) {
+    const type = GUARD_TYPES[typeId];
+    if (!type) {
+      throw new Error(`Unknown guard type: ${typeId}`);
+    }
+    super(typeId, type, position);
+    // Where it was ordered, who it is running down, and where home is.
+    this.orders = { ...position };
+    this.quarry = null;
+    this.home = { ...position };
   }
 }

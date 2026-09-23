@@ -12,10 +12,12 @@ import {
 import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
 import { lockEngagements, resolveMelee } from './melee.js';
+import { Terrain } from './terrain.js';
 import {
   AVOIDANCE,
   FEAR,
   FPS,
+  TERRAIN,
   GUARD_TYPE,
   IMPERIAL,
   HARVEST_MULTIPLIER,
@@ -53,9 +55,10 @@ function spawnOffset(random) {
 
 /** Headless game state and rules. Knows nothing about canvases or the DOM. */
 export class Game {
-  constructor({ onMessage = () => {}, random = Math.random } = {}) {
+  constructor({ onMessage = () => {}, random = Math.random, seed = 1 } = {}) {
     this.onMessage = onMessage;
     this.random = random;
+    this.terrain = new Terrain(seed);
     this.wallHintShown = false;
     this.upgradeHintShown = false;
     this.restart();
@@ -63,14 +66,50 @@ export class Game {
 
   restart() {
     this.navigationCache = null;
+    this.terrain.levelled = [];
     this.guards = [];
     this.walls = [];
     this.castles = [new Castle(STARTING_CASTLE_TYPE)];
+    this.levelUnderCities();
     this.raiders = [];
     this.tokens = STARTING_TOKENS;
     this.season = 0;
     this.seconds = 0;
     this.frame = 0;
+  }
+
+  /** Settlements stand on levelled ground, and clear the wood around them. */
+  levelUnderCities() {
+    for (const [index, castle] of this.castles.entries()) {
+      this.terrain.level(index, castle.position.x, castle.position.y, castle.type.footprint);
+    }
+  }
+
+  /**
+   * Woodland in a patch of ground, minus whatever has been felled. Trees go
+   * where a wall runs and wherever a city stands.
+   */
+  treesWithin(minX, minY, maxX, maxY) {
+    const navigation = this.navigation();
+    return this.terrain.treesWithin(minX, minY, maxX, maxY, (x, y) => {
+      for (const castle of this.castles) {
+        if (distanceToSquare({ x, y }, castle.position, castle.type.footprint) < TERRAIN.clearOfWall) {
+          return true;
+        }
+      }
+      const point = { x, y };
+      for (const wall of wallsNear(navigation.grid, point, TERRAIN.clearOfWall)) {
+        if (pointToLineDistance(point, wall.start, wall.end) < TERRAIN.clearOfWall) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  /** What a company's pace is multiplied by for the ground it is crossing. */
+  paceOn(position) {
+    return 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
   }
 
   get isDefeated() {
@@ -355,8 +394,8 @@ export class Game {
       steerCompany(guard, navigation);
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
-      const pace = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
-      guard.advance(pace / FPS);
+      const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
+      guard.advance(squeeze * this.paceOn(guard.position) / FPS);
     }
   }
 
@@ -377,11 +416,12 @@ export class Game {
    * given up and is besieging plants itself and swings instead.
    */
   advanceAgainstWalls(navigation, raider) {
+    const pace = this.paceOn(raider.position);
     if (!raider.avoidsWalls) {
-      raider.advance(1 / FPS);
+      raider.advance(pace / FPS);
       return;
     }
-    const step = { x: raider.velocity.x / FPS, y: raider.velocity.y / FPS };
+    const step = { x: raider.velocity.x * pace / FPS, y: raider.velocity.y * pace / FPS };
     const ahead = { x: raider.position.x + step.x, y: raider.position.y + step.y };
     const blocking = this.wallAcross(navigation, raider.position, ahead);
     if (!blocking) {
@@ -582,6 +622,7 @@ export class Game {
     }
     this.tokens -= upgraded.type.cost;
     this.castles[index] = upgraded;
+    this.levelUnderCities();
     const cleared = this.clearWallsUnder(upgraded);
     const razed = cleared > 0
       ? ` ${cleared} wall section${cleared === 1 ? '' : 's'} cleared for it.`

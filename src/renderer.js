@@ -4,6 +4,7 @@ import {
   PALETTE,
   SEASONS,
   SUN,
+  TERRAIN,
   TOWER_HEIGHT_UNITS,
   TOWER_RADIUS_UNITS,
   WALL,
@@ -55,6 +56,22 @@ const ROUTE_OPEN = '#7fd4ff';
 const ROUTE_SHUT = '#8a8a8a';
 const ROUTE_SIEGE = '#ff8a5c';
 
+// How far the ground mesh may reach from the focus, as a multiple of camera
+// distance. Stops a low tilt asking for half the world.
+const GROUND_SPAN = 1.05;
+const TRUNK_DISTANCE = 420;
+const TRUNK_FILL = 'rgb(84,62,42)';
+const CANOPY_FILL = 'rgb(74,96,58)';
+
+/** Parse a '#rrggbb' season colour into the channels shade() wants. */
+function shadeOf(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
 const TOWER = [186, 173, 143];
@@ -90,7 +107,7 @@ function wallTint(condition) {
  * The prism a wall segment occupies. Wound counter-clockwise seen from above so
  * face normals point outwards and back-face culling keeps the roof.
  */
-function wallPrism(start, end, halfWidth, height) {
+function wallPrism(start, end, halfWidth, height, ground = null) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const length = Math.hypot(dx, dy) || 1;
@@ -102,21 +119,25 @@ function wallPrism(start, end, halfWidth, height) {
     { x: end.x + offsetX, y: end.y + offsetY },
     { x: start.x + offsetX, y: start.y + offsetY },
   ];
-  return prismFrom(footprint, height);
+  return prismFrom(footprint, height, ground);
 }
 
-function squarePrism(centre, halfWidth, height) {
+function squarePrism(centre, halfWidth, height, base = 0) {
   return prismFrom([
     { x: centre.x - halfWidth, y: centre.y - halfWidth },
     { x: centre.x + halfWidth, y: centre.y - halfWidth },
     { x: centre.x + halfWidth, y: centre.y + halfWidth },
     { x: centre.x - halfWidth, y: centre.y + halfWidth },
-  ], height);
+  ], height, [base, base, base, base]);
 }
 
-function prismFrom(footprint, height) {
-  const base = footprint.map((point) => ({ x: point.x, y: point.y, z: 0 }));
-  const top = footprint.map((point) => ({ x: point.x, y: point.y, z: height }));
+function prismFrom(footprint, height, ground = null) {
+  const base = footprint.map((point, i) => ({ x: point.x, y: point.y, z: ground ? ground[i] : 0 }));
+  const top = footprint.map((point, i) => ({
+    x: point.x,
+    y: point.y,
+    z: (ground ? ground[i] : 0) + height,
+  }));
   const quads = [top];
   for (let i = 0; i < 4; i += 1) {
     const j = (i + 1) % 4;
@@ -129,11 +150,11 @@ function prismFrom(footprint, height) {
 export class Renderer {
   constructor({ terrain, units, structures }, camera) {
     this.canvases = [terrain, units, structures];
-    this.terrain = terrain.getContext('2d');
+    this.ground = terrain.getContext('2d');
     this.scene = units.getContext('2d');
     this.overlay = structures.getContext('2d');
     this.camera = camera;
-    this.paintedSeason = null;
+    this.paintedGround = null;
     this.units = new Map();
     this.startedAt = performance.now();
     this.atmosphere = new Atmosphere(camera);
@@ -191,21 +212,21 @@ export class Renderer {
       canvas.width = width;
       canvas.height = height;
     }
-    this.paintedSeason = null;
+    this.paintedGround = null;
   }
 
   render(game) {
     const { width, height } = this.camera;
     this.scene.clearRect(0, 0, width, height);
     this.overlay.clearRect(0, 0, width, height);
-    this.drawTerrain(game.season);
+    this.drawGround(game);
 
     const view = this.camera.view;
     const items = [];
     const paving = [];
     this.collectCastles(items, paving, view, game.castles);
-    this.collectWalls(items, view, game.walls);
-    this.collectTowers(items, view, game.walls);
+    this.collectWalls(items, view, game.walls, game.terrain);
+    this.collectTowers(items, view, game.walls, game.terrain);
     this.collectRaiders(items, view, game.raiders);
     this.collectRaiders(items, view, game.guards);
     items.sort((a, b) => b.depth - a.depth);
@@ -223,22 +244,137 @@ export class Renderer {
     this.drawBars(view, game);
   }
 
-  /** The ground fills the canvas, so the wash only changes with the season. */
-  drawTerrain(season) {
-    if (this.paintedSeason === season) {
+  /**
+   * The ground: a shaded mesh of the landscape with its woodland standing on
+   * it, painted onto its own layer.
+   *
+   * None of it moves, so it is only repainted when the view does. While the
+   * camera is still — which is most of a fight — the whole landscape costs
+   * nothing at all.
+   */
+  drawGround(game) {
+    const { width, height, focus, distance, elevation } = this.camera;
+    const key = `${game.season}|${Math.round(focus.x)}|${Math.round(focus.y)}`
+      + `|${Math.round(distance)}|${Math.round(elevation * 4)}|${width}x${height}`;
+    if (this.paintedGround === key) {
       return;
     }
-    this.paintedSeason = season;
-    const { width, height } = this.camera;
-    const palette = SEASONS[season % SEASONS.length];
-    const wash = this.terrain.createRadialGradient(
+    this.paintedGround = key;
+
+    const palette = SEASONS[game.season % SEASONS.length];
+    const wash = this.ground.createRadialGradient(
       width / 2, height / 2, Math.min(width, height) * 0.1,
       width / 2, height / 2, Math.max(width, height) * 0.8,
     );
     wash.addColorStop(0, palette.light);
     wash.addColorStop(1, palette.dark);
-    this.terrain.fillStyle = wash;
-    this.terrain.fillRect(0, 0, width, height);
+    this.ground.fillStyle = wash;
+    this.ground.fillRect(0, 0, width, height);
+
+    const bounds = this.groundBounds();
+    this.drawLandscape(game.terrain, palette, bounds);
+    this.drawWoods(game, bounds);
+  }
+
+  /** The patch of ground the view covers, clamped so a low tilt cannot run away. */
+  groundBounds() {
+    const { width, height } = this.camera;
+    const corners = [
+      this.camera.toWorld({ x: 0, y: height }),
+      this.camera.toWorld({ x: width, y: height }),
+      this.camera.toWorld({ x: 0, y: 0 }),
+      this.camera.toWorld({ x: width, y: 0 }),
+    ];
+    const span = this.camera.distance * GROUND_SPAN;
+    const clamp = (value, middle) => Math.max(middle - span, Math.min(middle + span, value));
+    const xs = corners.map((corner) => clamp(corner.x, this.camera.focus.x));
+    const ys = corners.map((corner) => clamp(corner.y, this.camera.focus.y));
+    return {
+      minX: Math.min(...xs), maxX: Math.max(...xs),
+      minY: Math.min(...ys), maxY: Math.max(...ys),
+    };
+  }
+
+  drawLandscape(terrain, palette, bounds) {
+    const context = this.ground;
+    const view = this.camera.view;
+    // Pick a cell that lands about the same size on screen at any zoom.
+    const cell = Math.max(TERRAIN.minCell, Math.min(TERRAIN.maxCell,
+      TERRAIN.meshCellPixels * this.camera.distance / view.focal));
+    const tint = shadeOf(palette.light);
+
+    for (let x = Math.floor(bounds.minX / cell) * cell; x < bounds.maxX; x += cell) {
+      for (let y = Math.floor(bounds.minY / cell) * cell; y < bounds.maxY; y += cell) {
+        const corners = [
+          { x, y }, { x: x + cell, y }, { x: x + cell, y: y + cell }, { x, y: y + cell },
+        ];
+        const points = [];
+        let usable = true;
+        for (const corner of corners) {
+          const screen = projectPoint(view, corner.x, corner.y, terrain.heightAt(corner.x, corner.y));
+          if (!screen) {
+            usable = false;
+            break;
+          }
+          points.push(screen);
+        }
+        if (!usable) {
+          continue;
+        }
+        // Shade by how the cell leans, which is what reads as a hill.
+        const a = terrain.heightAt(x, y);
+        const slopeX = (terrain.heightAt(x + cell, y) - a) / cell;
+        const slopeY = (terrain.heightAt(x, y + cell) - a) / cell;
+        const normal = { x: -slopeX * TERRAIN.slopeRelief, y: -slopeY * TERRAIN.slopeRelief, z: 1 };
+        const length = Math.hypot(normal.x, normal.y, normal.z);
+        const light = lightingFor({ x: normal.x / length, y: normal.y / length, z: normal.z / length });
+
+        context.beginPath();
+        context.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < 4; i += 1) {
+          context.lineTo(points[i].x, points[i].y);
+        }
+        context.closePath();
+        context.fillStyle = shade(tint, light);
+        context.fill();
+      }
+    }
+  }
+
+  /** Woodland, drawn with the ground because it never moves either. */
+  drawWoods(game, bounds) {
+    const context = this.ground;
+    const view = this.camera.view;
+    const trees = game.treesWithin(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
+    const trunks = this.camera.distance < TRUNK_DISTANCE;
+
+    for (const tree of trees) {
+      const top = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 2.2);
+      const foot = projectPoint(view, tree.x, tree.y, tree.z);
+      if (!top || !foot) {
+        continue;
+      }
+      const spread = view.focal / foot.depth * tree.size;
+      if (foot.x < -spread || foot.x > this.camera.width + spread
+        || foot.y < -spread || foot.y > this.camera.height + spread) {
+        continue;
+      }
+      if (trunks) {
+        context.fillStyle = TRUNK_FILL;
+        context.fillRect(foot.x - spread * 0.12, top.y, spread * 0.24, foot.y - top.y);
+      }
+      // A four-sided cone: cheap, and it still reads as a canopy from above.
+      const skirt = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 0.9);
+      const base = skirt ? skirt.y : foot.y;
+      context.beginPath();
+      context.moveTo(top.x, top.y);
+      context.lineTo(foot.x + spread * 0.8, base);
+      context.lineTo(foot.x, base + spread * 0.35);
+      context.lineTo(foot.x - spread * 0.8, base);
+      context.closePath();
+      context.fillStyle = CANOPY_FILL;
+      context.fill();
+    }
   }
 
   // --- scene collection ---------------------------------------------------
@@ -304,7 +440,7 @@ export class Renderer {
     }
   }
 
-  collectWalls(items, view, walls) {
+  collectWalls(items, view, walls, terrain) {
     const halfWidth = WALL_THICKNESS_UNITS / 2;
     for (const wall of walls) {
       // Height is how much has been raised; damage slumps what is standing.
@@ -317,14 +453,19 @@ export class Renderer {
       ])) {
         continue;
       }
-      const quads = wallPrism(wall.start, wall.end, halfWidth, height);
+      // Footprint corners 0 and 3 belong to the start, 1 and 2 to the end, so
+      // a section laid across a slope follows it rather than floating.
+      const startGround = terrain.heightAt(wall.start.x, wall.start.y);
+      const endGround = terrain.heightAt(wall.end.x, wall.end.y);
+      const ground = [startGround, endGround, endGround, startGround];
+      const quads = wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
       this.collectPrism(items, view, flat ? [quads[0]] : quads, wallTint(condition));
     }
   }
 
   /** Snapped wall ends share a point object, so a Set gives one tower per node. */
-  collectTowers(items, view, walls) {
+  collectTowers(items, view, walls, terrain) {
     const nodes = new Set();
     for (const wall of walls) {
       nodes.add(wall.start);
@@ -338,7 +479,8 @@ export class Renderer {
       if (!footing || view.focal / footing.depth * TOWER_RADIUS_UNITS < MIN_TOWER_PIXELS) {
         continue;
       }
-      const quads = squarePrism(node, TOWER_RADIUS_UNITS, TOWER_HEIGHT_UNITS);
+      const quads = squarePrism(node, TOWER_RADIUS_UNITS, TOWER_HEIGHT_UNITS,
+        terrain.heightAt(node.x, node.y));
       const flat = this.flankPixels(view, node, TOWER_HEIGHT_UNITS) < MIN_FLANK_PIXELS;
       this.collectPrism(items, view, flat ? [quads[0]] : quads, TOWER);
     }

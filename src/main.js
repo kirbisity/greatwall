@@ -6,6 +6,9 @@ import { Renderer } from './renderer.js';
 import { loadSprites } from './sprites.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 
+// A long stall must not teleport the camera or fast-forward the game.
+const MAX_FRAME_SECONDS = 0.05;
+
 function bind(id, handler) {
   const node = document.getElementById(id);
   if (node) {
@@ -32,12 +35,14 @@ class App {
       game: this.game,
       camera: this.camera,
       hud: this.hud,
-      onChange: () => this.draw(),
+      onChange: () => { this.needsDraw = true; },
       onMenu: () => this.openMenu(),
     });
 
     this.running = false;
     this.needsNewGame = true;
+    this.needsDraw = true;
+    this.lastFrameAt = 0;
     this.bestScore = 0;
   }
 
@@ -50,6 +55,8 @@ class App {
     this.hud.setAtmosphereLabel(settings.atmosphere);
     this.hud.setRoutesLabel(settings.showRoutes);
     this.draw();
+    this.lastFrameAt = performance.now();
+    window.requestAnimationFrame(() => this.frame());
   }
 
   bindButtons() {
@@ -129,28 +136,35 @@ class App {
   }
 
   resume() {
-    if (this.running) {
-      return;
-    }
     this.running = true;
-    this.loop();
   }
 
   pause() {
     this.running = false;
   }
 
-  loop() {
-    if (!this.running) {
-      return;
+  /**
+   * One display frame. The camera settles whether or not the simulation is
+   * running, so panning and zooming stay smooth behind a menu, and drawing is
+   * skipped entirely once everything is still.
+   */
+  frame() {
+    const now = performance.now();
+    const elapsed = Math.min((now - this.lastFrameAt) / 1000, MAX_FRAME_SECONDS);
+    this.lastFrameAt = now;
+
+    const cameraMoved = this.camera.update(elapsed);
+    if (this.running) {
+      this.game.step();
     }
-    this.game.step();
-    this.draw();
-    if (this.game.isDefeated) {
+    if (this.running || cameraMoved || this.needsDraw) {
+      this.needsDraw = false;
+      this.draw();
+    }
+    if (this.running && this.game.isDefeated) {
       this.gameOver();
-      return;
     }
-    window.requestAnimationFrame(() => this.loop());
+    window.requestAnimationFrame(() => this.frame());
   }
 
   gameOver() {

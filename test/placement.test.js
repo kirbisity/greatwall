@@ -116,14 +116,24 @@ test('repair is charged in proportion to the damage', () => {
   assert.equal(costFor(0.1), Math.trunc(full * 0.1));
 });
 
-test('redrawing an undamaged wall is free and changes nothing', () => {
+test('redrawing a finished, undamaged wall is free and changes nothing', () => {
   const game = gameWith('CC0');
-  game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).wall.finish();
   const before = game.tokens;
   const result = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
   assert.equal(result.status, 'intact');
   assert.equal(game.walls.length, 1);
   assert.equal(game.tokens, before);
+});
+
+test('redrawing an unfinished wall pays off the rest of its construction', () => {
+  const game = gameWith('CC0');
+  const wall = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).wall;
+  const result = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  assert.equal(result.status, 'repaired');
+  assert.equal(wall.isComplete, true);
+  assert.equal(wall.health, WALL.maxHealth);
+  assert.equal(game.walls.length, 1, 'still one section');
 });
 
 test('a wall drawn in the reverse direction still repairs rather than stacks', () => {

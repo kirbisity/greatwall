@@ -107,13 +107,25 @@ test('a ground sprite facing north keeps its top towards north', () => {
   assert.ok(Math.abs(b) < 1e-9 && Math.abs(c) < 1e-9, 'no skew when facing north');
 });
 
-test('the camera keeps the anchor under the cursor while zooming', () => {
+/** Run the camera forward until it stops moving. */
+function settle(camera, seconds = 1 / 60, limit = 600) {
+  for (let step = 0; step < limit && camera.update(seconds); step += 1) {
+    // settling
+  }
+}
+
+test('the camera keeps the anchor under the cursor throughout a zoom', () => {
   const camera = new Camera(1200, 800);
   const anchor = { x: 820, y: 300 };
   const before = camera.toWorld(anchor);
-  camera.zoomAt(anchor, 1.4);
-  const after = camera.toWorld(anchor);
-  assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 1e-6);
+  camera.zoomAt(anchor, 1.6);
+
+  // The whole glide must hold it, not just the end.
+  for (let step = 0; step < 40; step += 1) {
+    camera.update(1 / 60);
+    const now = camera.toWorld(anchor);
+    assert.ok(Math.hypot(now.x - before.x, now.y - before.y) < 1e-6, `drifted at step ${step}`);
+  }
 });
 
 test('panning drags the ground point under the cursor', () => {
@@ -122,20 +134,58 @@ test('panning drags the ground point under the cursor', () => {
   const to = { x: 700, y: 420 };
   const grabbed = camera.toWorld(from);
   camera.panFrom(from, to);
+  camera.update(1 / 60);
   const released = camera.toWorld(to);
   assert.ok(Math.hypot(released.x - grabbed.x, released.y - grabbed.y) < 1e-6);
 });
 
-test('zoom and tilt stay inside their limits', () => {
+test('a released drag carries on and then stops', () => {
+  const camera = new Camera(1200, 800);
+  camera.panFrom({ x: 700, y: 400 }, { x: 400, y: 400 });
+  camera.update(1 / 60);
+  const atRelease = { ...camera.focus };
+  camera.release();
+
+  camera.update(1 / 60);
+  const carried = Math.hypot(camera.focus.x - atRelease.x, camera.focus.y - atRelease.y);
+  assert.ok(carried > 0, 'momentum keeps it moving after the button is up');
+
+  settle(camera);
+  assert.equal(camera.update(1 / 60), false, 'and it comes to rest');
+});
+
+test('zoom and tilt settle inside their limits', () => {
   const camera = new Camera(1200, 800);
   for (let i = 0; i < 100; i += 1) {
     camera.zoomAt({ x: 600, y: 400 }, 2);
   }
+  settle(camera);
   assert.equal(camera.distance, CAMERA.minDistance);
+
+  for (let i = 0; i < 100; i += 1) {
+    camera.zoomAt({ x: 600, y: 400 }, 0.5);
+  }
+  settle(camera);
+  assert.equal(camera.distance, CAMERA.maxDistance);
+
   for (let i = 0; i < 100; i += 1) {
     camera.tilt(-10);
   }
+  settle(camera);
   assert.equal(camera.elevation, CAMERA.minElevation);
+});
+
+test('the ground resists further the harder it is pushed, and never passes the limit', () => {
+  const camera = new Camera(1200, 800);
+  const covered = [];
+  for (let shove = 0; shove < 40; shove += 1) {
+    const before = Math.hypot(camera.focus.x, camera.focus.y);
+    camera.panFrom({ x: 900, y: 400 }, { x: 300, y: 400 });
+    camera.update(1 / 60);
+    covered.push(Math.hypot(camera.focus.x, camera.focus.y) - before);
+  }
+  assert.ok(covered.at(-1) < covered[0], 'each shove moves less ground than the last');
+  assert.ok(Math.hypot(camera.focus.x, camera.focus.y) < CAMERA.hardLimit, 'stays inside the edge');
 });
 
 // Below roughly this angle the horizon enters the viewport and the ground

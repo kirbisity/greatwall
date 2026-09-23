@@ -41,6 +41,7 @@ export class Input {
       this.pointerDown = false;
       this.zoomAnchor = null;
       this.chainPoint = null;
+      this.camera.release();
     });
     document.addEventListener('click', (event) => this.handleClick(event));
     document.addEventListener('mousemove', (event) => this.handleMove(event));

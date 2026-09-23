@@ -49,7 +49,7 @@ export const HARVEST_MULTIPLIER = 2;
 export const WINTER_BUILD_MULTIPLIER = 8;
 
 export const WALL = {
-  maxHealth: 100,
+  maxHealth: 300,
   // A section is pegged out for `planSeconds` before any stone is laid. While
   // it is only marked out it is not a wall at all: nothing is blocked by it,
   // nothing routes around it, and it cannot be attacked. That stops a wall
@@ -172,15 +172,15 @@ export const SPAWN_MAX_DISTANCE = 400;
 
 export const CASTLE_TYPES = {
   CC0: {
-    name: 'Small Castle', cost: 300, maxHealth: 100, wealth: 40,
+    name: 'Small Castle', cost: 300, maxHealth: 500, wealth: 40,
     attack: 2, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
   },
   CC1: {
-    name: 'Medium Castle', cost: 1000, maxHealth: 200, wealth: 80,
+    name: 'Medium Castle', cost: 1000, maxHealth: 1000, wealth: 80,
     attack: 2, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
   },
   CC2: {
-    name: 'Fortified City', cost: 3000, maxHealth: 400, wealth: 160,
+    name: 'Fortified City', cost: 3000, maxHealth: 2000, wealth: 160,
     attack: 2, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
   },
 };
@@ -233,7 +233,7 @@ export const RAIDER_TYPES = {
     defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
-    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 10,
+    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 8,
     defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeHeavy,
   },
 };
@@ -247,16 +247,16 @@ export const STARTING_CASTLE_TYPE = 'CC0';
  */
 export const GUARD_TYPES = {
   IG_LIGHT: {
-    name: 'Imperial Light Guard', speed: 13, maxHealth: 26, attack: 5,
-    defense: 3, range: 4, cost: 260, avatar: AVATARS.imperialLight,
+    name: 'Imperial Light Guard', speed: 7, maxHealth: 25, attack: 2,
+    defense: 3, range: 2, cost: 260, avatar: AVATARS.imperialLight,
   },
   IG0: {
-    name: 'Imperial Guardsman', speed: 11, maxHealth: 46, attack: 7,
-    defense: 4, range: 4, cost: 450, avatar: AVATARS.imperialRegular,
+    name: 'Imperial Guardsman', speed: 6, maxHealth: 30, attack: 3,
+    defense: 4, range: 2, cost: 450, avatar: AVATARS.imperialRegular,
   },
   IG_HEAVY: {
-    name: 'Imperial Heavy Guard', speed: 9, maxHealth: 74, attack: 10,
-    defense: 6, range: 4, cost: 680, avatar: AVATARS.imperialHeavy,
+    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40, attack: 3,
+    defense: 6, range: 2, cost: 680, avatar: AVATARS.imperialHeavy,
   },
 };
 
@@ -399,6 +399,37 @@ export const DAMAGE_EFFECTS = {
 /** How long the city burns before the game-over screen shows. */
 export const BREACH = {
   collapseSeconds: 5,
+};
+
+/**
+ * Houses fill in behind the walls on their own, between the castle and the
+ * ring the walls describe — the bigger that ring, the more of them fit.
+ * They add to income but add nothing to defence: a raider that reaches one
+ * burns it down in a moment.
+ */
+export const HOUSES = {
+  // Capacity is read off how far out the walls sit (the average distance
+  // from the castle to each standing wall's midpoint), one house per this
+  // many units past the castle's own footprint, up to maxHouses.
+  radialSpacing: 14,
+  maxHouses: 24,
+  // Kept clear of the castle itself and of any wall, so a house never
+  // crowds either.
+  innerMargin: 10,
+  wallClearance: 10,
+  placementAttempts: 8,
+
+  spawnIntervalSeconds: 3,
+  riseSeconds: 5,
+  // Coin per house, added to the base city income each payout.
+  income: 5,
+
+  // How close a raider must come to set one alight, and how long it burns
+  // before it is gone for good.
+  contactRadius: 10,
+  burnSeconds: 1,
+
+  footprint: { width: 3.6, depth: 3.2, height: 2.6, roofHeight: 2, overhang: 0.6 },
 };
 
 export const WALL_THICKNESS_UNITS = 3;

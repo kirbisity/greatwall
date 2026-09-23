@@ -1,5 +1,5 @@
 import { distance } from './geometry.js';
-import { CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, RAIDER_TYPES, WALL } from './config.js';
+import { CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, HOUSES, RAIDER_TYPES, WALL } from './config.js';
 
 export class Wall {
   /**
@@ -214,6 +214,42 @@ export class Raider extends Company {
     this.avoidsWalls = true;
     // Which section to batter when walled in.
     this.siegeTarget = null;
+  }
+}
+
+/**
+ * A dwelling that fills in behind the walls on its own. It has no fight in
+ * it: a raider that reaches one does not battle it, it just burns.
+ */
+export class House {
+  constructor(position) {
+    this.position = { ...position };
+    // Seconds since it broke ground, driving the rise; frozen once alight.
+    this.age = 0;
+    this.burning = false;
+    this.burnElapsed = 0;
+  }
+
+  /** 0 the moment it breaks ground, 1 once fully risen. */
+  get growth() {
+    return Math.min(1, this.age / HOUSES.riseSeconds);
+  }
+
+  get isGone() {
+    return this.burning && this.burnElapsed >= HOUSES.burnSeconds;
+  }
+
+  advance(seconds) {
+    if (this.burning) {
+      this.burnElapsed += seconds;
+      return;
+    }
+    this.age += seconds;
+  }
+
+  ignite() {
+    this.burning = true;
+    this.burnElapsed = 0;
   }
 }
 

@@ -1,4 +1,4 @@
-import { Castle, Guard, Raider, Wall } from './entities.js';
+import { Castle, Guard, House, Raider, Wall } from './entities.js';
 import {
   closestPointOnSquare,
   distance,
@@ -21,6 +21,7 @@ import {
   FPS,
   TERRAIN,
   GUARD_TYPES,
+  HOUSES,
   IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
@@ -71,6 +72,8 @@ export class Game {
     this.terrain.levelled = [];
     this.guards = [];
     this.walls = [];
+    this.houses = [];
+    this.houseSpawnCountdown = HOUSES.spawnIntervalSeconds;
     this.castles = [new Castle(STARTING_CASTLE_TYPE)];
     this.levelUnderCities();
     this.raiders = [];
@@ -166,13 +169,18 @@ export class Game {
     for (const wall of this.walls) {
       wall.raise(1 / FPS);
     }
+    for (const house of this.houses) {
+      house.advance(1 / FPS);
+    }
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     this.moveRaiders();
     this.moveGuards();
+    this.resolveHouseContact();
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
     this.guards = this.guards.filter((guard) => guard.isAlive);
     this.walls = this.walls.filter((wall) => wall.health >= 0);
+    this.houses = this.houses.filter((house) => !house.isGone);
     // Once the city is lost the field keeps animating, but this is the clock
     // the game-over screen actually waits on: see BREACH.collapseSeconds.
     if (this.isDefeated) {
@@ -191,6 +199,11 @@ export class Game {
     if (this.seconds % RAIDER_SPAWN_INTERVAL_SECONDS === RAIDER_SPAWN_INTERVAL_SECONDS - 1) {
       this.spawnRaider();
     }
+    this.houseSpawnCountdown -= 1;
+    if (this.houseSpawnCountdown <= 0) {
+      this.houseSpawnCountdown = HOUSES.spawnIntervalSeconds;
+      this.trySpawnHouse();
+    }
   }
 
   showHints() {
@@ -204,15 +217,29 @@ export class Game {
     }
   }
 
-  collectIncome() {
-    let productivity = 0;
+  /**
+   * city_income * num_city + house_income * num_houses, before the seasonal
+   * multiplier. num_city is just the castle count today, but the formula is
+   * written to hold once there is more than one.
+   */
+  get incomeBreakdown() {
+    let cityIncome = 0;
     for (const castle of this.castles) {
-      castle.regenerate(REGEN_FRACTION_PER_PAYOUT);
+      cityIncome += castle.effectiveType.wealth;
+    }
+    const houseCount = this.houses.length;
+    const housePerHouse = HOUSES.income;
+    const houseIncome = houseCount * housePerHouse;
+    return { cityIncome, houseCount, housePerHouse, houseIncome, total: cityIncome + houseIncome };
+  }
+
+  collectIncome() {
+    for (const castle of this.castles) {
       // A castle under construction still earns at its old rate — the new
       // income only starts once the new buildings have actually risen.
-      productivity += castle.effectiveType.wealth;
+      castle.regenerate(REGEN_FRACTION_PER_PAYOUT);
     }
-    this.tokens += productivity * this.harvestMultiplier;
+    this.tokens += this.incomeBreakdown.total * this.harvestMultiplier;
   }
 
   advanceSeason() {
@@ -522,6 +549,130 @@ export class Game {
     }
   }
 
+  // --- houses ---------------------------------------------------------------
+
+  /**
+   * How far out the walls sit, on average, from the castle. Zero with no
+   * standing wall, which is what keeps houses off the ground until there is
+   * something to shelter behind.
+   */
+  settlementRadius() {
+    const castle = this.castles[0];
+    if (!castle) {
+      return 0;
+    }
+    let total = 0;
+    let count = 0;
+    for (const wall of this.walls) {
+      if (wall.isPlanned) {
+        continue;
+      }
+      const midpoint = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+      total += distance(midpoint, castle.position);
+      count += 1;
+    }
+    return count > 0 ? total / count : 0;
+  }
+
+  /** How many houses the current wall ring can support. */
+  houseCapacity() {
+    const castle = this.castles[0];
+    if (!castle) {
+      return 0;
+    }
+    const usable = this.settlementRadius() - castle.type.footprint - HOUSES.innerMargin;
+    if (usable <= 0) {
+      return 0;
+    }
+    return Math.min(HOUSES.maxHouses, Math.floor(usable / HOUSES.radialSpacing));
+  }
+
+  /** A point clear of every house and every standing wall, or null if none was found. */
+  pickHouseSite() {
+    const castle = this.castles[0];
+    if (!castle) {
+      return null;
+    }
+    const radius = this.settlementRadius();
+    const inner = castle.type.footprint + HOUSES.innerMargin;
+    if (radius <= inner) {
+      return null;
+    }
+    for (let attempt = 0; attempt < HOUSES.placementAttempts; attempt += 1) {
+      const angle = this.random() * 2 * Math.PI;
+      const reach = inner + this.random() * (radius - inner);
+      const point = {
+        x: castle.position.x + Math.cos(angle) * reach,
+        y: castle.position.y + Math.sin(angle) * reach,
+      };
+      if (this.houseSiteIsClear(point)) {
+        return point;
+      }
+    }
+    return null;
+  }
+
+  houseSiteIsClear(point) {
+    for (const house of this.houses) {
+      if (distance(point, house.position) < HOUSES.radialSpacing * 0.5) {
+        return false;
+      }
+    }
+    for (const wall of this.walls) {
+      if (wall.isPlanned) {
+        continue;
+      }
+      if (pointToLineDistance(point, wall.start, wall.end) < HOUSES.wallClearance) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Add one house if the wall ring has room for it and a clear site turns up. */
+  trySpawnHouse() {
+    if (this.houses.length >= this.houseCapacity()) {
+      return false;
+    }
+    const site = this.pickHouseSite();
+    if (!site) {
+      return false;
+    }
+    this.houses.push(new House(site));
+    return true;
+  }
+
+  /** A raider that reaches a house sets it alight; nothing puts it back out. */
+  resolveHouseContact() {
+    for (const house of this.houses) {
+      if (house.burning) {
+        continue;
+      }
+      for (const raider of this.raiders) {
+        const reach = HOUSES.contactRadius + raider.type.range;
+        if (distanceSquared(house.position, raider.position) < reach * reach) {
+          house.ignite();
+          break;
+        }
+      }
+    }
+  }
+
+  /** Demolish any house standing where a bigger castle now does. */
+  clearHousesUnder(castle) {
+    const remaining = [];
+    let cleared = 0;
+    for (const house of this.houses) {
+      if (distanceToSquare(house.position, castle.position, castle.type.footprint) <= 0) {
+        cleared += 1;
+      } else {
+        remaining.push(house);
+      }
+    }
+    this.houses = remaining;
+    return cleared;
+  }
+
   // --- player actions -----------------------------------------------------
 
   /** Snap to an existing wall end so junctions share a node. */
@@ -691,6 +842,7 @@ export class Game {
     this.tokens -= upgraded.type.cost;
     this.castles[index] = upgraded;
     this.levelUnderCities();
+    this.clearHousesUnder(upgraded);
     const cleared = this.clearWallsUnder(upgraded);
     const razed = cleared > 0
       ? ` ${cleared} wall section${cleared === 1 ? '' : 's'} cleared for it.`

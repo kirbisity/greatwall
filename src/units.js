@@ -276,12 +276,28 @@ const FORMATIONS = {
     places: wedge(4, 1.8 * SCALE, 2.3 * SCALE),
     figure: horseman({ weapon: shaft({ x: at(0.34), y: 0, z: at(0.4) }, at(2.4), at(0.09), 0.05, MATERIALS.shaft) }),
   }),
+  IG_LIGHT: () => ({
+    places: grid(5, 4, at(1.55)),
+    figure: footSoldier({
+      cloth: MATERIALS.imperialTrim,
+      skin: MATERIALS.imperialTrim,
+      weapon: swordArm(MATERIALS.imperialGold),
+    }),
+  }),
   IG0: () => ({
     places: grid(7, 5, at(1.6)),
     figure: footSoldier({
       cloth: MATERIALS.imperialGold,
       skin: MATERIALS.imperialTrim,
       weapon: swordArm(MATERIALS.imperialDeep),
+    }),
+  }),
+  IG_HEAVY: () => ({
+    places: grid(8, 6, at(1.65)),
+    figure: footSoldier({
+      cloth: MATERIALS.imperialDeep,
+      skin: MATERIALS.imperialTrim,
+      weapon: swordArm(MATERIALS.imperialGold),
     }),
   }),
 };
@@ -300,7 +316,14 @@ export function compileUnit(typeId) {
     return null;
   }
   const { places, figure } = build();
-  const jitter = seededRandom(typeId.charCodeAt(2) * 37 + 11);
+  // Sum of the code points, not just one character, so ids that only differ
+  // past the third letter — IG_LIGHT and IG_HEAVY among them — still land on
+  // different seeds.
+  let seed = 11;
+  for (let i = 0; i < typeId.length; i += 1) {
+    seed = seed * 37 + typeId.charCodeAt(i);
+  }
+  const jitter = seededRandom(seed);
   let radius = 0;
 
   const figures = places.map((place) => {

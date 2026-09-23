@@ -39,6 +39,12 @@ export class Hud {
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
     this.music = element('backgroundmusic');
+    this.dispatchMenu = element('dispatchMenu');
+    this.dispatchButtons = [
+      element('dispatchOption0'),
+      element('dispatchOption1'),
+      element('dispatchOption2'),
+    ];
 
     this.soundLevel = INITIAL_SOUND_LEVEL;
     this.shownTokens = null;
@@ -127,6 +133,36 @@ export class Hud {
   closeMessage() {
     clearTimeout(this.toastTimer);
     this.messageModal.style.display = 'none';
+  }
+
+  /**
+   * The tier picker, pinned above the castle. Each button carries its own
+   * click handler and stops the event there, or it would also bubble up to
+   * the map's click listener and dispatch a company to wherever the button
+   * happened to be drawn.
+   */
+  showDispatchMenu(options, screen, onPick) {
+    this.dispatchMenu.style.display = 'flex';
+    this.dispatchMenu.style.left = `${Math.round(screen.x)}px`;
+    this.dispatchMenu.style.top = `${Math.round(screen.y)}px`;
+    this.dispatchButtons.forEach((button, index) => {
+      const option = options[index];
+      if (!option) {
+        button.style.display = 'none';
+        button.onclick = null;
+        return;
+      }
+      button.style.display = 'flex';
+      button.innerText = `${option.name}\n$${option.cost} · ${option.maxHealth}hp`;
+      button.onclick = (event) => {
+        event.stopPropagation();
+        onPick(option.id);
+      };
+    });
+  }
+
+  hideDispatchMenu() {
+    this.dispatchMenu.style.display = 'none';
   }
 
   showGameOver(score, best) {

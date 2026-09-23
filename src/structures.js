@@ -76,31 +76,44 @@ function lighten(material, factor) {
   return material.map((channel) => Math.min(255, channel * factor));
 }
 
+/**
+ * `growRadius` is how far a part sits from the building's own centre, and
+ * `partBase` is the z it stands on. Neither means anything for an ordinary
+ * static building — they exist so a rebuild in progress can grow or shrink
+ * each part in place, anchored on its own footing, in an order that reads as
+ * rising from the centre outward.
+ */
+function tag(faces, part) {
+  const growRadius = Math.hypot(part.x, part.y);
+  const partBase = part.base ?? 0;
+  return faces.map((face) => ({ ...face, growRadius, partBase }));
+}
+
 function compilePart(part) {
   const base = part.base ?? 0;
   const halfWidth = part.width / 2;
   const halfDepth = part.depth / 2;
 
   if (part.type === 'ground') {
-    return [{
+    return tag([{
       points: corners(part.x, part.y, halfWidth, halfDepth, base + GROUND_LIFT),
       material: materialOf(part.material, 'court'),
       ground: true,
-    }];
+    }], part);
   }
 
   if (part.type === 'block') {
-    return boxFaces(part.x, part.y, halfWidth, halfDepth, base, base + part.height,
-      materialOf(part.material, 'rampart'));
+    return tag(boxFaces(part.x, part.y, halfWidth, halfDepth, base, base + part.height,
+      materialOf(part.material, 'rampart')), part);
   }
 
   // A building is a body with a tiered roof resting on it.
   const roof = { ...DEFAULT_ROOF, ...(part.roof ?? {}) };
   const bodyTop = base + part.height;
-  return [
+  return tag([
     ...boxFaces(part.x, part.y, halfWidth, halfDepth, base, bodyTop, materialOf(part.material, 'plaster')),
     ...roofFaces(part.x, part.y, halfWidth, halfDepth, bodyTop, roof, materialOf(roof.material, 'roofTile')),
-  ];
+  ], part);
 }
 
 /**

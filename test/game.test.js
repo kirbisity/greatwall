@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Castle, Raider, Wall } from '../src/entities.js';
-import { FPS, RAIDER_SPAWN_INTERVAL_SECONDS, RAIDER_TYPES, STARTING_TOKENS, WALL } from '../src/config.js';
+import {
+  BREACH,
+  CASTLE_GUARD_TIERS,
+  FPS,
+  GUARD_TYPES,
+  RAIDER_SPAWN_INTERVAL_SECONDS,
+  RAIDER_TYPES,
+  STARTING_TOKENS,
+  WALL,
+} from '../src/config.js';
 
 function fixedRandom(value = 0) {
   return () => value;
@@ -190,4 +199,109 @@ test('the game is lost once the castle health goes negative', () => {
   assert.equal(game.isDefeated, false);
   game.castles[0].health = -1;
   assert.equal(game.isDefeated, true);
+});
+
+// --- the breach: the city burns before the game actually ends -------------
+
+test('game over is held off for BREACH.collapseSeconds after the last castle falls', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.castles[0].health = -1;
+  assert.equal(game.breachComplete, false, 'not yet');
+  stepSeconds(game, BREACH.collapseSeconds - 0.5);
+  assert.equal(game.breachComplete, false, 'still burning');
+  assert.ok(game.breachFraction > 0 && game.breachFraction < 1);
+  stepSeconds(game, 1);
+  assert.equal(game.breachComplete, true, 'burnt out');
+  assert.equal(game.breachFraction, 1);
+});
+
+// --- dispatching the imperial army in tiers --------------------------------
+
+test('a level 1 city can only field its light company', () => {
+  const game = new Game({ random: fixedRandom() });
+  const options = game.dispatchOptions();
+  assert.deepEqual(options.map((option) => option.id), CASTLE_GUARD_TIERS.CC0);
+});
+
+test('each upgrade unlocks the next guard tier without losing the ones below it', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const seenAtEachLevel = [game.dispatchOptions().map((option) => option.id)];
+  game.upgradeCastle(0);
+  seenAtEachLevel.push(game.dispatchOptions().map((option) => option.id));
+  game.upgradeCastle(0);
+  seenAtEachLevel.push(game.dispatchOptions().map((option) => option.id));
+  assert.deepEqual(seenAtEachLevel, [
+    CASTLE_GUARD_TIERS.CC0,
+    CASTLE_GUARD_TIERS.CC1,
+    CASTLE_GUARD_TIERS.CC2,
+  ]);
+});
+
+test('sendGuard charges the tier it was asked for, not a flat rate', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  for (const [typeId, type] of Object.entries(GUARD_TYPES)) {
+    const before = game.tokens;
+    const result = game.sendGuard(typeId, { x: 10, y: 10 });
+    assert.equal(result.sent, true, typeId);
+    assert.equal(before - game.tokens, type.cost, `${typeId} should cost $${type.cost}`);
+    assert.equal(result.guard.typeId, typeId);
+  }
+});
+
+test('sendGuard refuses a company the treasury cannot afford', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 0;
+  const result = game.sendGuard('IG0', { x: 10, y: 10 });
+  assert.equal(result.sent, false);
+  assert.equal(result.status, 'poor');
+  assert.equal(game.guards.length, 0);
+});
+
+// --- upgrading rebuilds gradually, keeping the old stats meanwhile ---------
+
+test('the wall planning phase now takes twice as long as it used to', () => {
+  assert.equal(WALL.planSeconds, 6);
+});
+
+test('a castle mid-rebuild still fights and earns at its old strength', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const before = game.castles[0];
+  const oldMaxHealth = before.type.maxHealth;
+  const oldWealth = before.type.wealth;
+
+  game.upgradeCastle(0);
+  const castle = game.castles[0];
+  assert.equal(castle.typeId, 'CC1', 'the shape changes at once');
+  assert.equal(castle.type.maxHealth, 200, 'the new tier is already set');
+  // But what actually governs play is still the old numbers.
+  assert.equal(castle.effectiveType.maxHealth, oldMaxHealth);
+  assert.equal(castle.healthFraction, castle.health / oldMaxHealth);
+
+  const tokensBeforeIncome = game.tokens;
+  game.collectIncome();
+  assert.equal(game.tokens, tokensBeforeIncome + oldWealth * game.harvestMultiplier,
+    'income is still the old tier\'s, not the new one\'s');
+});
+
+test('advanceRebuild moves through demolish then build, then clears itself', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  game.upgradeCastle(0);
+  const castle = game.castles[0];
+  const demolishSeconds = castle.rebuild.demolishTotal;
+  const buildSeconds = castle.rebuild.buildTotal;
+
+  stepSeconds(game, demolishSeconds - 0.5);
+  assert.ok(castle.rebuild, 'still demolishing');
+  assert.equal(castle.buildProgress, 0, 'nothing rises until the old one is clear');
+
+  stepSeconds(game, 1);
+  assert.ok(castle.buildProgress > 0, 'now rising');
+
+  stepSeconds(game, buildSeconds);
+  assert.equal(castle.rebuild, null, 'construction finished');
+  assert.equal(castle.effectiveType.maxHealth, castle.type.maxHealth, 'now on the new stats');
 });

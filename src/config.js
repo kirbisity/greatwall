@@ -54,7 +54,7 @@ export const WALL = {
   // it is only marked out it is not a wall at all: nothing is blocked by it,
   // nothing routes around it, and it cannot be attacked. That stops a wall
   // being thrown up in the face of a breach.
-  planSeconds: 3,
+  planSeconds: 6,
   // Once building starts it rises to full strength over `buildSeconds`, and
   // can be attacked the whole way up.
   buildSeconds: 10,
@@ -123,9 +123,8 @@ export const MELEE = {
   recoverySeconds: 0.6,
 };
 
-/** How the imperial army behaves once ordered out. */
+/** How the imperial army behaves once ordered out. Cost lives on each tier. */
 export const IMPERIAL = {
-  cost: 450,
   // A company will break off towards any raider inside this range.
   huntRadius: 320,
   // Having won, it looks this far for another fight before going home.
@@ -186,11 +185,29 @@ export const CASTLE_TYPES = {
   },
 };
 
-/** Portraits shown over a company. Any type may override its own. */
+/**
+ * How long an upgrade takes to show up on the ground. The old structure sinks
+ * away over `demolishSeconds`, then the new one rises over `buildSeconds` —
+ * near the centre first, the rim last. Until it has finished rising, the
+ * castle still fights and earns at its old strength: only the shape changes
+ * early, not the substance.
+ */
+export const CASTLE_REBUILD = {
+  demolishSeconds: 2,
+  buildSeconds: 20,
+  // The fraction of the build phase spent waiting before the outermost part
+  // so much as stirs, so the centre is well up before the rim starts.
+  staggerFraction: 0.6,
+};
+
+/** Portraits shown over a company, one tier of one per faction. */
 export const AVATARS = {
-  steppe: 'images/unit_avatar/avatar_mongol_regular.png',
-  steppeElite: 'images/unit_avatar/avatar_mongol_elite.png',
-  imperial: 'images/unit_avatar/avatar_chinese_regular.png',
+  steppeLight: 'images/unit_avatar/avatar_mongol_light.png',
+  steppeRegular: 'images/unit_avatar/avatar_mongol_regular.png',
+  steppeHeavy: 'images/unit_avatar/avatar_mongol_heavy.png',
+  imperialLight: 'images/unit_avatar/avatar_chinese_light.png',
+  imperialRegular: 'images/unit_avatar/avatar_chinese_regular.png',
+  imperialHeavy: 'images/unit_avatar/avatar_chinese_heavy.png',
 };
 
 export const AVATAR = {
@@ -205,33 +222,50 @@ export const AVATAR = {
 export const RAIDER_TYPES = {
   CR0: {
     name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
-    defense: 2, range: 5, lineOfSight: 40, avatar: AVATARS.steppe,
+    defense: 2, range: 5, lineOfSight: 40, avatar: AVATARS.steppeRegular,
   },
   IR0: {
     name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
-    defense: 3, range: 2, lineOfSight: 30, avatar: AVATARS.steppe,
+    defense: 3, range: 2, lineOfSight: 30, avatar: AVATARS.steppeLight,
   },
   IR1: {
     name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
-    defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeElite,
+    defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
     name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 10,
-    defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeElite,
+    defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeHeavy,
   },
 };
 
 export const STARTING_CASTLE_TYPE = 'CC0';
 
-/** The one company the player can field. Slow, but it can take a beating. */
+/**
+ * The imperial army comes in three tiers, unlocked as the city grows — see
+ * `CASTLE_GUARD_TIERS`. Each carries its own cost, so a heavier company is a
+ * heavier purchase.
+ */
 export const GUARD_TYPES = {
+  IG_LIGHT: {
+    name: 'Imperial Light Guard', speed: 13, maxHealth: 26, attack: 5,
+    defense: 3, range: 4, cost: 260, avatar: AVATARS.imperialLight,
+  },
   IG0: {
     name: 'Imperial Guardsman', speed: 11, maxHealth: 46, attack: 7,
-    defense: 4, range: 4, avatar: AVATARS.imperial,
+    defense: 4, range: 4, cost: 450, avatar: AVATARS.imperialRegular,
+  },
+  IG_HEAVY: {
+    name: 'Imperial Heavy Guard', speed: 9, maxHealth: 74, attack: 10,
+    defense: 6, range: 4, cost: 680, avatar: AVATARS.imperialHeavy,
   },
 };
 
-export const GUARD_TYPE = 'IG0';
+/** Which guard tiers a castle can field, unlocked as it grows. */
+export const CASTLE_GUARD_TIERS = {
+  CC0: ['IG_LIGHT'],
+  CC1: ['IG_LIGHT', 'IG0'],
+  CC2: ['IG_LIGHT', 'IG0', 'IG_HEAVY'],
+};
 
 // One row per season; the last row repeats once the seasons run past it.
 export const SEASON_RAIDER_MIX = [
@@ -346,6 +380,25 @@ export const PALETTE = {
   towerEdge: '#5f5748',
   barFill: '#15110c',
   barEdge: '#c9a227',
+};
+
+/**
+ * Smoke and fire on a battered structure. Both scale up as health falls, so a
+ * wall or city reads as more urgently ablaze the closer it is to falling.
+ */
+export const DAMAGE_EFFECTS = {
+  smokeThreshold: 0.6,
+  fireThreshold: 0.3,
+  maxSmokePuffs: 4,
+  maxFirePuffs: 3,
+  puffLifeSeconds: 2.4,
+  smokeRadius: 5,
+  fireRadius: 3,
+};
+
+/** How long the city burns before the game-over screen shows. */
+export const BREACH = {
+  collapseSeconds: 5,
 };
 
 export const WALL_THICKNESS_UNITS = 3;

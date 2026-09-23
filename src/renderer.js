@@ -1,6 +1,8 @@
 import {
   AMBIENT_LIGHT,
   AVATAR,
+  CASTLE_REBUILD,
+  DAMAGE_EFFECTS,
   HEALTH_COLORS,
   PALETTE,
   SEASONS,
@@ -12,6 +14,7 @@ import {
   WALL_HEIGHT_UNITS,
   WALL_THICKNESS_UNITS,
 } from './config.js';
+import { clamp } from './geometry.js';
 import {
   centroid,
   facesCamera,
@@ -91,6 +94,44 @@ function healthColor(fraction) {
 
 function shade(tint, light) {
   return `rgb(${Math.round(tint[0] * light)},${Math.round(tint[1] * light)},${Math.round(tint[2] * light)})`;
+}
+
+/** A stable pseudo-random value in [0, 1) for a given number, no state kept. */
+function hash(seed) {
+  const s = Math.sin(seed * 12.9898) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+const FILL_PATTERN = /rgb\((\d+),(\d+),(\d+)\)/;
+
+/** A pre-shaded fill, darkened towards black — the city burning down. */
+function darkenFill(fill, amount) {
+  if (amount <= 0) {
+    return fill;
+  }
+  const match = fill.match(FILL_PATTERN);
+  if (!match) {
+    return fill;
+  }
+  const scale = 1 - Math.min(1, amount);
+  return `rgb(${Math.round(match[1] * scale)},${Math.round(match[2] * scale)},${Math.round(match[3] * scale)})`;
+}
+
+/**
+ * How grown a part is, given how far through the build phase the whole
+ * structure is (`overall`, 0 to 1) and how far the part sits from the centre
+ * (`radiusFraction`, 0 to 1). A part near the centre finishes early; one on
+ * the rim does not begin until `staggerFraction` of the phase has passed —
+ * which is what makes the building read as rising outward rather than
+ * inflating as one piece.
+ */
+function staggeredGrowth(overall, radiusFraction, staggerFraction) {
+  const start = radiusFraction * staggerFraction;
+  const span = 1 - staggerFraction;
+  if (span <= 0) {
+    return overall >= start ? 1 : 0;
+  }
+  return clamp((overall - start) / span, 0, 1);
 }
 
 /**
@@ -204,12 +245,14 @@ export class Renderer {
     return model;
   }
 
+  /** Faces plus how far the furthest part sits from the centre, for a rebuild. */
   structureFor(typeId) {
     const cached = this.structures.get(typeId);
     if (cached) {
       return cached;
     }
-    const faces = compileStructure(BUILDINGS[typeId]).map((face) => {
+    const definition = BUILDINGS[typeId];
+    const faces = definition ? compileStructure(definition).map((face) => {
       const normal = normalOf(face.points[0], face.points[1], face.points[2]);
       return {
         points: face.points,
@@ -217,10 +260,14 @@ export class Renderer {
         centre: centroid(face.points),
         fill: shade(face.material, lightingFor(normal)),
         ground: face.ground === true,
+        growRadius: face.growRadius ?? 0,
+        partBase: face.partBase ?? 0,
       };
-    });
-    this.structures.set(typeId, faces);
-    return faces;
+    }) : [];
+    const maxGrowRadius = Math.max(1, ...faces.filter((face) => !face.ground).map((face) => face.growRadius));
+    const result = { faces, maxGrowRadius };
+    this.structures.set(typeId, result);
+    return result;
   }
 
   resize(width, height) {
@@ -240,7 +287,10 @@ export class Renderer {
     const view = this.camera.view;
     const items = [];
     const paving = [];
-    this.collectCastles(items, paving, view, game.castles, game.terrain);
+    // Once the last castle falls, the city blackens over BREACH.collapseSeconds
+    // before the game actually ends.
+    const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
+    this.collectCastles(items, paving, view, game.castles, game.terrain, blacken);
     this.collectWalls(items, view, game.walls, game.terrain);
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectRaiders(items, view, game.raiders, game.terrain);
@@ -255,6 +305,7 @@ export class Renderer {
       this.atmosphere.drawClouds(this.overlay);
     }
     this.drawPeggedWalls(view, game);
+    this.drawDamageEffects(view, game);
     if (settings.showRoutes) {
       this.drawRoutes(view, game);
     }
@@ -509,32 +560,64 @@ export class Renderer {
     }
   }
 
-  collectCastles(items, paving, view, castles, terrain) {
+  /** Screen bounding box of a footprint square, for the on-screen cull. */
+  onScreenFor(view, position, reach) {
+    const { x, y } = position;
+    return this.isOnScreen(view, [
+      { x: x - reach, y: y - reach }, { x: x + reach, y: y - reach },
+      { x: x + reach, y: y + reach }, { x: x - reach, y: y + reach },
+    ]);
+  }
+
+  /**
+   * Castles, plus the two states either side of an upgrade: the old
+   * structure sinking into the ground, then the new one rising back out of
+   * it, part by part, centre first. `blacken` mixes every face towards
+   * black, for the city burning down once the game is lost.
+   */
+  collectCastles(items, paving, view, castles, terrain, blacken = 0) {
     for (const castle of castles) {
-      const definition = BUILDINGS[castle.typeId];
-      if (!definition) {
-        continue;
-      }
       const { x, y } = castle.position;
-      const reach = definition.radius;
-      if (!this.isOnScreen(view, [
-        { x: x - reach, y: y - reach }, { x: x + reach, y: y - reach },
-        { x: x + reach, y: y + reach }, { x: x - reach, y: y + reach },
-      ])) {
+      const ground = terrain.heightAt(x, y);
+
+      if (castle.rebuild && castle.rebuild.demolishSeconds > 0) {
+        const definition = BUILDINGS[castle.rebuild.fromTypeId];
+        if (!definition || !this.onScreenFor(view, castle.position, definition.radius)) {
+          continue;
+        }
+        const grow = castle.demolishProgress;
+        for (const face of this.structureFor(castle.rebuild.fromTypeId).faces) {
+          this.collectStructureFace(face.ground ? paving : items, view, face, castle.position, ground, { grow, blacken });
+        }
         continue;
       }
-      const ground = terrain.heightAt(x, y);
-      for (const face of this.structureFor(castle.typeId)) {
-        this.collectStructureFace(face.ground ? paving : items, view, face, castle.position, ground);
+
+      const definition = BUILDINGS[castle.typeId];
+      if (!definition || !this.onScreenFor(view, castle.position, definition.radius)) {
+        continue;
+      }
+      const { faces, maxGrowRadius } = this.structureFor(castle.typeId);
+      const overall = castle.rebuild ? castle.buildProgress : 1;
+      for (const face of faces) {
+        const grow = castle.rebuild && !face.ground
+          ? staggeredGrowth(overall, face.growRadius / maxGrowRadius, CASTLE_REBUILD.staggerFraction)
+          : 1;
+        this.collectStructureFace(face.ground ? paving : items, view, face, castle.position, ground, { grow, blacken });
       }
     }
   }
 
-  collectStructureFace(items, view, face, offset, ground = 0) {
+  collectStructureFace(items, view, face, offset, ground = 0, options = {}) {
+    const { grow = 1, blacken = 0 } = options;
+    // Shrunk toward its own footing rather than the world origin, so a part
+    // reads as rising out of the ground instead of the whole city swelling.
+    const localZ = grow < 1 && !face.ground
+      ? (z) => face.partBase + (z - face.partBase) * grow
+      : (z) => z;
     const centre = {
       x: face.centre.x + offset.x,
       y: face.centre.y + offset.y,
-      z: face.centre.z + ground,
+      z: localZ(face.centre.z) + ground,
     };
     if (!facesCamera(view, face.normal, centre)) {
       return;
@@ -542,14 +625,19 @@ export class Renderer {
     const points = [];
     let depth = 0;
     for (const corner of face.points) {
-      const screen = projectPoint(view, corner.x + offset.x, corner.y + offset.y, corner.z + ground);
+      const screen = projectPoint(view, corner.x + offset.x, corner.y + offset.y, localZ(corner.z) + ground);
       if (!screen) {
         return;
       }
       points.push(screen);
       depth += screen.depth;
     }
-    items.push({ kind: 'face', depth: depth / points.length, points, fill: face.fill });
+    items.push({
+      kind: 'face',
+      depth: depth / points.length,
+      points,
+      fill: blacken > 0 ? darkenFill(face.fill, blacken) : face.fill,
+    });
   }
 
   collectRaiders(items, view, raiders, terrain) {
@@ -726,6 +814,98 @@ export class Renderer {
       }
     }
     context.restore();
+  }
+
+  /**
+   * Smoke, then fire, on any castle or standing wall that is badly battered.
+   * Puffs are placed by a cheap positional hash rather than kept as live
+   * particles, so the cost is a handful of gradient fills only where
+   * something is actually burning, and nothing at all otherwise.
+   */
+  drawDamageEffects(view, game) {
+    const breaching = game.isDefeated;
+    for (const castle of game.castles) {
+      const definition = BUILDINGS[castle.typeId];
+      if (!definition) {
+        continue;
+      }
+      const ground = game.terrain.heightAt(castle.position.x, castle.position.y);
+      const fraction = breaching ? -1 : castle.healthFraction;
+      const seed = castle.position.x * 7.31 + castle.position.y * 13.7;
+      this.drawStructureDamage(view, castle.position, definition.radius, fraction, seed, ground);
+    }
+    for (const wall of game.walls) {
+      if (wall.isPlanned) {
+        continue;
+      }
+      const condition = wallCondition(wall);
+      if (condition >= DAMAGE_EFFECTS.smokeThreshold) {
+        continue;
+      }
+      const mid = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+      const ground = game.terrain.heightAt(mid.x, mid.y);
+      const seed = mid.x * 7.31 + mid.y * 13.7;
+      this.drawStructureDamage(view, mid, Math.max(10, wall.length / 2), condition, seed, ground);
+    }
+  }
+
+  drawStructureDamage(view, centre, spread, healthFraction, seed, ground) {
+    if (healthFraction >= DAMAGE_EFFECTS.smokeThreshold) {
+      return;
+    }
+    const smokeIntensity = clamp(
+      (DAMAGE_EFFECTS.smokeThreshold - healthFraction) / DAMAGE_EFFECTS.smokeThreshold, 0, 1);
+    const smokeCount = Math.ceil(smokeIntensity * DAMAGE_EFFECTS.maxSmokePuffs);
+    for (let i = 0; i < smokeCount; i += 1) {
+      this.drawPuff(view, centre, spread, seed + i * 17.3, ground, 'smoke');
+    }
+    if (healthFraction >= DAMAGE_EFFECTS.fireThreshold) {
+      return;
+    }
+    const fireIntensity = clamp(
+      (DAMAGE_EFFECTS.fireThreshold - healthFraction) / DAMAGE_EFFECTS.fireThreshold, 0, 1);
+    const fireCount = Math.ceil(fireIntensity * DAMAGE_EFFECTS.maxFirePuffs);
+    for (let i = 0; i < fireCount; i += 1) {
+      this.drawPuff(view, centre, spread, seed + 101 + i * 23.9, ground, 'fire');
+    }
+  }
+
+  /** One smoke or fire puff, its position and phase both derived from `seed`. */
+  drawPuff(view, centre, spread, seed, ground, kind) {
+    const rx = (hash(seed) - 0.5) * 2 * spread;
+    const ry = (hash(seed + 1) - 0.5) * 2 * spread;
+    const phase = hash(seed + 2) * DAMAGE_EFFECTS.puffLifeSeconds;
+    const life = DAMAGE_EFFECTS.puffLifeSeconds;
+    const p = ((this.clock + phase) % life) / life;
+
+    const rise = kind === 'smoke' ? p * 10 : Math.sin(p * Math.PI) * 1.2;
+    const worldZ = ground + rise + (kind === 'smoke' ? 2 : 0.5);
+    const screen = projectPoint(view, centre.x + rx, centre.y + ry, worldZ);
+    if (!screen) {
+      return;
+    }
+
+    const baseRadius = kind === 'smoke' ? DAMAGE_EFFECTS.smokeRadius : DAMAGE_EFFECTS.fireRadius;
+    const growth = kind === 'smoke' ? (0.4 + p * 0.9) : (0.6 + Math.sin(p * Math.PI) * 0.5);
+    const pixelRadius = Math.max(1, view.focal / screen.depth * baseRadius * growth);
+    const alpha = kind === 'smoke'
+      ? (1 - p) * 0.5
+      : 0.35 + 0.35 * Math.sin(p * Math.PI * 3 + seed);
+
+    const context = this.overlay;
+    const gradient = context.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, pixelRadius);
+    if (kind === 'smoke') {
+      gradient.addColorStop(0, `rgba(68,66,62,${alpha.toFixed(3)})`);
+      gradient.addColorStop(1, 'rgba(68,66,62,0)');
+    } else {
+      gradient.addColorStop(0, `rgba(255,214,120,${alpha.toFixed(3)})`);
+      gradient.addColorStop(0.5, `rgba(224,102,40,${(alpha * 0.85).toFixed(3)})`);
+      gradient.addColorStop(1, 'rgba(224,102,40,0)');
+    }
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);
+    context.fill();
   }
 
   /** The portrait a company carries, over its head. */

@@ -1,5 +1,5 @@
 import { distance } from './geometry.js';
-import { CASTLE_TYPES, GUARD_TYPES, RAIDER_TYPES, WALL } from './config.js';
+import { CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, RAIDER_TYPES, WALL } from './config.js';
 
 export class Wall {
   /**
@@ -59,7 +59,12 @@ export class Wall {
 }
 
 export class Castle {
-  constructor(typeId, position = { x: 0, y: 0 }) {
+  /**
+   * `options.previousTypeId`/`previousType` start a rebuild: the shape on the
+   * ground changes at once, but combat and income keep running off the old
+   * stats until the new structure has actually finished rising.
+   */
+  constructor(typeId, position = { x: 0, y: 0 }, options = {}) {
     const type = CASTLE_TYPES[typeId];
     if (!type) {
       throw new Error(`Unknown castle type: ${typeId}`);
@@ -67,19 +72,60 @@ export class Castle {
     this.typeId = typeId;
     this.type = type;
     this.position = { ...position };
-    this.health = type.maxHealth;
+    this.health = options.health ?? type.maxHealth;
+    this.rebuild = options.previousTypeId ? {
+      fromTypeId: options.previousTypeId,
+      fromType: options.previousType ?? CASTLE_TYPES[options.previousTypeId],
+      demolishSeconds: CASTLE_REBUILD.demolishSeconds,
+      demolishTotal: CASTLE_REBUILD.demolishSeconds,
+      buildElapsed: 0,
+      buildTotal: CASTLE_REBUILD.buildSeconds,
+    } : null;
+  }
+
+  /** The stats in effect right now: the old tier's, while still under construction. */
+  get effectiveType() {
+    return this.rebuild ? this.rebuild.fromType : this.type;
   }
 
   get healthFraction() {
-    return this.health / this.type.maxHealth;
+    return this.health / this.effectiveType.maxHealth;
   }
 
   takeHit(attackPower) {
-    this.health -= attackPower / this.type.defense;
+    this.health -= attackPower / this.effectiveType.defense;
   }
 
   regenerate(fraction) {
-    this.health = Math.min(this.type.maxHealth, this.health + fraction * this.type.maxHealth);
+    this.health = Math.min(this.effectiveType.maxHealth, this.health + fraction * this.effectiveType.maxHealth);
+  }
+
+  /** 1 while the old structure still stands, falling to 0 as it is cleared away. */
+  get demolishProgress() {
+    return this.rebuild ? this.rebuild.demolishSeconds / this.rebuild.demolishTotal : 0;
+  }
+
+  /** 0 before the new structure has broken ground, 1 once it has fully risen. */
+  get buildProgress() {
+    if (!this.rebuild || this.rebuild.demolishSeconds > 0) {
+      return 0;
+    }
+    return this.rebuild.buildElapsed / this.rebuild.buildTotal;
+  }
+
+  /** Advance the demolish-then-rise sequence, clearing it once complete. */
+  advanceRebuild(seconds) {
+    if (!this.rebuild) {
+      return;
+    }
+    if (this.rebuild.demolishSeconds > 0) {
+      this.rebuild.demolishSeconds = Math.max(0, this.rebuild.demolishSeconds - seconds);
+      return;
+    }
+    this.rebuild.buildElapsed = Math.min(this.rebuild.buildTotal, this.rebuild.buildElapsed + seconds);
+    if (this.rebuild.buildElapsed >= this.rebuild.buildTotal) {
+      this.rebuild = null;
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import { distanceSquared, pointToLineDistance } from './geometry.js';
-import { AVOIDANCE, NAVIGATION, RAIDER_STEERING_RADIANS } from './config.js';
+import { AVOIDANCE, NAVIGATION, RAIDER_STEERING_RADIANS, TURN_EASE } from './config.js';
 import { isBlocked, routeFrom, siegeTarget, wallsNear } from './navigation.js';
 
 const FULL_TURN_RADIANS = 2 * Math.PI;
@@ -20,10 +20,13 @@ function chooseWaypoint(raider, navigation) {
     return castle;
   }
 
-  const route = routeFrom(navigation, raider.position);
-  if (route) {
-    raider.siegeTarget = null;
-    return route.waypoint;
+  const givenUp = raider.stuckSeconds >= AVOIDANCE.patienceSeconds;
+  if (!givenUp) {
+    const route = routeFrom(navigation, raider.position);
+    if (route) {
+      raider.siegeTarget = null;
+      return route.waypoint;
+    }
   }
   if (!raider.besieges) {
     return castle;
@@ -32,6 +35,9 @@ function chooseWaypoint(raider, navigation) {
   // Walled in. Keep hitting the same section so the damage adds up.
   if (!raider.siegeTarget || !navigation.barriers.includes(raider.siegeTarget)) {
     raider.siegeTarget = siegeTarget(navigation, raider.position, castle);
+    // Fresh target, fresh patience: the way may be open once it falls.
+    raider.stuckSeconds = 0;
+    raider.closestApproach = Infinity;
   }
   return raider.siegeTarget ? midpointOf(raider.siegeTarget) : castle;
 }
@@ -63,6 +69,15 @@ function shoveOffWalls(company, waypoint, navigation) {
   if (shiftX === 0 && shiftY === 0) {
     return waypoint;
   }
+  // Hold the push below the pull of the waypoint, so it bends the approach
+  // rather than replacing it and walking the company round in a circle.
+  const reach = Math.hypot(waypoint.x - company.position.x, waypoint.y - company.position.y);
+  const cap = reach * AVOIDANCE.maxShoveFraction;
+  const shove = Math.hypot(shiftX, shiftY);
+  if (shove > cap) {
+    shiftX *= cap / shove;
+    shiftY *= cap / shove;
+  }
   return { x: waypoint.x + shiftX, y: waypoint.y + shiftY };
 }
 
@@ -70,19 +85,22 @@ function turnTowards(raider, waypoint) {
   const desired = Math.atan2(waypoint.y - raider.position.y, waypoint.x - raider.position.x);
   let heading = raider.heading;
 
-  const difference = desired - heading;
-  if (difference <= -Math.PI) {
-    heading -= FULL_TURN_RADIANS;
-  } else if (difference >= Math.PI) {
-    heading += FULL_TURN_RADIANS;
+  // Shortest way round to the wanted heading.
+  let difference = desired - heading;
+  while (difference <= -Math.PI) {
+    difference += FULL_TURN_RADIANS;
+  }
+  while (difference > Math.PI) {
+    difference -= FULL_TURN_RADIANS;
   }
 
-  const deadzone = 4 * RAIDER_STEERING_RADIANS;
-  if (heading < desired - deadzone) {
-    heading = Math.min(desired, heading + RAIDER_STEERING_RADIANS);
-  } else if (heading > desired + deadzone) {
-    heading = Math.max(desired, heading - RAIDER_STEERING_RADIANS);
-  }
+  // Ease into it rather than swinging at a fixed rate, which overshoots and
+  // then has to come back.
+  const turn = Math.max(
+    -RAIDER_STEERING_RADIANS,
+    Math.min(RAIDER_STEERING_RADIANS, difference * TURN_EASE),
+  );
+  heading += turn;
 
   raider.velocity.x = raider.type.speed * Math.cos(heading);
   raider.velocity.y = raider.type.speed * Math.sin(heading);

@@ -45,7 +45,7 @@ its price, less its damage. Castles pay income and regenerate every two seconds,
 be upgraded twice. Seasons turn every 60 seconds: winter multiplies build costs,
 autumn doubles income, and later seasons bring tougher raiders.
 
-Cavalry die against walls. Infantry walk through them.
+Nothing crosses a standing wall: raiders look for a way round and besiege only when there is none.
 
 ## Tests
 

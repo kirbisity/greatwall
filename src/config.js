@@ -62,8 +62,6 @@ export const WALL = {
   maxLength: 200,
   snapRadius: 20,
   reachMargin: 2,
-  // A raider stops steering around a wall once it has been breached this far.
-  intactHealth: 80,
 };
 
 export const RAIDER_STEERING_RADIANS = 0.01;
@@ -102,24 +100,20 @@ export const CASTLE_TYPES = {
 
 export const RAIDER_TYPES = {
   CR0: {
-    name: 'Sabre Cavalry', speed: 18, maxHealth: 10, attack: 5,
+    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
     defense: 2, range: 5, lineOfSight: 40,
-    sprites: ['images/units/saber_cavalry_eastern.png', 'images/units/saber_cavalry_eastern1.png'],
   },
   IR0: {
-    name: 'Light Axe Infantry', speed: 7, maxHealth: 20, attack: 2,
+    name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
     defense: 3, range: 2, lineOfSight: 30,
-    sprites: ['images/units/light_infantry.png', 'images/units/light_infantry1.png'],
   },
   IR1: {
-    name: 'Light Sword Infantry', speed: 7, maxHealth: 20, attack: 3,
+    name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
     defense: 5, range: 2, lineOfSight: 30,
-    sprites: ['images/units/sword_infantry.png', 'images/units/sword_infantry1.png'],
   },
   CR1: {
-    name: 'Spear Cavalry', speed: 20, maxHealth: 10, attack: 10,
+    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 10,
     defense: 2, range: 6, lineOfSight: 50,
-    sprites: ['images/units/spear_cavalry.png', 'images/units/spear_cavalry1.png'],
   },
 };
 
@@ -187,9 +181,6 @@ export const PALETTE = {
   barFill: '#15110c',
   barEdge: '#c9a227',
 };
-
-/** World units per sprite pixel, preserving the scale the flat renderer used. */
-export const SPRITE_UNITS_PER_PIXEL = 0.1;
 
 export const WALL_THICKNESS_UNITS = 3;
 export const WALL_HEIGHT_UNITS = 6;

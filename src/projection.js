@@ -58,7 +58,7 @@ export function groundAt(view, screenX, screenY) {
 
 /**
  * How one world unit of ground maps to pixels at a point, as two screen
- * vectors: east and north. Sprites lie flat by drawing through this.
+ * vectors: east and north. Health bars are sized from this.
  */
 export function groundJacobian(view, x, y) {
   const origin = projectPoint(view, x, y, 0);
@@ -72,27 +72,6 @@ export function groundJacobian(view, x, y) {
     east: { x: (east.x - origin.x) / JACOBIAN_STEP, y: (east.y - origin.y) / JACOBIAN_STEP },
     north: { x: (north.x - origin.x) / JACOBIAN_STEP, y: (north.y - origin.y) / JACOBIAN_STEP },
   };
-}
-
-/**
- * Canvas setTransform arguments that lay a sprite flat on the ground, facing
- * `heading` radians. Sprite pixels are treated as world units with y downward,
- * so the image's top edge points along the heading.
- */
-export function groundTransform(jacobian, heading) {
-  const sin = Math.sin(heading);
-  const cos = Math.cos(heading);
-  // Sprite +x is to the right of the heading, sprite +y is behind it.
-  const right = { east: sin, north: -cos };
-  const down = { east: -cos, north: -sin };
-  return [
-    jacobian.east.x * right.east + jacobian.north.x * right.north,
-    jacobian.east.y * right.east + jacobian.north.y * right.north,
-    jacobian.east.x * down.east + jacobian.north.x * down.north,
-    jacobian.east.y * down.east + jacobian.north.y * down.north,
-    jacobian.origin.x,
-    jacobian.origin.y,
-  ];
 }
 
 export function normalOf(a, b, c) {

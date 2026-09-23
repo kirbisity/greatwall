@@ -2,10 +2,37 @@ import { distance } from './geometry.js';
 import { CASTLE_TYPES, RAIDER_TYPES, WALL } from './config.js';
 
 export class Wall {
-  constructor(start, end) {
+  /**
+   * `built` is how much of the section stands, from a foundation course to a
+   * finished rampart. Health is capped by it, so a wall under construction is
+   * both shorter and weaker, and can be attacked the whole way up.
+   */
+  constructor(start, end, built = 1) {
     this.start = start;
     this.end = end;
     this.length = distance(start, end);
+    this.built = built;
+    this.health = WALL.maxHealth * built;
+  }
+
+  get isComplete() {
+    return this.built >= 1;
+  }
+
+  /** Raise the section, making good any damage taken while it went up. */
+  raise(seconds) {
+    if (this.built >= 1) {
+      return;
+    }
+    // buildSeconds is the time from foundation to finished, not from nothing.
+    const added = seconds * (1 - WALL.initialFraction) / WALL.buildSeconds;
+    this.built = Math.min(1, this.built + added);
+    this.health = Math.min(WALL.maxHealth * this.built, this.health + WALL.maxHealth * added);
+  }
+
+  /** Pay off the remaining construction as well as the damage. */
+  finish() {
+    this.built = 1;
     this.health = WALL.maxHealth;
   }
 
@@ -61,8 +88,11 @@ export class Raider {
     this.destination = { x: 0, y: 0 };
     this.waypoint = { x: 0, y: 0 };
     this.health = type.maxHealth;
-    // Raiders that have turned a full circle give up avoiding and charge.
-    this.turnedRadians = 0;
+    // Navigation state: which section to batter when walled in, and when to
+    // think again rather than re-planning every frame.
+    this.siegeTarget = null;
+    this.planVersion = null;
+    this.replanCountdown = 0;
   }
 
   get isAlive() {

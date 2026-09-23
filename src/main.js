@@ -4,6 +4,10 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { loadSprites } from './sprites.js';
+import { loadSettings, saveSettings, settings } from './settings.js';
+
+// A long stall must not teleport the camera or fast-forward the game.
+const MAX_FRAME_SECONDS = 0.05;
 
 function bind(id, handler) {
   const node = document.getElementById(id);
@@ -14,6 +18,7 @@ function bind(id, handler) {
 
 class App {
   constructor() {
+    loadSettings();
     this.hud = new Hud();
     this.camera = new Camera(window.innerWidth, window.innerHeight);
     this.game = new Game({ onMessage: (text) => this.hud.showMessage(text) });
@@ -30,12 +35,14 @@ class App {
       game: this.game,
       camera: this.camera,
       hud: this.hud,
-      onChange: () => this.draw(),
+      onChange: () => { this.needsDraw = true; },
       onMenu: () => this.openMenu(),
     });
 
     this.running = false;
     this.needsNewGame = true;
+    this.needsDraw = true;
+    this.lastFrameAt = 0;
     this.bestScore = 0;
   }
 
@@ -45,7 +52,11 @@ class App {
     this.bindButtons();
     window.addEventListener('resize', () => this.resize());
     this.hud.setCursor('move');
+    this.hud.setAtmosphereLabel(settings.atmosphere);
+    this.hud.setRoutesLabel(settings.showRoutes);
     this.draw();
+    this.lastFrameAt = performance.now();
+    window.requestAnimationFrame(() => this.frame());
   }
 
   bindButtons() {
@@ -54,6 +65,8 @@ class App {
     bind('settingsBtn', () => this.hud.openSettings());
     bind('settingsBackBtn', () => this.hud.closeSettings());
     bind('soundBtn', () => this.hud.cycleSoundLevel());
+    bind('atmosphereBtn', () => this.toggleAtmosphere());
+    bind('routesBtn', () => this.toggleRoutes());
     bind('bgmusicBtn', () => this.hud.playMusic());
     bind('menuBtn', () => this.openMenu());
     bind('help', () => this.openHelp());
@@ -67,6 +80,21 @@ class App {
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
+  }
+
+  toggleAtmosphere() {
+    settings.atmosphere = !settings.atmosphere;
+    saveSettings();
+    this.hud.setAtmosphereLabel(settings.atmosphere);
+    this.hud.setRoutesLabel(settings.showRoutes);
+    this.draw();
+  }
+
+  toggleRoutes() {
+    settings.showRoutes = !settings.showRoutes;
+    saveSettings();
+    this.hud.setRoutesLabel(settings.showRoutes);
+    this.draw();
   }
 
   resize() {
@@ -108,28 +136,35 @@ class App {
   }
 
   resume() {
-    if (this.running) {
-      return;
-    }
     this.running = true;
-    this.loop();
   }
 
   pause() {
     this.running = false;
   }
 
-  loop() {
-    if (!this.running) {
-      return;
+  /**
+   * One display frame. The camera settles whether or not the simulation is
+   * running, so panning and zooming stay smooth behind a menu, and drawing is
+   * skipped entirely once everything is still.
+   */
+  frame() {
+    const now = performance.now();
+    const elapsed = Math.min((now - this.lastFrameAt) / 1000, MAX_FRAME_SECONDS);
+    this.lastFrameAt = now;
+
+    const cameraMoved = this.camera.update(elapsed);
+    if (this.running) {
+      this.game.step();
     }
-    this.game.step();
-    this.draw();
-    if (this.game.isDefeated) {
+    if (this.running || cameraMoved || this.needsDraw) {
+      this.needsDraw = false;
+      this.draw();
+    }
+    if (this.running && this.game.isDefeated) {
       this.gameOver();
-      return;
     }
-    window.requestAnimationFrame(() => this.loop());
+    window.requestAnimationFrame(() => this.frame());
   }
 
   gameOver() {

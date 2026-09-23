@@ -1,11 +1,8 @@
-import { CASTLE_TYPES, RAIDER_TYPES } from './config.js';
+import { RAIDER_TYPES } from './config.js';
 
-/** Start loading every sprite once; drawing a not-yet-loaded image is a no-op. */
+/** Unit sprites only; castles are generated geometry. Drawing an unloaded image is a no-op. */
 export function loadSprites() {
-  const paths = Object.values(CASTLE_TYPES).map((type) => type.sprite);
-  for (const type of Object.values(RAIDER_TYPES)) {
-    paths.push(...type.sprites);
-  }
+  const paths = Object.values(RAIDER_TYPES).flatMap((type) => type.sprites);
 
   const sprites = new Map();
   for (const path of paths) {

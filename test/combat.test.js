@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Raider, Wall } from '../src/entities.js';
 import { steerRaider } from '../src/pathfinding.js';
+import { buildNavigation } from '../src/navigation.js';
 import { FPS, WALL } from '../src/config.js';
 
 /** Frames a raider spends inside a wall's damage band crossing it head-on. */
@@ -51,38 +52,76 @@ for (const expected of CROSSING_OUTCOMES) {
   });
 }
 
-test('a wall beyond line of sight does not divert a raider yet', () => {
-  const raider = new Raider('CR0', { x: 100, y: 0 });
-  raider.aimAt({ x: 0, y: 0 });
-  const distant = new Wall({ x: 20, y: -30 }, { x: 20, y: 30 });
-  steerRaider(raider, [distant]);
-  assert.deepEqual(raider.waypoint, { x: 0, y: 0 });
+const CITY = { x: 0, y: 0 };
+
+function navigate(raider, walls) {
+  const navigation = buildNavigation(walls, CITY, `${walls.length}`);
+  steerRaider(raider, navigation);
+  return navigation;
+}
+
+function approaching(x = 160, y = 0) {
+  const raider = new Raider('CR0', { x, y });
+  raider.aimAt(CITY);
+  return raider;
+}
+
+test('a raider with a clear path heads straight for the city', () => {
+  const raider = approaching();
+  navigate(raider, []);
+  assert.deepEqual(raider.waypoint, CITY);
+  assert.ok(raider.velocity.x < 0, 'moving towards the city');
 });
 
-test('a raider with a clear path heads straight for its destination', () => {
-  const raider = new Raider('CR0', { x: 100, y: 0 });
-  raider.aimAt({ x: 0, y: 0 });
-  steerRaider(raider, []);
-  assert.deepEqual(raider.waypoint, { x: 0, y: 0 });
-  assert.ok(raider.velocity.x < 0, 'moving towards the origin');
+test('a raider routes to the open end of a wall barring its way', () => {
+  const raider = approaching();
+  // A wall across the approach, open at both ends.
+  const wall = new Wall({ x: 80, y: -60 }, { x: 80, y: 60 });
+  navigate(raider, [wall]);
+  assert.notDeepEqual(raider.waypoint, CITY, 'does not charge the wall');
+  assert.ok(Math.abs(raider.waypoint.y) > 60, 'aims past one of the wall ends');
 });
 
-test('a raider steers off the direct line when a wall comes into sight', () => {
-  const raider = new Raider('CR0', { x: 100, y: 0 });
-  raider.aimAt({ x: 0, y: 0 });
-  const wall = new Wall({ x: 75, y: -30 }, { x: 75, y: 30 });
-  steerRaider(raider, [wall]);
-  assert.notDeepEqual(raider.waypoint, { x: 0, y: 0 });
-  assert.notEqual(raider.velocity.y, 0, 'turned away from the straight line');
+test('a wall that does not bar the way is ignored', () => {
+  const raider = approaching();
+  const aside = new Wall({ x: 80, y: 200 }, { x: 80, y: 320 });
+  navigate(raider, [aside]);
+  assert.deepEqual(raider.waypoint, CITY, 'no detour towards a wall off the route');
 });
 
-test('a raider that has circled a full turn gives up and charges', () => {
-  const raider = new Raider('CR0', { x: 100, y: 0 });
-  raider.aimAt({ x: 0, y: 0 });
-  raider.turnedRadians = 7;
-  const wall = new Wall({ x: 75, y: -30 }, { x: 75, y: 30 });
-  steerRaider(raider, [wall]);
-  assert.deepEqual(raider.waypoint, { x: 0, y: 0 });
+// A lone wall well away from the city must not pull raiders towards it: going
+// via its ends is always longer than going straight, so the graph never picks it.
+test('a standalone wall off to one side attracts nobody', () => {
+  const raider = approaching();
+  const standalone = new Wall({ x: 120, y: -400 }, { x: 240, y: -400 });
+  navigate(raider, [standalone]);
+  assert.deepEqual(raider.waypoint, CITY);
+});
+
+test('a raider walled in picks a section to batter', () => {
+  const raider = approaching();
+  // A closed box round the city leaves no open end to route through.
+  const r = 70;
+  const corners = [{ x: -r, y: -r }, { x: r, y: -r }, { x: r, y: r }, { x: -r, y: r }];
+  const ring = corners.map((corner, index) => new Wall(corner, corners[(index + 1) % 4]));
+  navigate(raider, ring);
+  assert.ok(raider.siegeTarget, 'chose a wall to attack');
+  assert.ok(ring.includes(raider.siegeTarget));
+});
+
+test('a breach in the ring reopens a route and calls off the siege', () => {
+  const raider = approaching();
+  const r = 70;
+  const corners = [{ x: -r, y: -r }, { x: r, y: -r }, { x: r, y: r }, { x: -r, y: r }];
+  const ring = corners.map((corner, index) => new Wall(corner, corners[(index + 1) % 4]));
+  navigate(raider, ring);
+  assert.ok(raider.siegeTarget, 'besieging to begin with');
+
+  // Knock the eastern section below the intact threshold.
+  ring[1].health = WALL.intactHealth;
+  raider.replanCountdown = 0;
+  navigate(raider, ring);
+  assert.equal(raider.siegeTarget, null, 'walks through the breach instead');
 });
 
 test('a breached wall no longer diverts raiders on its own', () => {

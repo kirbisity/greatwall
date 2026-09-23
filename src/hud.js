@@ -35,6 +35,8 @@ export class Hud {
     this.messageModal = element('gameInfo');
     this.messageText = element('infoP');
     this.soundButton = element('soundBtn');
+    this.atmosphereButton = element('atmosphereBtn');
+    this.routesButton = element('routesBtn');
     this.music = element('backgroundmusic');
 
     this.soundLevel = INITIAL_SOUND_LEVEL;
@@ -142,6 +144,14 @@ export class Hud {
     this.music.play().catch((error) => {
       console.warn('Background music blocked until the page is clicked:', error.message);
     });
+  }
+
+  setAtmosphereLabel(enabled) {
+    this.atmosphereButton.innerText = `Atmosphere: ${enabled ? 'On' : 'Off'}`;
+  }
+
+  setRoutesLabel(enabled) {
+    this.routesButton.innerText = `Show Routes: ${enabled ? 'On' : 'Off'}`;
   }
 
   cycleSoundLevel() {

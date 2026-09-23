@@ -1,3 +1,5 @@
+const EPSILON = 1e-9;
+
 export function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -52,24 +54,69 @@ export function isWithinSegmentBand(point, lineStart, lineEnd, range, reach) {
   return cross * cross < range * range * lengthSquared;
 }
 
-export function rotateAround(origin, point, radians) {
-  const radius = distance(origin, point);
-  const angle = Math.atan2(point.y - origin.y, point.x - origin.x) + radians;
-  return {
-    x: origin.x + radius * Math.cos(angle),
-    y: origin.y + radius * Math.sin(angle),
-  };
-}
 
-/** Grow a segment outwards from its midpoint by `factor` (1 leaves it unchanged). */
-export function scaleSegment(start, end, factor) {
-  const half = (factor - 1) / 2;
-  return {
-    start: { x: start.x - (end.x - start.x) * half, y: start.y - (end.y - start.y) * half },
-    end: { x: end.x + (end.x - start.x) * half, y: end.y + (end.y - start.y) * half },
-  };
-}
 
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+/** Nearest point on an axis-aligned square's perimeter, inside or out. */
+export function closestPointOnSquare(point, centre, half) {
+  const minX = centre.x - half;
+  const maxX = centre.x + half;
+  const minY = centre.y - half;
+  const maxY = centre.y + half;
+
+  if (point.x > minX && point.x < maxX && point.y > minY && point.y < maxY) {
+    const gaps = [point.x - minX, maxX - point.x, point.y - minY, maxY - point.y];
+    const nearest = Math.min(...gaps);
+    if (nearest === gaps[0]) {
+      return { x: minX, y: point.y };
+    }
+    if (nearest === gaps[1]) {
+      return { x: maxX, y: point.y };
+    }
+    return { x: point.x, y: nearest === gaps[2] ? minY : maxY };
+  }
+  return { x: clamp(point.x, minX, maxX), y: clamp(point.y, minY, maxY) };
+}
+
+/**
+ * Whether a segment passes through the interior of an axis-aligned square,
+ * by clipping its parameter against each slab. Merely touching the boundary
+ * does not count, so a wall snapped onto a city edge may meet it, while a
+ * diagonal through two opposite corners is correctly caught.
+ */
+export function segmentEntersSquare(start, end, centre, half) {
+  const slabs = [
+    { origin: start.x, delta: end.x - start.x, min: centre.x - half, max: centre.x + half },
+    { origin: start.y, delta: end.y - start.y, min: centre.y - half, max: centre.y + half },
+  ];
+  let enter = 0;
+  let leave = 1;
+
+  for (const slab of slabs) {
+    if (Math.abs(slab.delta) < EPSILON) {
+      // Parallel to this slab: it only ever enters if it starts within it.
+      if (slab.origin <= slab.min || slab.origin >= slab.max) {
+        return false;
+      }
+      continue;
+    }
+    const first = (slab.min - slab.origin) / slab.delta;
+    const second = (slab.max - slab.origin) / slab.delta;
+    enter = Math.max(enter, Math.min(first, second));
+    leave = Math.min(leave, Math.max(first, second));
+    if (enter >= leave) {
+      return false;
+    }
+  }
+  return leave - enter > EPSILON;
+}
+
+/** Distance from a point to an axis-aligned square; zero when inside it. */
+export function distanceToSquare(point, centre, half) {
+  const outsideX = Math.max(0, Math.abs(point.x - centre.x) - half);
+  const outsideY = Math.max(0, Math.abs(point.y - centre.y) - half);
+  return Math.hypot(outsideX, outsideY);
 }

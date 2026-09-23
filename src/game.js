@@ -1,6 +1,14 @@
 import { Castle, Raider, Wall } from './entities.js';
-import { distance, distanceSquared, isWithinSegmentBand } from './geometry.js';
+import {
+  closestPointOnSquare,
+  distance,
+  distanceSquared,
+  distanceToSquare,
+  isWithinSegmentBand,
+  segmentEntersSquare,
+} from './geometry.js';
 import { steerRaider } from './pathfinding.js';
+import { buildNavigation } from './navigation.js';
 import {
   FPS,
   HARVEST_MULTIPLIER,
@@ -47,6 +55,7 @@ export class Game {
   }
 
   restart() {
+    this.navigationCache = null;
     this.walls = [];
     this.castles = [new Castle(STARTING_CASTLE_TYPE)];
     this.raiders = [];
@@ -88,6 +97,9 @@ export class Game {
   step() {
     if (this.advanceClock()) {
       this.onSecondElapsed();
+    }
+    for (const wall of this.walls) {
+      wall.raise(1 / FPS);
     }
     this.moveRaiders();
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
@@ -149,10 +161,29 @@ export class Game {
     this.raiders.push(raider);
   }
 
+  /**
+   * Wall layout drives the route graph, and a breach opens a way through, so
+   * the signature counts both the sections standing and those still intact.
+   */
+  navigation() {
+    let intact = 0;
+    for (const wall of this.walls) {
+      if (wall.isIntact) {
+        intact += 1;
+      }
+    }
+    const version = `${this.walls.length}:${intact}`;
+    if (this.navigationCache?.version !== version) {
+      this.navigationCache = buildNavigation(this.walls, this.castles[0]?.position, version);
+    }
+    return this.navigationCache;
+  }
+
   moveRaiders() {
     const target = this.castles[0];
+    const navigation = this.navigation();
     for (const raider of this.raiders) {
-      steerRaider(raider, this.walls);
+      steerRaider(raider, navigation);
       raider.advance(1 / FPS);
       this.resolveWallContact(raider);
       if (raider.isAlive && target) {
@@ -195,31 +226,97 @@ export class Game {
         return wall.end;
       }
     }
-    return point;
+    return null;
   }
 
-  isInsideCastle(point, hitboxMultiplier) {
-    return this.castles.some((castle) => {
-      const reach = castle.type.hitbox * hitboxMultiplier;
-      return distanceSquared(point, castle.position) < reach * reach;
-    });
-  }
-
-  buildWall(from, to) {
-    if (this.isInsideCastle(to, 1.5)) {
-      return { built: false, reason: 'castle' };
+  /** Snap onto a city's edge so walls meet the settlement flush. */
+  snapToCityBrim(point) {
+    for (const castle of this.castles) {
+      const brim = closestPointOnSquare(point, castle.position, castle.type.footprint);
+      if (distance(brim, point) < WALL.brimSnapRadius) {
+        return brim;
+      }
     }
-    const wall = new Wall(this.snapToWallEnds(from), this.snapToWallEnds(to));
+    return null;
+  }
+
+  /** Wall ends take precedence, so chaining sections still shares nodes. */
+  snapPoint(point) {
+    return this.snapToWallEnds(point) ?? this.snapToCityBrim(point) ?? point;
+  }
+
+  /** A wall already spanning these two ends, in either direction. */
+  findWallBetween(start, end) {
+    const reach = WALL.snapRadius * WALL.snapRadius;
+    return this.walls.find((wall) => (
+      (distanceSquared(wall.start, start) < reach && distanceSquared(wall.end, end) < reach)
+      || (distanceSquared(wall.start, end) < reach && distanceSquared(wall.end, start) < reach)
+    )) ?? null;
+  }
+
+  crossesCity(start, end) {
+    return this.castles.some((castle) => (
+      segmentEntersSquare(start, end, castle.position, castle.type.footprint)
+    ));
+  }
+
+  /** Restore a damaged wall, charging only for the stonework replaced. */
+  repairWall(wall) {
+    const missing = WALL.maxHealth - wall.health;
+    if (missing <= 0) {
+      return { status: 'intact', wall };
+    }
+    const cost = Math.trunc(this.wallCost(wall.length) * missing / WALL.maxHealth);
+    if (this.tokens < cost) {
+      return { status: 'poor' };
+    }
+    this.tokens -= cost;
+    wall.finish();
+    return { status: 'repaired', wall, cost };
+  }
+
+  /**
+   * Lay a section between two points. Redrawing over an existing wall repairs
+   * it rather than stacking a second one, and nothing may cross a city.
+   */
+  buildWall(from, to) {
+    const start = this.snapPoint(from);
+    const end = this.snapPoint(to);
+
+    const existing = this.findWallBetween(start, end);
+    if (existing) {
+      return { ...this.repairWall(existing), start, end };
+    }
+    if (this.crossesCity(start, end)) {
+      return { status: 'blocked', start, end };
+    }
+    const wall = new Wall(start, end, WALL.initialFraction);
     if (wall.length <= 1) {
-      return { built: false, reason: 'tooShort' };
+      return { status: 'short', start, end };
     }
     const cost = this.wallCost(wall.length);
     if (this.tokens < cost) {
-      return { built: false, reason: 'tooPoor' };
+      return { status: 'poor', start, end };
     }
     this.tokens -= cost;
     this.walls.push(wall);
-    return { built: true, wall };
+    return { status: 'built', wall, start, end };
+  }
+
+  /** Demolish anything standing where a structure now does, refunding it. */
+  clearWallsUnder(castle) {
+    const standing = [];
+    let cleared = 0;
+    for (const wall of this.walls) {
+      if (segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
+        this.tokens += wall.refundValue;
+        cleared += 1;
+      } else {
+        standing.push(wall);
+      }
+    }
+    this.walls = standing;
+    return cleared;
   }
 
   removeWallAt(point) {
@@ -246,17 +343,14 @@ export class Game {
   }
 
   upgradeCastleAt(point) {
-    const index = this.castles.findIndex((castle) => this.isNear(point, castle, 3));
+    const index = this.castles.findIndex((castle) => (
+      distanceToSquare(point, castle.position, castle.type.footprint) < WALL.snapRadius
+    ));
     if (index === -1) {
       return false;
     }
     this.upgradeCastle(index);
     return true;
-  }
-
-  isNear(point, castle, hitboxMultiplier) {
-    const reach = castle.type.hitbox * hitboxMultiplier;
-    return distanceSquared(point, castle.position) < reach * reach;
   }
 
   upgradeCastle(index) {
@@ -274,7 +368,11 @@ export class Game {
     }
     this.tokens -= upgraded.type.cost;
     this.castles[index] = upgraded;
-    this.onMessage(`Upgraded to ${upgraded.type.name}`);
+    const cleared = this.clearWallsUnder(upgraded);
+    const razed = cleared > 0
+      ? ` ${cleared} wall section${cleared === 1 ? '' : 's'} cleared for it.`
+      : '';
+    this.onMessage(`Upgraded to ${upgraded.type.name}.${razed}`);
     return true;
   }
 }

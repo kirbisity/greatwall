@@ -17,6 +17,10 @@ import {
   normalOf,
   projectPoint,
 } from './projection.js';
+import { Atmosphere } from './atmosphere.js';
+import { settings } from './settings.js';
+import { BUILDINGS } from './buildings/index.js';
+import { compileStructure } from './structures.js';
 
 const NORTH = Math.PI / 2;
 const SPRITE_FRAME_LENGTH = 10;
@@ -27,9 +31,15 @@ const CULL_MARGIN = 80;
 const MIN_FLANK_PIXELS = 2.5;
 // Towers this small on screen are indistinguishable from the wall they sit on.
 const MIN_TOWER_PIXELS = 1.5;
+// A wrecked section still stands this much of its raised height.
+const DAMAGE_SLUMP = 0.55;
 
 const CASTLE_BAR = { minWidth: 44, maxWidth: 120, height: 7, gap: 7 };
 const RAIDER_BAR = { minWidth: 14, maxWidth: 44, height: 4, gap: 4 };
+
+const ROUTE_OPEN = '#7fd4ff';
+const ROUTE_SHUT = '#8a8a8a';
+const ROUTE_SIEGE = '#ff8a5c';
 
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
@@ -48,10 +58,18 @@ function shade(tint, light) {
   return `rgb(${Math.round(tint[0] * light)},${Math.round(tint[1] * light)},${Math.round(tint[2] * light)})`;
 }
 
+/**
+ * How battered a section is, judged against how much of it stands rather than
+ * against a finished wall. A section still going up is sound, not ruined.
+ */
+function wallCondition(wall) {
+  const raised = WALL.maxHealth * Math.max(wall.built, 0.01);
+  return Math.max(0, Math.min(1, wall.health / raised));
+}
+
 /** Damaged masonry darkens towards scorched red. */
-function wallTint(wall) {
-  const health = Math.max(0, wall.health) / WALL.maxHealth;
-  return STONE.map((channel, index) => channel * health + RUINED[index] * (1 - health));
+function wallTint(condition) {
+  return STONE.map((channel, index) => channel * condition + RUINED[index] * (1 - condition));
 }
 
 /**
@@ -103,6 +121,28 @@ export class Renderer {
     this.camera = camera;
     this.sprites = sprites;
     this.paintedSeason = null;
+    this.atmosphere = new Atmosphere(camera);
+    // Building geometry never changes, so each type is compiled and shaded once.
+    this.structures = new Map();
+  }
+
+  structureFor(typeId) {
+    const cached = this.structures.get(typeId);
+    if (cached) {
+      return cached;
+    }
+    const faces = compileStructure(BUILDINGS[typeId]).map((face) => {
+      const normal = normalOf(face.points[0], face.points[1], face.points[2]);
+      return {
+        points: face.points,
+        normal,
+        centre: centroid(face.points),
+        fill: shade(face.material, lightingFor(normal)),
+        ground: face.ground === true,
+      };
+    });
+    this.structures.set(typeId, faces);
+    return faces;
   }
 
   resize(width, height) {
@@ -121,13 +161,23 @@ export class Renderer {
 
     const view = this.camera.view;
     const items = [];
+    const paving = [];
+    this.collectCastles(items, paving, view, game.castles);
     this.collectWalls(items, view, game.walls);
     this.collectTowers(items, view, game.walls);
-    this.collectCastles(items, view, game.castles);
     this.collectRaiders(items, view, game.raiders, game.frame);
     items.sort((a, b) => b.depth - a.depth);
+    this.paint(paving);
     this.paint(items);
 
+    // Haze and cloud sit above the world but below the readouts.
+    if (settings.atmosphere) {
+      this.atmosphere.drawFog(this.overlay, game.season);
+      this.atmosphere.drawClouds(this.overlay);
+    }
+    if (settings.showRoutes) {
+      this.drawRoutes(view, game);
+    }
     this.drawBars(view, game);
   }
 
@@ -215,7 +265,9 @@ export class Renderer {
   collectWalls(items, view, walls) {
     const halfWidth = WALL_THICKNESS_UNITS / 2;
     for (const wall of walls) {
-      const height = WALL_HEIGHT_UNITS * Math.max(0.35, wall.health / WALL.maxHealth);
+      // Height is how much has been raised; damage slumps what is standing.
+      const condition = wallCondition(wall);
+      const height = WALL_HEIGHT_UNITS * wall.built * (DAMAGE_SLUMP + (1 - DAMAGE_SLUMP) * condition);
       if (!this.isOnScreen(view, [
         wall.start, wall.end,
         { x: wall.start.x, y: wall.start.y, z: height },
@@ -225,7 +277,7 @@ export class Renderer {
       }
       const quads = wallPrism(wall.start, wall.end, halfWidth, height);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
-      this.collectPrism(items, view, flat ? [quads[0]] : quads, wallTint(wall));
+      this.collectPrism(items, view, flat ? [quads[0]] : quads, wallTint(condition));
     }
   }
 
@@ -266,13 +318,46 @@ export class Renderer {
     return jacobian;
   }
 
-  collectCastles(items, view, castles) {
+  collectCastles(items, paving, view, castles) {
     for (const castle of castles) {
-      const image = this.sprites.get(castle.type.sprite);
-      if (image && image.width) {
-        this.collectSprite(items, view, image, castle.position, NORTH);
+      const definition = BUILDINGS[castle.typeId];
+      if (!definition) {
+        continue;
+      }
+      const { x, y } = castle.position;
+      const reach = definition.radius;
+      if (!this.isOnScreen(view, [
+        { x: x - reach, y: y - reach }, { x: x + reach, y: y - reach },
+        { x: x + reach, y: y + reach }, { x: x - reach, y: y + reach },
+      ])) {
+        continue;
+      }
+      for (const face of this.structureFor(castle.typeId)) {
+        this.collectStructureFace(face.ground ? paving : items, view, face, castle.position);
       }
     }
+  }
+
+  collectStructureFace(items, view, face, offset) {
+    const centre = {
+      x: face.centre.x + offset.x,
+      y: face.centre.y + offset.y,
+      z: face.centre.z,
+    };
+    if (!facesCamera(view, face.normal, centre)) {
+      return;
+    }
+    const points = [];
+    let depth = 0;
+    for (const corner of face.points) {
+      const screen = projectPoint(view, corner.x + offset.x, corner.y + offset.y, corner.z);
+      if (!screen) {
+        return;
+      }
+      points.push(screen);
+      depth += screen.depth;
+    }
+    items.push({ kind: 'face', depth: depth / points.length, points, fill: face.fill });
   }
 
   collectRaiders(items, view, raiders, frame) {
@@ -307,10 +392,52 @@ export class Renderer {
 
   // --- screen-space overlays ----------------------------------------------
 
+  /** Debug view: the gateways raiders navigate by, and the waypoint each holds. */
+  drawRoutes(view, game) {
+    const context = this.overlay;
+    const navigation = game.navigation();
+    context.save();
+    context.font = '11px monospace';
+
+    for (const [index, gateway] of navigation.gateways.entries()) {
+      const screen = projectPoint(view, gateway.x, gateway.y, 0);
+      if (!screen) {
+        continue;
+      }
+      const reachable = Number.isFinite(navigation.distances[index]);
+      context.fillStyle = reachable ? ROUTE_OPEN : ROUTE_SHUT;
+      context.beginPath();
+      context.arc(screen.x, screen.y, 5, 0, 2 * Math.PI);
+      context.fill();
+      context.fillText(
+        reachable ? String(Math.round(navigation.distances[index])) : 'x',
+        screen.x + 8,
+        screen.y - 6,
+      );
+    }
+
+    context.lineWidth = 1;
+    for (const raider of game.raiders) {
+      const from = projectPoint(view, raider.position.x, raider.position.y, 0);
+      const to = projectPoint(view, raider.waypoint.x, raider.waypoint.y, 0);
+      if (!from || !to) {
+        continue;
+      }
+      context.strokeStyle = raider.siegeTarget ? ROUTE_SIEGE : ROUTE_OPEN;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+    }
+    context.restore();
+  }
+
   drawBars(view, game) {
     for (const castle of game.castles) {
-      const image = this.sprites.get(castle.type.sprite);
-      this.drawBarOver(view, castle.position, image, CASTLE_BAR, castle.healthFraction);
+      const definition = BUILDINGS[castle.typeId];
+      if (definition) {
+        this.drawCastleBar(view, castle, definition);
+      }
     }
     for (const raider of game.raiders) {
       const fraction = raider.health / raider.type.maxHealth;
@@ -320,6 +447,19 @@ export class Renderer {
       const image = this.sprites.get(raider.type.sprites[0]);
       this.drawBarOver(view, raider.position, image, RAIDER_BAR, fraction);
     }
+  }
+
+  /** Above the building's far edge, widening with the compound itself. */
+  drawCastleBar(view, castle, definition) {
+    const anchor = projectPoint(view, castle.position.x, castle.position.y + definition.radius, 0);
+    const jacobian = this.camera.jacobianAt(castle.position);
+    if (!anchor || !jacobian) {
+      return;
+    }
+    const footprint = Math.hypot(jacobian.east.x, jacobian.east.y) * definition.radius * 2;
+    const width = Math.min(Math.max(footprint * 0.4, CASTLE_BAR.minWidth), CASTLE_BAR.maxWidth);
+    this.drawBar(anchor.x, anchor.y - CASTLE_BAR.height - CASTLE_BAR.gap, width, CASTLE_BAR.height,
+      castle.healthFraction);
   }
 
   /** Rest the bar above the sprite's far edge, measured in world units. */

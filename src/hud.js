@@ -26,6 +26,8 @@ function element(id) {
 export class Hud {
   constructor() {
     this.tokenLabel = element('token0');
+    this.incomeLabel = element('income0');
+    this.incomeFormula = element('incomeFormula0');
     this.timeLabel = element('time0');
     this.seasonLabel = element('season0');
     this.menu = element('myNav');
@@ -48,6 +50,8 @@ export class Hud {
 
     this.soundLevel = INITIAL_SOUND_LEVEL;
     this.shownTokens = null;
+    this.shownIncome = null;
+    this.shownIncomeFormula = null;
     this.shownSeconds = null;
     this.shownSeason = null;
     this.toastTimer = null;
@@ -76,6 +80,17 @@ export class Hud {
     if (tokens !== this.shownTokens) {
       this.shownTokens = tokens;
       this.tokenLabel.innerText = `$${tokens}`;
+    }
+    const breakdown = game.incomeBreakdown;
+    const income = Math.trunc(breakdown.total * game.harvestMultiplier);
+    if (income !== this.shownIncome) {
+      this.shownIncome = income;
+      this.incomeLabel.innerText = `$${income}`;
+    }
+    const formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`;
+    if (formula !== this.shownIncomeFormula) {
+      this.shownIncomeFormula = formula;
+      this.incomeFormula.innerText = formula;
     }
     if (game.seconds !== this.shownSeconds) {
       this.shownSeconds = game.seconds;

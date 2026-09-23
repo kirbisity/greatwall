@@ -93,6 +93,14 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .readout-season .readout-value { color: var(--parchment); font-size: 19px; }
 
+/* The breakdown behind the income figure: small enough to stay out of the way. */
+.readout-formula {
+	font-family: var(--body);
+	font-size: 10px;
+	color: var(--parchment-dim);
+	font-variant-numeric: tabular-nums;
+}
+
 .viewTools { display: flex; gap: 8px; margin-left: auto; }
 
 .iconButton {
@@ -410,6 +418,8 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 	.readouts { gap: 14px; }
 	.readout { min-width: 64px; }
 	.readout-value { font-size: 17px; }
+	/* The formula is the least essential line at this width; the total stands on its own. */
+	.readout-formula { display: none; }
 	.toolButton { width: 60px; }
 	.modal-content { padding: 26px 24px; }
 }

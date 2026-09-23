@@ -401,6 +401,37 @@ export const BREACH = {
   collapseSeconds: 5,
 };
 
+/**
+ * Houses fill in behind the walls on their own, between the castle and the
+ * ring the walls describe — the bigger that ring, the more of them fit.
+ * They add to income but add nothing to defence: a raider that reaches one
+ * burns it down in a moment.
+ */
+export const HOUSES = {
+  // Capacity is read off how far out the walls sit (the average distance
+  // from the castle to each standing wall's midpoint), one house per this
+  // many units past the castle's own footprint, up to maxHouses.
+  radialSpacing: 14,
+  maxHouses: 24,
+  // Kept clear of the castle itself and of any wall, so a house never
+  // crowds either.
+  innerMargin: 10,
+  wallClearance: 10,
+  placementAttempts: 8,
+
+  spawnIntervalSeconds: 3,
+  riseSeconds: 5,
+  // Coin per house, added to the base city income each payout.
+  income: 5,
+
+  // How close a raider must come to set one alight, and how long it burns
+  // before it is gone for good.
+  contactRadius: 10,
+  burnSeconds: 1,
+
+  footprint: { width: 3.6, depth: 3.2, height: 2.6, roofHeight: 2, overhang: 0.6 },
+};
+
 export const WALL_THICKNESS_UNITS = 3;
 export const WALL_HEIGHT_UNITS = 6;
 export const TOWER_RADIUS_UNITS = 2.6;

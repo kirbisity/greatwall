@@ -4,6 +4,7 @@ import {
   CASTLE_REBUILD,
   DAMAGE_EFFECTS,
   HEALTH_COLORS,
+  HOUSES,
   PALETTE,
   SEASONS,
   SUN,
@@ -55,6 +56,22 @@ const DAMAGE_SLUMP = 0.55;
 
 const CASTLE_BAR = { minWidth: 44, maxWidth: 120, height: 7, gap: 7 };
 const RAIDER_BAR = { minWidth: 14, maxWidth: 44, height: 4, gap: 4 };
+
+/**
+ * One tiny building, run through the same compiler as a castle. A single
+ * untiered roof keeps it to about a dozen faces, cheap enough for two dozen
+ * of them to sit in the scene at once.
+ */
+const HOUSE_DEFINITION = {
+  name: 'House',
+  radius: Math.max(HOUSES.footprint.width, HOUSES.footprint.depth) / 2 + HOUSES.footprint.overhang,
+  parts: [{
+    type: 'building', x: 0, y: 0,
+    width: HOUSES.footprint.width, depth: HOUSES.footprint.depth, height: HOUSES.footprint.height,
+    material: 'plaster',
+    roof: { height: HOUSES.footprint.roofHeight, overhang: HOUSES.footprint.overhang, tiers: 1, material: 'roofTile' },
+  }],
+};
 
 const ROUTE_OPEN = '#7fd4ff';
 const ROUTE_SHUT = '#8a8a8a';
@@ -270,6 +287,24 @@ export class Renderer {
     return result;
   }
 
+  /** The one house shape, compiled and shaded once and shared by every house. */
+  get houseModel() {
+    if (!this._houseModel) {
+      this._houseModel = compileStructure(HOUSE_DEFINITION).map((face) => {
+        const normal = normalOf(face.points[0], face.points[1], face.points[2]);
+        return {
+          points: face.points,
+          normal,
+          centre: centroid(face.points),
+          fill: shade(face.material, lightingFor(normal)),
+          ground: face.ground === true,
+          partBase: face.partBase ?? 0,
+        };
+      });
+    }
+    return this._houseModel;
+  }
+
   resize(width, height) {
     for (const canvas of this.canvases) {
       canvas.width = width;
@@ -293,6 +328,7 @@ export class Renderer {
     this.collectCastles(items, paving, view, game.castles, game.terrain, blacken);
     this.collectWalls(items, view, game.walls, game.terrain);
     this.collectTowers(items, view, game.walls, game.terrain);
+    this.collectHouses(items, view, game.houses, game.terrain);
     this.collectRaiders(items, view, game.raiders, game.terrain);
     this.collectRaiders(items, view, game.guards, game.terrain);
     items.sort((a, b) => b.depth - a.depth);
@@ -306,6 +342,7 @@ export class Renderer {
     }
     this.drawPeggedWalls(view, game);
     this.drawDamageEffects(view, game);
+    this.drawBurningHouses(view, game);
     if (settings.showRoutes) {
       this.drawRoutes(view, game);
     }
@@ -557,6 +594,23 @@ export class Renderer {
         terrain.heightAt(node.x, node.y));
       const flat = this.flankPixels(view, node, TOWER_HEIGHT_UNITS) < MIN_FLANK_PIXELS;
       this.collectPrism(items, view, flat ? [quads[0]] : quads, TOWER);
+    }
+  }
+
+  /**
+   * Houses behind the walls. A burning one is skipped here entirely — it is
+   * drawn instead as a burst of fire in drawBurningHouses, on the overlay.
+   */
+  collectHouses(items, view, houses, terrain) {
+    const faces = this.houseModel;
+    for (const house of houses) {
+      if (house.burning || !this.onScreenFor(view, house.position, HOUSE_DEFINITION.radius)) {
+        continue;
+      }
+      const ground = terrain.heightAt(house.position.x, house.position.y);
+      for (const face of faces) {
+        this.collectStructureFace(items, view, face, house.position, ground, { grow: house.growth });
+      }
     }
   }
 
@@ -902,6 +956,41 @@ export class Renderer {
       gradient.addColorStop(0.5, `rgba(224,102,40,${(alpha * 0.85).toFixed(3)})`);
       gradient.addColorStop(1, 'rgba(224,102,40,0)');
     }
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);
+    context.fill();
+  }
+
+  /**
+   * A house does not smoulder like a battered wall — it catches all at once
+   * and is gone within HOUSES.burnSeconds, so this is one bright, shrinking
+   * burst timed to that window rather than the looping ambient puffs above.
+   */
+  drawBurningHouses(view, game) {
+    for (const house of game.houses) {
+      if (!house.burning) {
+        continue;
+      }
+      const ground = game.terrain.heightAt(house.position.x, house.position.y);
+      const progress = clamp(house.burnElapsed / HOUSES.burnSeconds, 0, 1);
+      this.drawHouseFire(view, house.position, ground, progress);
+    }
+  }
+
+  drawHouseFire(view, position, ground, progress) {
+    const screen = projectPoint(view, position.x, position.y, ground + 1 + progress * 1.4);
+    if (!screen) {
+      return;
+    }
+    const fade = 1 - progress;
+    const worldRadius = 2.2 + progress * 2.2;
+    const pixelRadius = Math.max(1, view.focal / screen.depth * worldRadius);
+    const context = this.overlay;
+    const gradient = context.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, pixelRadius);
+    gradient.addColorStop(0, `rgba(255,224,140,${(0.9 * fade).toFixed(3)})`);
+    gradient.addColorStop(0.5, `rgba(224,102,40,${(0.75 * fade).toFixed(3)})`);
+    gradient.addColorStop(1, 'rgba(224,102,40,0)');
     context.fillStyle = gradient;
     context.beginPath();
     context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);

@@ -35,6 +35,7 @@ export class Hud {
     this.menu = element('myNav');
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
+    this.levelList = element('levelList');
     this.settings = element('settingMenu');
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
@@ -124,6 +125,31 @@ export class Hud {
 
   closeMenu() {
     this.menu.style.height = '0%';
+  }
+
+  /**
+   * The level picker in the main menu, built from the level configs rather
+   * than the markup, so adding a level stays a matter of levels.js alone.
+   */
+  showLevels(levels, chosen, onPick) {
+    if (!this.levelList) {
+      return;
+    }
+    this.levelList.replaceChildren();
+    levels.forEach((level, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = index === chosen ? 'levelItem is-chosen' : 'levelItem';
+      const name = document.createElement('span');
+      name.className = 'levelName';
+      name.innerText = `${index + 1}. ${level.name}`;
+      const blurb = document.createElement('span');
+      blurb.className = 'levelBlurb';
+      blurb.innerText = level.blurb;
+      button.append(name, blurb);
+      button.addEventListener('click', () => onPick(index));
+      this.levelList.append(button);
+    });
   }
 
   openSettings() {

@@ -423,8 +423,10 @@ export class Renderer {
       width / 2, height / 2, Math.min(width, height) * 0.1,
       width / 2, height / 2, Math.max(width, height) * 0.8,
     );
-    wash.addColorStop(0, TERRAIN.grassColor);
-    wash.addColorStop(1, TERRAIN.rockColor);
+    // The backdrop takes the level's own palette, so a desert does not sit
+    // on a green wash where the mesh has not reached.
+    wash.addColorStop(0, game.terrain.land.grassColor);
+    wash.addColorStop(1, game.terrain.land.rockColor);
     this.ground.fillStyle = wash;
     this.ground.fillRect(0, 0, width, height);
 
@@ -500,6 +502,7 @@ export class Renderer {
     ys.push(ys[ys.length - 1] + cell);
 
     const down = ys.length;
+    const relief = terrain.land.slopeRelief;
     const mesh = this.meshBuffers(xs.length * down);
     const { heights, screenX, screenY, usable } = mesh;
     for (let i = 0; i < xs.length; i += 1) {
@@ -545,8 +548,8 @@ export class Renderer {
         const a = heights[corner];
         const slopeX = (heights[right] - a) / cell;
         const slopeY = (heights[corner + 1] - a) / cell;
-        const normalX = -slopeX * TERRAIN.slopeRelief;
-        const normalY = -slopeY * TERRAIN.slopeRelief;
+        const normalX = -slopeX * relief;
+        const normalY = -slopeY * relief;
         const length = Math.hypot(normalX, normalY, 1);
         const light = lightingForVector(normalX / length, normalY / length, 1 / length);
         terrain.groundTintAt(xs[i], ys[j], tint, gold);

@@ -13,6 +13,7 @@ import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
 import { lockEngagements, resolveMelee } from './melee.js';
 import { Terrain } from './terrain.js';
+import { LEVELS } from './levels.js';
 import {
   AVOIDANCE,
   BREACH,
@@ -59,12 +60,26 @@ function spawnOffset(random) {
 
 /** Headless game state and rules. Knows nothing about canvases or the DOM. */
 export class Game {
-  constructor({ onMessage = () => {}, random = Math.random, seed = 1 } = {}) {
+  constructor({ onMessage = () => {}, random = Math.random, seed = 1, level = LEVELS[0] } = {}) {
     this.onMessage = onMessage;
     this.random = random;
-    this.terrain = new Terrain(seed);
+    // The level says only what is different about it -- its landscape, where
+    // raiders ride in from, what water lies across the map. Everything else
+    // is the same game (see levels.js).
+    this.seed = seed;
     this.wallHintShown = false;
     this.upgradeHintShown = false;
+    this.loadLevel(level);
+  }
+
+  /**
+   * Swap to another level and begin it. The landscape is built fresh, since
+   * a level's ground is fixed for its whole run, but the Game itself carries
+   * on -- input and the renderer hold onto this object.
+   */
+  loadLevel(level) {
+    this.level = level;
+    this.terrain = new Terrain(this.seed, level.land, level.river);
     this.restart();
   }
 
@@ -285,6 +300,30 @@ export class Game {
     }
   }
 
+  /**
+   * Where the next raider rides in from.
+   *
+   * A level with a `spawnArc` musters them along one stretch of horizon --
+   * a bearing inside the arc, at a distance in the usual band. Without one
+   * they come from anywhere, by the same offset-per-axis the game has always
+   * used, so a level that asks for nothing is spawned exactly as before.
+   */
+  spawnPoint(centre) {
+    const arc = this.level.spawnArc;
+    if (!arc) {
+      return {
+        x: Math.trunc(centre.x + spawnOffset(this.random)),
+        y: Math.trunc(centre.y + spawnOffset(this.random)),
+      };
+    }
+    const bearing = (arc.centre + (this.random() - 0.5) * arc.spread) * Math.PI / 180;
+    const reach = SPAWN_MIN_DISTANCE + this.random() * (SPAWN_MAX_DISTANCE - SPAWN_MIN_DISTANCE);
+    return {
+      x: Math.trunc(centre.x + Math.cos(bearing) * reach),
+      y: Math.trunc(centre.y + Math.sin(bearing) * reach),
+    };
+  }
+
   spawnRaider() {
     const target = this.castles[0];
     if (!target) {
@@ -292,10 +331,8 @@ export class Game {
     }
     const mix = SEASON_RAIDER_MIX[Math.min(this.season, SEASON_RAIDER_MIX.length - 1)];
     const typeId = mix[Math.floor(this.random() * mix.length)];
-    const raider = new Raider(typeId, {
-      x: Math.trunc(target.position.x + spawnOffset(this.random)),
-      y: Math.trunc(target.position.y + spawnOffset(this.random)),
-    });
+    const from = this.spawnPoint(target.position);
+    const raider = new Raider(typeId, from);
     raider.aimAt(target.position);
     this.raiders.push(raider);
   }
@@ -321,7 +358,12 @@ export class Game {
         this.walls.filter((wall) => !wall.isPlanned),
         castle,
         version,
-        castle ? this.terrain.mountainsWithin(castle.x - reach, castle.y - reach, castle.x + reach, castle.y + reach) : [],
+        castle ? [
+          ...this.terrain.mountainsWithin(castle.x - reach, castle.y - reach, castle.x + reach, castle.y + reach),
+          // Water is one more thing to route around, so it rides in the
+          // same list the peaks do.
+          ...this.terrain.riverCirclesWithin(castle.x - reach, castle.x + reach),
+        ] : [],
       );
     }
     return this.navigationCache;

@@ -3,6 +3,7 @@ import { Game } from './game.js';
 import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
+import { LEVELS } from './levels.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 
 // A long stall must not teleport the camera or fast-forward the game.
@@ -39,6 +40,7 @@ class App {
     });
 
     this.running = false;
+    this.chosenLevel = 0;
     this.needsNewGame = true;
     this.needsDraw = true;
     this.lastFrameAt = 0;
@@ -53,6 +55,7 @@ class App {
     this.hud.setCursor('move');
     this.hud.setAtmosphereLabel(settings.atmosphere);
     this.hud.setRoutesLabel(settings.showRoutes);
+    this.showLevels();
     this.draw();
     this.lastFrameAt = performance.now();
     window.requestAnimationFrame(() => this.frame());
@@ -88,6 +91,15 @@ class App {
       // picker it just opened has had a chance to be used.
       event.stopPropagation();
       this.input.selectTool('attack');
+    });
+  }
+
+  /** Picking a level starts it: there is nothing to unlock, so nothing to wait for. */
+  showLevels() {
+    this.hud.showLevels(LEVELS, this.chosenLevel, (index) => {
+      this.chosenLevel = index;
+      this.showLevels();
+      this.restart();
     });
   }
 
@@ -138,7 +150,7 @@ class App {
   }
 
   newGame() {
-    this.game.restart();
+    this.game.loadLevel(LEVELS[this.chosenLevel]);
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
     this.draw();

@@ -295,6 +295,31 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .menuItem-primary { color: var(--bronze); border-color: var(--bronze-deep); }
 
+/* --- level picker ------------------------------------------------------ */
+
+.levelList { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 26px; }
+
+.levelItem {
+	width: 300px;
+	padding: 9px 14px;
+	text-align: left;
+	background: none;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	opacity: .55;
+}
+
+.levelItem:hover { opacity: .85; }
+
+.levelItem.is-chosen { opacity: 1; border-color: var(--bronze-deep); }
+
+.levelName { display: block; font-size: 14px; letter-spacing: .09em; text-transform: uppercase; }
+
+.levelBlurb { display: block; margin-top: 3px; font-size: 12px; line-height: 1.6; opacity: .75; }
+
 /* --- modals ------------------------------------------------------------ */
 
 .modal {

@@ -32,7 +32,11 @@ function stubElement(id) {
   return {
     id,
     style: {},
+    className: '',
     classList: { toggle: () => {} },
+    children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    replaceChildren() { this.children = []; },
     innerText: '',
     loop: false,
     volume: 0,
@@ -63,6 +67,7 @@ function installDom() {
       return elements.get(id);
     },
     addEventListener: (type, handler) => documentListeners.set(type, handler),
+    createElement: (tag) => stubElement(tag),
   };
   globalThis.window = {
     innerWidth: 1280,

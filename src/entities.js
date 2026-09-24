@@ -16,10 +16,19 @@ export class Wall {
     // Pegged out but not yet begun. Until this runs down the section is not a
     // wall: it blocks nothing, diverts nothing, and cannot be attacked.
     this.planSeconds = planSeconds;
+    // >0 while a paid repair is working its way back up. The wall stays
+    // exactly what it was standing there the whole time — repair only
+    // affects how fast health climbs, never built, isPlanned or collision.
+    this.repairSeconds = 0;
+    this.repairMissing = 0;
   }
 
   get isPlanned() {
     return this.planSeconds > 0;
+  }
+
+  get isRepairing() {
+    return this.repairSeconds > 0;
   }
 
   get isComplete() {
@@ -32,6 +41,15 @@ export class Wall {
       this.planSeconds = Math.max(0, this.planSeconds - seconds);
       return;
     }
+    if (this.repairSeconds > 0) {
+      // A steady climb back to full over WALL.repairSeconds, not tied to
+      // how much was missing at any given instant — so the same order
+      // always takes the same time, whether it caught the wall at 90% or 10%.
+      const rate = this.repairMissing / WALL.repairSeconds;
+      this.health = Math.min(WALL.maxHealth, this.health + rate * seconds);
+      this.repairSeconds = Math.max(0, this.repairSeconds - seconds);
+      return;
+    }
     if (this.built >= 1) {
       return;
     }
@@ -41,11 +59,23 @@ export class Wall {
     this.health = Math.min(WALL.maxHealth * this.built, this.health + WALL.maxHealth * added);
   }
 
-  /** Pay off the remaining construction as well as the damage. */
+  /** Pay off the remaining construction as well as the damage, right away. */
   finish() {
     this.planSeconds = 0;
+    this.repairSeconds = 0;
     this.built = 1;
     this.health = WALL.maxHealth;
+  }
+
+  /**
+   * Start a paid repair. The masonry is whole again at once — built jumps
+   * to 1 if a section still mid-construction is what got redrawn over — but
+   * its condition, and the tint that reads off it, only heals gradually.
+   */
+  beginRepair() {
+    this.built = 1;
+    this.repairMissing = WALL.maxHealth - this.health;
+    this.repairSeconds = WALL.repairSeconds;
   }
 
   /** Half the build price, scaled by how much of the wall is left standing. */

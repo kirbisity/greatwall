@@ -87,7 +87,8 @@ export class Hud {
       this.shownIncome = income;
       this.incomeLabel.innerText = `$${income}`;
     }
-    const formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`;
+    const formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`
+      + ` - ${breakdown.upkeepPerWall}×${breakdown.wallCount}`;
     if (formula !== this.shownIncomeFormula) {
       this.shownIncomeFormula = formula;
       this.incomeFormula.innerText = formula;

@@ -11,7 +11,7 @@ const CURSORS = {
 };
 
 // Outcomes that leave a usable end to keep drawing from.
-const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact', 'planning']);
+const CHAIN_CONTINUES = new Set(['built', 'repairing', 'intact', 'planning']);
 
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
@@ -187,6 +187,13 @@ export class Input {
     if (result.status === 'blocked') {
       this.chainPoint = null;
       this.hud.showMessage('Walls cannot cross the city');
+      return;
+    }
+    if (result.status === 'crowded') {
+      // A junction already at its limit — no message, just let go of the
+      // tool the way it would if the player had simply let up on it.
+      this.chainPoint = null;
+      this.resetTool();
       return;
     }
     if (result.status === 'poor') {

@@ -230,7 +230,19 @@ export class Game {
     const houseCount = this.houses.length;
     const housePerHouse = HOUSES.income;
     const houseIncome = houseCount * housePerHouse;
-    return { cityIncome, houseCount, housePerHouse, houseIncome, total: cityIncome + houseIncome };
+    let wallCount = 0;
+    for (const wall of this.walls) {
+      if (!wall.isPlanned) {
+        wallCount += 1;
+      }
+    }
+    const upkeepPerWall = WALL.upkeepPerSection;
+    const wallUpkeep = wallCount * upkeepPerWall;
+    return {
+      cityIncome, houseCount, housePerHouse, houseIncome,
+      wallCount, upkeepPerWall, wallUpkeep,
+      total: cityIncome + houseIncome - wallUpkeep,
+    };
   }
 
   collectIncome() {
@@ -614,7 +626,7 @@ export class Game {
 
   houseSiteIsClear(point) {
     for (const house of this.houses) {
-      if (distance(point, house.position) < HOUSES.radialSpacing * 0.5) {
+      if (distance(point, house.position) < HOUSES.minSpacing) {
         return false;
       }
     }
@@ -699,6 +711,24 @@ export class Game {
     return null;
   }
 
+  /**
+   * How many sections already meet at a shared node. Only wall-end snaps
+   * share a point object at all — a city-brim snap is a fresh point every
+   * time, so the city itself is never subject to this cap.
+   */
+  nodeDegree(point) {
+    let degree = 0;
+    for (const wall of this.walls) {
+      if (wall.start === point) {
+        degree += 1;
+      }
+      if (wall.end === point) {
+        degree += 1;
+      }
+    }
+    return degree;
+  }
+
   /** Wall ends take precedence, so chaining sections still shares nodes. */
   snapPoint(point) {
     return this.snapToWallEnds(point) ?? this.snapToCityBrim(point) ?? point;
@@ -720,12 +750,22 @@ export class Game {
   }
 
   /** Restore a damaged wall, charging only for the stonework replaced. */
+  /**
+   * Pay for a repair, but the wall does not snap back — the order goes in
+   * and health climbs over WALL.repairSeconds while a tool icon marks the
+   * work in progress. See Wall#beginRepair.
+   */
   repairWall(wall) {
     // A section still pegged out has nothing to repair, and letting a redraw
-    // finish it would be a way to buy back the three seconds it is meant to
-    // cost. The masons have to mark it out first.
+    // finish it would be a way to buy back the plan delay. The masons have
+    // to mark it out first.
     if (wall.isPlanned) {
       return { status: 'planning', wall };
+    }
+    // Already under repair: nothing new to charge for, but a chained drag
+    // should still carry on from here rather than stopping short.
+    if (wall.isRepairing) {
+      return { status: 'repairing', wall };
     }
     const missing = WALL.maxHealth - wall.health;
     if (missing <= 0) {
@@ -736,8 +776,8 @@ export class Game {
       return { status: 'poor' };
     }
     this.tokens -= cost;
-    wall.finish();
-    return { status: 'repaired', wall, cost };
+    wall.beginRepair();
+    return { status: 'repairing', wall, cost };
   }
 
   /**
@@ -754,6 +794,11 @@ export class Game {
     }
     if (this.crossesCity(start, end)) {
       return { status: 'blocked', start, end };
+    }
+    // A junction already at its limit takes no more sections. Quietly —
+    // this is a layout rule, not something to interrupt the player over.
+    if (this.nodeDegree(start) >= WALL.maxEdgesPerNode || this.nodeDegree(end) >= WALL.maxEdgesPerNode) {
+      return { status: 'crowded', start, end };
     }
     const wall = new Wall(start, end, WALL.initialFraction, WALL.planSeconds);
     if (wall.length <= 1) {

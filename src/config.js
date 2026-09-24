@@ -59,6 +59,11 @@ export const WALL = {
   // can be attacked the whole way up.
   buildSeconds: 10,
   initialFraction: 0.2,
+  // Redrawing over a section pays to bring it back, but not at once: it
+  // heals over this many seconds instead, the same way it went up in the
+  // first place, and the tool icon that marks the work stays over it
+  // meanwhile. See Wall#beginRepair.
+  repairSeconds: 10,
   // How close a wall end must come to a city edge before it snaps onto it.
   brimSnapRadius: 26,
   attack: 1,
@@ -68,6 +73,12 @@ export const WALL = {
   maxLength: 200,
   snapRadius: 20,
   reachMargin: 2,
+  // Coin per standing section, charged with the rest of the income each
+  // payout — a wall is upkeep, not just a one-off purchase.
+  upkeepPerSection: 1,
+  // A junction may not gather more than this many sections. Past it, a
+  // build attempt is simply refused — see Game#buildWall.
+  maxEdgesPerNode: 3,
 };
 
 /* ==========================================================================
@@ -217,6 +228,18 @@ export const AVATAR = {
   maxWidth: 64,
   // Clear of the health bar beneath it.
   gap: 5,
+};
+
+/** The banner flown over a city, planted above the tallest roof. */
+export const FLAG = {
+  sprite: 'images/flags/flag_song.png',
+  // Planted this far above the ground per world unit of the castle's own
+  // footprint radius — a rough stand-in for how tall its central hall is,
+  // without needing the roof height off every building definition.
+  heightPerFootprint: 0.7,
+  width: 20,
+  minWidth: 12,
+  maxWidth: 34,
 };
 
 export const RAIDER_TYPES = {
@@ -417,6 +440,10 @@ export const HOUSES = {
   // crowds either.
   innerMargin: 8,
   wallClearance: 10,
+  // How close two houses may sit centre to centre. Kept separate from
+  // radialSpacing — that governs capacity, this just keeps the (now
+  // bigger) models from overlapping each other.
+  minSpacing: 10,
   // Denser packing means a random point is more often too close to an
   // existing house, so it gets more tries to find a clear one.
   placementAttempts: 16,
@@ -431,7 +458,7 @@ export const HOUSES = {
   contactRadius: 10,
   burnSeconds: 3,
 
-  footprint: { width: 3.6, depth: 3.2, height: 2.6, roofHeight: 2, overhang: 0.6 },
+  footprint: { width: 5.2, depth: 4.6, height: 3.4, roofHeight: 2.6, overhang: 0.85 },
 };
 
 export const WALL_THICKNESS_UNITS = 3;

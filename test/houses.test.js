@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Castle, House, Raider } from '../src/entities.js';
-import { CASTLE_TYPES, FPS, HOUSES } from '../src/config.js';
+import { CASTLE_TYPES, FPS, HOUSES, WALL } from '../src/config.js';
 
 function fixedRandom(value = 0.5) {
   return () => value;
@@ -129,6 +129,20 @@ test('incomeBreakdown is city_income * num_city + house_income * num_houses', ()
   assert.equal(breakdown.houseCount, 5);
   assert.equal(breakdown.housePerHouse, HOUSES.income);
   assert.equal(breakdown.total, CASTLE_TYPES.CC0.wealth + 5 * HOUSES.income);
+});
+
+test('standing walls carry upkeep, subtracted from the total', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall.finish();
+  game.buildWall({ x: 300, y: 0 }, { x: 400, y: 0 }).wall.finish();
+  // A pegged section is not a wall yet, so it costs nothing to keep.
+  game.buildWall({ x: 500, y: 0 }, { x: 600, y: 0 });
+
+  const breakdown = game.incomeBreakdown;
+  assert.equal(breakdown.wallCount, 2, 'the pegged section does not count');
+  assert.equal(breakdown.upkeepPerWall, WALL.upkeepPerSection);
+  assert.equal(breakdown.total, CASTLE_TYPES.CC0.wealth - 2 * WALL.upkeepPerSection);
 });
 
 test('collectIncome pays out the full breakdown, houses included', () => {

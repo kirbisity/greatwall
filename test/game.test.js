@@ -153,6 +153,30 @@ test('wall ends snap onto a nearby node so junctions share a point', () => {
   assert.equal(game.walls[0].end, game.walls[1].start, 'shared node reference');
 });
 
+test('a junction takes no more than WALL.maxEdgesPerNode sections', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const node = { x: 300, y: 0 };
+  // Three spokes into the same point, each from a different direction so
+  // none of them snap to one another instead.
+  for (let i = 0; i < WALL.maxEdgesPerNode; i += 1) {
+    const angle = (i / WALL.maxEdgesPerNode) * 2 * Math.PI;
+    const far = { x: node.x + 150 * Math.cos(angle), y: node.y + 150 * Math.sin(angle) };
+    assert.equal(game.buildWall(far, node).status, 'built', `spoke ${i}`);
+  }
+  assert.equal(game.nodeDegree(game.walls[0].end), WALL.maxEdgesPerNode);
+
+  // A fourth is refused outright, quietly -- no wall, no message, no charge.
+  const before = game.tokens;
+  const wallsBefore = game.walls.length;
+  const angle = WALL.maxEdgesPerNode / (WALL.maxEdgesPerNode + 1) * 2 * Math.PI;
+  const far = { x: node.x + 150 * Math.cos(angle), y: node.y + 150 * Math.sin(angle) };
+  const result = game.buildWall(far, node);
+  assert.equal(result.status, 'crowded');
+  assert.equal(game.walls.length, wallsBefore, 'no fourth section');
+  assert.equal(game.tokens, before, 'nothing charged');
+});
+
 test('undo returns the last wall and its refund', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 1000;

@@ -3,6 +3,7 @@ import {
   AVATAR,
   CASTLE_REBUILD,
   DAMAGE_EFFECTS,
+  FLAG,
   HEALTH_COLORS,
   HOUSES,
   PALETTE,
@@ -345,8 +346,10 @@ export class Renderer {
       this.atmosphere.drawClouds(this.overlay);
     }
     this.drawPeggedWalls(view, game);
+    this.drawRepairingWalls(view, game);
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
+    this.drawCityFlags(view, game);
     if (settings.showRoutes) {
       this.drawRoutes(view, game);
     }
@@ -875,6 +878,35 @@ export class Renderer {
   }
 
   /**
+   * A section paid to repair, health climbing back over WALL.repairSeconds —
+   * already standing, so just the pulsing tool over it, hovering above the
+   * top of the wall rather than the dashed line a pegged section gets.
+   */
+  drawRepairingWalls(view, game) {
+    const tool = this.imageFor(PLAN_TOOL);
+    if (!tool) {
+      return;
+    }
+    const context = this.overlay;
+    const pulse = 0.55 + 0.45 * Math.sin(this.clock * 4);
+    const size = PLAN_TOOL_SIZE;
+    for (const wall of game.walls) {
+      if (!wall.isRepairing) {
+        continue;
+      }
+      const midpoint = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+      const ground = game.terrain.heightAt(midpoint.x, midpoint.y);
+      const anchor = projectPoint(view, midpoint.x, midpoint.y, ground + WALL_HEIGHT_UNITS + 1.5);
+      if (!anchor) {
+        continue;
+      }
+      context.globalAlpha = pulse;
+      context.drawImage(tool, anchor.x - size / 2, anchor.y - size, size, size);
+      context.globalAlpha = 1;
+    }
+  }
+
+  /**
    * Smoke, then fire, on any castle or standing wall that is badly battered.
    * Puffs are placed by a cheap positional hash rather than kept as live
    * particles, so the cost is a handful of gradient fills only where
@@ -1039,6 +1071,30 @@ export class Renderer {
       context.beginPath();
       context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);
       context.fill();
+    }
+  }
+
+  /** One banner over each castle, planted above roughly where its hall stands tallest. */
+  drawCityFlags(view, game) {
+    const image = this.imageFor(FLAG.sprite);
+    if (!image) {
+      return;
+    }
+    for (const castle of game.castles) {
+      const definition = BUILDINGS[castle.typeId];
+      if (!definition) {
+        continue;
+      }
+      const ground = game.terrain.heightAt(castle.position.x, castle.position.y);
+      const staffHeight = definition.radius * FLAG.heightPerFootprint;
+      const anchor = projectPoint(view, castle.position.x, castle.position.y, ground + staffHeight);
+      if (!anchor) {
+        continue;
+      }
+      const scale = this.camera.view.focal / this.camera.distance;
+      const width = Math.min(FLAG.maxWidth, Math.max(FLAG.minWidth, FLAG.width * scale / 2));
+      const height = width * image.naturalHeight / image.naturalWidth;
+      this.overlay.drawImage(image, anchor.x, anchor.y - height, width, height);
     }
   }
 

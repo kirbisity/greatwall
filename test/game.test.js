@@ -64,6 +64,29 @@ test('the season turns at 59 seconds even though spawning is on its own cadence'
   assert.equal(game.season, 1);
 });
 
+test('seasonPhase climbs smoothly, with no jump where the season itself turns', () => {
+  const game = new Game({ random: fixedRandom() });
+  assert.equal(game.seasonPhase, 0);
+  stepSeconds(game, 30);
+  assert.ok(Math.abs(game.seasonPhase - 0.5) < 1e-9, `expected ~0.5, got ${game.seasonPhase}`);
+
+  // this.season turns a second early relative to this.seconds completing a
+  // season (see onSecondElapsed), which is exactly the gap seasonPhase is
+  // built to paper over: it should keep climbing steadily through that
+  // second rather than jumping to match this.season's own step.
+  stepSeconds(game, 28);
+  const before = game.seasonPhase;
+  assert.equal(game.season, 0, 'still autumn one second before the turn');
+  stepSeconds(game, 1);
+  assert.equal(game.season, 1, 'winter now, by this.season');
+  const after = game.seasonPhase;
+  assert.ok(after - before < 0.05, `expected a single second's step, got ${before} -> ${after}`);
+  assert.ok(Math.abs(game.seasonPhase - 59 / 60) < 1e-9, `expected ~0.983, got ${game.seasonPhase}`);
+
+  stepSeconds(game, 1);
+  assert.ok(Math.abs(game.seasonPhase - 1) < 1e-9, `expected exactly 1 a full season in, got ${game.seasonPhase}`);
+});
+
 test('winter multiplies build cost and autumn multiplies income', () => {
   const game = new Game({ random: fixedRandom() });
   assert.equal(game.harvestMultiplier, 2);

@@ -40,9 +40,9 @@ function spread() {
   };
 }
 
-test('one cloud per layer count, across every layer', () => {
+test('one cloud per layer count, across every layer, plus its winter standbys', () => {
   const atmosphere = new Atmosphere(camera(), { random: spread() });
-  const expected = CLOUD_LAYERS.reduce((total, layer) => total + layer.count, 0);
+  const expected = CLOUD_LAYERS.reduce((total, layer) => total + layer.count + (layer.winterExtra ?? 0), 0);
   assert.equal(atmosphere.clouds.length, expected);
   for (const layer of CLOUD_LAYERS.keys()) {
     assert.ok(atmosphere.clouds.some((cloud) => cloud.layer === layer), `layer ${layer} unused`);
@@ -68,29 +68,81 @@ test('fog is one gradient fill whose haze thickens with distance', () => {
   assert.ok(alphaAt(0) > alphaAt(FOG.samples), 'top of screen is hazier than the bottom');
   for (const stop of context.calls.stops) {
     const alpha = Number(stop.color.match(/([\d.]+)\)$/)[1]);
-    assert.ok(alpha >= 0 && alpha <= FOG.maxAlpha + 1e-9, `alpha ${alpha} out of range`);
+    assert.ok(alpha >= 0 && alpha <= FOG.maxOpacity + 1e-9, `alpha ${alpha} out of range`);
   }
 });
 
-test('fog takes its colour from the season', () => {
+test('fog takes its colour from the season, exactly at each one\'s midpoint', () => {
   const atmosphere = new Atmosphere(camera(), { random: spread() });
   for (const [index, season] of SEASONS.entries()) {
     const context = fakeContext();
-    atmosphere.drawFog(context, index);
+    atmosphere.drawFog(context, index + 0.5);
     assert.ok(context.calls.stops.every((stop) => stop.color.includes(season.haze)),
       `season ${season.name} should tint with ${season.haze}`);
   }
 });
 
-function captureClouds(atmosphere) {
+test('fog blends smoothly across a season turning, not in a hard cut', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const colourAt = (phase) => {
+    const context = fakeContext();
+    atmosphere.drawFog(context, phase);
+    return context.calls.stops[0].color.match(/rgba\(([\d, ]+),/)[1].split(',').map(Number);
+  };
+  // Either side of a season turn (phase 1 = the Autumn/Winter boundary), the
+  // haze should be close to the boundary colour, not jump between the two
+  // seasons' own midpoint colours.
+  const justBefore = colourAt(0.999);
+  const atTheTurn = colourAt(1);
+  const justAfter = colourAt(1.001);
+  const jump = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+  assert.ok(jump(justBefore, atTheTurn) < 2, 'a season turning should not visibly jump the haze');
+  assert.ok(jump(atTheTurn, justAfter) < 2, 'a season turning should not visibly jump the haze');
+});
+
+test('fog thickens as the camera climbs', () => {
+  const low = camera();
+  low.distance = CAMERA.minDistance;
+  low.targetDistance = low.distance;
+  low.elevation = CAMERA.minElevation;
+  low.targetElevation = low.elevation;
+  low.refreshView();
+
+  const high = camera();
+  high.distance = CAMERA.maxDistance;
+  high.targetDistance = high.distance;
+  high.elevation = CAMERA.maxElevation;
+  high.targetElevation = high.elevation;
+  high.refreshView();
+
+  const alphaAtTop = (view) => {
+    const atmosphere = new Atmosphere(view, { random: spread() });
+    const context = fakeContext();
+    atmosphere.drawFog(context, 0);
+    return Number(context.calls.stops[0].color.match(/([\d.]+)\)$/)[1]);
+  };
+  assert.ok(alphaAtTop(high) > alphaAtTop(low), 'a higher camera should read hazier at the same screen row');
+});
+
+function captureClouds(atmosphere, seasonPhase = 0) {
   const drawn = [];
   const context = {
     globalAlpha: 1,
     drawImage: (image, x, y, w, h) => drawn.push({ x, y, w, h, alpha: context.globalAlpha }),
   };
-  atmosphere.drawClouds(context);
+  atmosphere.drawClouds(context, seasonPhase);
   return { drawn, context };
 }
+
+test('winter stands more clouds up, gained gradually rather than all at once', () => {
+  const WINTER = 1;
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const summerCount = captureClouds(atmosphere, 3.5).drawn.length;
+  const approachingWinter = captureClouds(atmosphere, WINTER - 0.2).drawn.length;
+  const deepWinter = captureClouds(atmosphere, WINTER + 0.5).drawn.length;
+  assert.ok(approachingWinter > summerCount, 'more clouds should already be gathering ahead of winter');
+  assert.ok(deepWinter > approachingWinter, 'winter itself should have even more than the approach to it');
+});
 
 test('clouds are drawn and alpha is restored afterwards', () => {
   const atmosphere = new Atmosphere(camera(), { random: spread() });

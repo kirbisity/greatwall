@@ -412,11 +412,16 @@ export const TERRAIN = {
   mottleStrength: 0.18,
 };
 
+// Each season's own haze colour, how much it thickens the fog (1 is the
+// baseline in FOG.maxAlpha) and how much it swells the cloud deck (1 is the
+// year-round count in CLOUD_LAYERS). Atmosphere.seasonBlend holds these
+// exactly at a season's midpoint and blends across the turn on either side,
+// so nothing here is ever a hard cut in play.
 export const SEASONS = [
-  { name: 'Autumn', haze: '198, 176, 138' },
-  { name: 'Winter', haze: '198, 202, 206' },
-  { name: 'Spring', haze: '178, 190, 154' },
-  { name: 'Summer', haze: '206, 194, 142' },
+  { name: 'Autumn', haze: '214, 194, 146', hazeDensity: 1, cloudBoost: 1 },
+  { name: 'Winter', haze: '236, 239, 241', hazeDensity: 1.8, cloudBoost: 1.9 },
+  { name: 'Spring', haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1 },
+  { name: 'Summer', haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1 },
 ];
 
 /**
@@ -427,7 +432,13 @@ export const FOG = {
   samples: 6,
   startDistance: 260,
   falloff: 0.00085,
-  maxAlpha: 0.5,
+  maxAlpha: 0.58,
+  // Extra density per world unit of camera height, so a higher, farther-back
+  // view reads as more atmosphere between the eye and the ground.
+  altitudeFactor: 0.003,
+  // However dense the haze and altitude multiply out to, the ground never
+  // vanishes completely beneath it.
+  maxOpacity: 0.92,
 };
 
 /**
@@ -438,10 +449,14 @@ export const FOG = {
  */
 // Altitudes and the field below are sized against the camera's own reach
 // (see CAMERA.maxDistance), so the sky keeps working if that reach changes.
+// `winterExtra` clouds stand by beyond a layer's regular `count`, revealing
+// themselves one at a time as SEASONS' cloudBoost climbs towards winter (see
+// Atmosphere's constructor and placeClouds) -- a fuller sky in the cold
+// months, gained gradually rather than switched on at the solstice.
 export const CLOUD_LAYERS = [
-  { altitude: 26, worldSize: 85, opacity: 0.10, drift: 3.5, count: 12 },
-  { altitude: 45, worldSize: 125, opacity: 0.13, drift: 5.5, count: 9 },
-  { altitude: 71, worldSize: 185, opacity: 0.16, drift: 8.5, count: 7 },
+  { altitude: 26, worldSize: 85, opacity: 0.10, drift: 3.5, count: 12, winterExtra: 5 },
+  { altitude: 45, worldSize: 125, opacity: 0.13, drift: 5.5, count: 9, winterExtra: 4 },
+  { altitude: 71, worldSize: 185, opacity: 0.16, drift: 8.5, count: 7, winterExtra: 3 },
 ];
 
 /**

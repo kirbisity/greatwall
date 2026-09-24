@@ -143,6 +143,22 @@ export class Game {
     return this.season % SEASONS_PER_YEAR === AUTUMN ? HARVEST_MULTIPLIER : 1;
   }
 
+  /**
+   * Continuous position in the year: what the sky blends by, so a season
+   * turning is never a hard cut -- see Atmosphere's seasonBlend.
+   *
+   * Deliberately not `this.season` plus a fraction: advanceSeason fires a
+   * second before `this.seconds` actually completes a season (see
+   * onSecondElapsed), so that sum would jump by a whole season for the one
+   * second in between. Dividing the clock directly stays perfectly
+   * continuous instead, at the cost of reading fractionally behind
+   * `this.season` for that same one second -- invisible in the sky, unlike
+   * a jump would be.
+   */
+  get seasonPhase() {
+    return this.seconds / SEASON_LENGTH_SECONDS;
+  }
+
   wallCost(length) {
     return Math.trunc(length * WALL.costPerUnit * this.buildMultiplier);
   }

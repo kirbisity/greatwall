@@ -14,6 +14,33 @@ function wrap(value, span) {
   return ((value % span) + span) % span;
 }
 
+const MAX_CLOUD_BOOST = Math.max(...SEASONS.map((season) => season.cloudBoost));
+
+/**
+ * The year's atmosphere at a given moment, blended rather than switched.
+ *
+ * `seasonPhase` is the season index plus how far through it the game is (0
+ * at the start of autumn, 1.5 at the middle of winter, and so on). Each
+ * season's own haze, density and cloud cover hold exactly at its midpoint
+ * and blend linearly to the next season's across the boundary between them,
+ * so nothing about the sky changes on the tick a season turns.
+ */
+function seasonBlend(seasonPhase) {
+  const count = SEASONS.length;
+  const raw = seasonPhase - 0.5;
+  const base = Math.floor(raw);
+  const t = raw - base;
+  const from = SEASONS[((base % count) + count) % count];
+  const to = SEASONS[(((base + 1) % count) + count) % count];
+  const fromHaze = from.haze.split(',').map(Number);
+  const toHaze = to.haze.split(',').map(Number);
+  return {
+    haze: fromHaze.map((channel, i) => Math.round(channel + (toHaze[i] - channel) * t)).join(', '),
+    hazeDensity: from.hazeDensity + (to.hazeDensity - from.hazeDensity) * t,
+    cloudBoost: from.cloudBoost + (to.cloudBoost - from.cloudBoost) * t,
+  };
+}
+
 /**
  * Distance haze and drifting cloud decks.
  *
@@ -32,15 +59,25 @@ export class Atmosphere {
     this.startedAt = now();
     this.sprite = new Image();
     this.sprite.src = CLOUD_SPRITE;
-    this.clouds = CLOUD_LAYERS.flatMap((layer, index) => (
-      Array.from({ length: layer.count }, () => ({
-        layer: index,
-        x: random(),
-        y: random(),
-        scale: 0.7 + random() * 0.6,
-        fade: 0.75 + random() * 0.5,
-      }))
-    ));
+    const makeCloud = (layer) => ({
+      layer,
+      x: random(),
+      y: random(),
+      scale: 0.7 + random() * 0.6,
+      fade: 0.75 + random() * 0.5,
+    });
+    this.clouds = CLOUD_LAYERS.flatMap((layer, index) => {
+      const core = Array.from({ length: layer.count }, () => makeCloud(index));
+      // A deck's own count is what shows the rest of the year; a handful
+      // more stand ready and reveal themselves one at a time as cloudBoost
+      // rises towards winter, each at its own point in that climb, so the
+      // sky gains clouds gradually rather than all at once.
+      const extra = Array.from({ length: layer.winterExtra ?? 0 }, (_, i) => ({
+        ...makeCloud(index),
+        revealsAt: 1 + (MAX_CLOUD_BOOST - 1) * ((i + 1) / (layer.winterExtra + 1)),
+      }));
+      return [...core, ...extra];
+    });
   }
 
   /** Seconds of sky time elapsed. */
@@ -63,16 +100,24 @@ export class Atmosphere {
     return Number.isFinite(distance) ? distance : Number.MAX_SAFE_INTEGER;
   }
 
-  drawFog(context, season) {
+  /**
+   * `seasonPhase` blends the haze's colour and density across the year --
+   * see seasonBlend. Fog also thickens with the camera's own height, so
+   * pulling back and tilting up into a higher view reads as more atmosphere
+   * between the eye and the ground, the way real haze does.
+   */
+  drawFog(context, seasonPhase) {
     const { width, height } = this.camera;
-    const haze = SEASONS[season % SEASONS.length].haze;
+    const { haze, hazeDensity } = seasonBlend(seasonPhase);
+    const altitude = 1 + this.camera.view.position.z * FOG.altitudeFactor;
     const gradient = context.createLinearGradient(0, 0, 0, height);
     for (let step = 0; step <= FOG.samples; step += 1) {
       const offset = step / FOG.samples;
       const distance = this.groundDistanceAt(offset * height);
       const beyond = Math.max(0, distance - FOG.startDistance);
       const density = 1 - Math.exp(-beyond * FOG.falloff);
-      gradient.addColorStop(offset, `rgba(${haze},${(density * FOG.maxAlpha).toFixed(3)})`);
+      const alpha = Math.min(FOG.maxOpacity, density * FOG.maxAlpha * hazeDensity * altitude);
+      gradient.addColorStop(offset, `rgba(${haze},${alpha.toFixed(3)})`);
     }
     context.fillStyle = gradient;
     context.fillRect(0, 0, width, height);
@@ -82,7 +127,7 @@ export class Atmosphere {
    * Where each cloud currently sits on screen. Decks above the camera, and
    * those outside the viewport, are dropped here rather than drawn.
    */
-  placeClouds() {
+  placeClouds(seasonPhase = 0) {
     if (!this.sprite.width) {
       return [];
     }
@@ -93,9 +138,13 @@ export class Atmosphere {
     const drift = this.drift;
     const cameraHeight = view.position.z;
     const half = CLOUD_FIELD / 2;
+    const { cloudBoost } = seasonBlend(seasonPhase);
     const placed = [];
 
     for (const cloud of this.clouds) {
+      if (cloud.revealsAt !== undefined && cloud.revealsAt > cloudBoost) {
+        continue;
+      }
       const layer = CLOUD_LAYERS[cloud.layer];
       const headroom = cameraHeight - layer.altitude;
       if (headroom <= 0) {
@@ -136,8 +185,8 @@ export class Atmosphere {
     return placed;
   }
 
-  drawClouds(context) {
-    for (const placed of this.placeClouds()) {
+  drawClouds(context, seasonPhase = 0) {
+    for (const placed of this.placeClouds(seasonPhase)) {
       context.globalAlpha = placed.alpha;
       context.drawImage(this.sprite,
         placed.screen.x - placed.width / 2, placed.screen.y - placed.height / 2,

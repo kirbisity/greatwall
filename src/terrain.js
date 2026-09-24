@@ -79,6 +79,22 @@ export class Terrain {
     this.levelled.push({ key, x, y, radius, height: this.wildHeightAt(x, y) });
   }
 
+  /**
+   * The ground colour here, in `'#rrggbb'` -- grass, dirt or bare rock. Read
+   * from its own noise, so the same patch always comes back the same colour,
+   * independent of season, lighting or anything else that changes over time.
+   */
+  groundColorAt(x, y) {
+    const grain = valueNoise(x / TERRAIN.groundScale, y / TERRAIN.groundScale, this.seed + 149);
+    if (grain > TERRAIN.rockThreshold) {
+      return TERRAIN.rockColor;
+    }
+    if (grain > TERRAIN.dirtThreshold) {
+      return TERRAIN.dirtColor;
+    }
+    return TERRAIN.grassColor;
+  }
+
   /** How thick the woodland is here, 0 to 1. */
   forestAt(x, y) {
     const cover = valueNoise(x / TERRAIN.forestScale, y / TERRAIN.forestScale, this.seed + 91);

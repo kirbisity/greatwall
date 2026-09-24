@@ -7,7 +7,6 @@ import {
   HEALTH_COLORS,
   HOUSES,
   PALETTE,
-  SEASONS,
   SUN,
   TERRAIN,
   TOWER_HEIGHT_UNITS,
@@ -91,7 +90,7 @@ const PLAN_TOOL_SIZE = 22;
 const TRUNK_FILL = 'rgb(84,62,42)';
 const CANOPY_FILL = 'rgb(74,96,58)';
 
-/** Parse a '#rrggbb' season colour into the channels shade() wants. */
+/** Parse a '#rrggbb' colour into the channels shade() wants. */
 function shadeOf(hex) {
   return [
     parseInt(hex.slice(1, 3), 16),
@@ -361,29 +360,30 @@ export class Renderer {
    *
    * None of it moves, so it is only repainted when the view does. While the
    * camera is still — which is most of a fight — the whole landscape costs
-   * nothing at all.
+   * nothing at all. Ground colour is fixed by position, not by season, so
+   * this never needs repainting for the year turning either — only the fog
+   * over it does that.
    */
   drawGround(game) {
     const { width, height, focus, distance, elevation } = this.camera;
-    const key = `${game.season}|${Math.round(focus.x)}|${Math.round(focus.y)}`
+    const key = `${Math.round(focus.x)}|${Math.round(focus.y)}`
       + `|${Math.round(distance)}|${Math.round(elevation * 4)}|${width}x${height}`;
     if (this.paintedGround === key) {
       return;
     }
     this.paintedGround = key;
 
-    const palette = SEASONS[game.season % SEASONS.length];
     const wash = this.ground.createRadialGradient(
       width / 2, height / 2, Math.min(width, height) * 0.1,
       width / 2, height / 2, Math.max(width, height) * 0.8,
     );
-    wash.addColorStop(0, palette.light);
-    wash.addColorStop(1, palette.dark);
+    wash.addColorStop(0, TERRAIN.grassColor);
+    wash.addColorStop(1, TERRAIN.rockColor);
     this.ground.fillStyle = wash;
     this.ground.fillRect(0, 0, width, height);
 
     const bounds = this.groundBounds();
-    this.drawLandscape(game.terrain, palette, bounds);
+    this.drawLandscape(game.terrain, bounds);
     this.drawWoods(game, bounds);
   }
 
@@ -406,13 +406,12 @@ export class Renderer {
     };
   }
 
-  drawLandscape(terrain, palette, bounds) {
+  drawLandscape(terrain, bounds) {
     const context = this.ground;
     const view = this.camera.view;
     // Pick a cell that lands about the same size on screen at any zoom.
     const cell = Math.max(TERRAIN.minCell, Math.min(TERRAIN.maxCell,
       TERRAIN.meshCellPixels * this.camera.distance / view.focal));
-    const tint = shadeOf(palette.light);
 
     for (let x = Math.floor(bounds.minX / cell) * cell; x < bounds.maxX; x += cell) {
       for (let y = Math.floor(bounds.minY / cell) * cell; y < bounds.maxY; y += cell) {
@@ -439,6 +438,7 @@ export class Renderer {
         const normal = { x: -slopeX * TERRAIN.slopeRelief, y: -slopeY * TERRAIN.slopeRelief, z: 1 };
         const length = Math.hypot(normal.x, normal.y, normal.z);
         const light = lightingFor({ x: normal.x / length, y: normal.y / length, z: normal.z / length });
+        const tint = shadeOf(terrain.groundColorAt(x, y));
 
         context.beginPath();
         context.moveTo(points[0].x, points[0].y);

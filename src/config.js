@@ -386,13 +386,23 @@ export const TERRAIN = {
   meshCellPixels: 86,
   minCell: 34,
   maxCell: 240,
+
+  // Ground colour reads as patches of grass, dirt and bare rock, picked per
+  // cell from its own noise rather than tinted by season -- the year now
+  // shows through the fog, not the dirt underfoot.
+  groundScale: 200,
+  dirtThreshold: 0.55,
+  rockThreshold: 0.78,
+  grassColor: '#6f8a49',
+  dirtColor: '#8a7350',
+  rockColor: '#8c887c',
 };
 
 export const SEASONS = [
-  { name: 'Autumn', light: '#9a7c4b', dark: '#5f4a2a', accent: '#d9a441', haze: '198, 176, 138' },
-  { name: 'Winter', light: '#8d8a83', dark: '#4f4e4b', accent: '#cfd8dc', haze: '198, 202, 206' },
-  { name: 'Spring', light: '#7f8f52', dark: '#4a5530', accent: '#9ccc65', haze: '178, 190, 154' },
-  { name: 'Summer', light: '#948a46', dark: '#5a5228', accent: '#e0c341', haze: '206, 194, 142' },
+  { name: 'Autumn', haze: '198, 176, 138' },
+  { name: 'Winter', haze: '198, 202, 206' },
+  { name: 'Spring', haze: '178, 190, 154' },
+  { name: 'Summer', haze: '206, 194, 142' },
 ];
 
 /**

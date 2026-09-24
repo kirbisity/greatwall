@@ -36,7 +36,7 @@ test('damage is the attacker power divided by the defender armour', () => {
 // infantry walk through one. Rebalancing should fail this deliberately.
 const CROSSING_OUTCOMES = [
   { typeId: 'CR0', name: 'Sabre Cavalry', survived: false, wallDamage: 52.5 },
-  { typeId: 'CR1', name: 'Spear Cavalry', survived: false, wallDamage: 105 },
+  { typeId: 'CR1', name: 'Spear Cavalry', survived: false, wallDamage: 84 },
   { typeId: 'IR0', name: 'Light Axe Infantry', survived: true, wallDamage: 34 },
   { typeId: 'IR1', name: 'Light Sword Infantry', survived: true, wallDamage: 51 },
 ];

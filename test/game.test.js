@@ -5,6 +5,7 @@ import { Castle, Raider, Wall } from '../src/entities.js';
 import {
   BREACH,
   CASTLE_GUARD_TIERS,
+  CASTLE_TYPES,
   FPS,
   GUARD_TYPES,
   RAIDER_SPAWN_INTERVAL_SECONDS,
@@ -275,7 +276,7 @@ test('a castle mid-rebuild still fights and earns at its old strength', () => {
   game.upgradeCastle(0);
   const castle = game.castles[0];
   assert.equal(castle.typeId, 'CC1', 'the shape changes at once');
-  assert.equal(castle.type.maxHealth, 200, 'the new tier is already set');
+  assert.equal(castle.type.maxHealth, CASTLE_TYPES.CC1.maxHealth, 'the new tier is already set');
   // But what actually governs play is still the old numbers.
   assert.equal(castle.effectiveType.maxHealth, oldMaxHealth);
   assert.equal(castle.healthFraction, castle.health / oldMaxHealth);

@@ -70,7 +70,10 @@ test('houses spawn over time up to capacity and then stop', () => {
   const capacity = game.houseCapacity();
   assert.ok(capacity > 0, 'the ring should support at least one house');
 
-  stepSeconds(game, HOUSES.spawnIntervalSeconds * (capacity + 6));
+  // Denser packing means a spawn attempt sometimes lands too close to an
+  // existing house and finds nothing; generous slack keeps this from being
+  // a flaky race against how many intervals it happens to take.
+  stepSeconds(game, HOUSES.spawnIntervalSeconds * (capacity * 3 + 20));
   assert.equal(game.houses.length, capacity);
 
   // Waiting longer does not overshoot it.

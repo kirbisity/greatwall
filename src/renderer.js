@@ -72,6 +72,10 @@ const HOUSE_DEFINITION = {
     roof: { height: HOUSES.footprint.roofHeight, overhang: HOUSES.footprint.overhang, tiers: 1, material: 'roofTile' },
   }],
 };
+// Licks and smoke puffs a burning house draws each frame — a few is enough
+// to read as flame without costing more than the ambient damage effects do.
+const HOUSE_FLAME_LICKS = 3;
+const HOUSE_SMOKE_PUFFS = 2;
 
 const ROUTE_OPEN = '#7fd4ff';
 const ROUTE_SHUT = '#8a8a8a';
@@ -963,9 +967,11 @@ export class Renderer {
   }
 
   /**
-   * A house does not smoulder like a battered wall — it catches all at once
-   * and is gone within HOUSES.burnSeconds, so this is one bright, shrinking
-   * burst timed to that window rather than the looping ambient puffs above.
+   * A house does not smoulder like a battered wall — it catches all at once,
+   * burns hard for HOUSES.burnSeconds, and is gone. The flame is several
+   * licks wandering and flickering on the clock rather than one static
+   * blob, so it reads as burning rather than glowing; smoke rises above it
+   * once it has properly caught, and both fade together in the last stretch.
    */
   drawBurningHouses(view, game) {
     for (const house of game.houses) {
@@ -979,22 +985,61 @@ export class Renderer {
   }
 
   drawHouseFire(view, position, ground, progress) {
-    const screen = projectPoint(view, position.x, position.y, ground + 1 + progress * 1.4);
-    if (!screen) {
+    const context = this.overlay;
+    const clock = this.clock;
+    const seed = position.x * 7.31 + position.y * 13.7;
+    // Full strength through most of the burn, then dies down in the last
+    // fifth rather than cutting off with the house still roaring.
+    const fade = progress < 0.8 ? 1 : 1 - (progress - 0.8) / 0.2;
+
+    for (let i = 0; i < HOUSE_FLAME_LICKS; i += 1) {
+      const phase = seed + i * 41.7;
+      const flicker = 0.7 + 0.3 * Math.sin(clock * 11 + phase * 2.1);
+      const worldX = position.x + Math.sin(clock * 6 + phase) * 0.5;
+      const worldY = position.y + Math.cos(clock * 5.2 + phase * 1.4) * 0.5;
+      const worldZ = ground + 0.6 + i * 0.3 + Math.sin(clock * 4.3 + phase * 1.3) * 0.3;
+      const screen = projectPoint(view, worldX, worldY, worldZ);
+      if (!screen) {
+        continue;
+      }
+      const worldRadius = (1.5 + i * 0.5) * flicker;
+      const pixelRadius = Math.max(1, view.focal / screen.depth * worldRadius);
+      const alpha = 0.85 * fade * flicker;
+      const gradient = context.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, pixelRadius);
+      gradient.addColorStop(0, `rgba(255,224,140,${alpha.toFixed(3)})`);
+      gradient.addColorStop(0.5, `rgba(224,102,40,${(alpha * 0.85).toFixed(3)})`);
+      gradient.addColorStop(1, 'rgba(224,102,40,0)');
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);
+      context.fill();
+    }
+
+    // Smoke only once the fire has properly caught, rising above the licks
+    // and thickening as the burn goes on.
+    if (progress < 0.12) {
       return;
     }
-    const fade = 1 - progress;
-    const worldRadius = 2.2 + progress * 2.2;
-    const pixelRadius = Math.max(1, view.focal / screen.depth * worldRadius);
-    const context = this.overlay;
-    const gradient = context.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, pixelRadius);
-    gradient.addColorStop(0, `rgba(255,224,140,${(0.9 * fade).toFixed(3)})`);
-    gradient.addColorStop(0.5, `rgba(224,102,40,${(0.75 * fade).toFixed(3)})`);
-    gradient.addColorStop(1, 'rgba(224,102,40,0)');
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);
-    context.fill();
+    for (let i = 0; i < HOUSE_SMOKE_PUFFS; i += 1) {
+      const phase = seed + 90 + i * 53.1;
+      const rise = 2.4 + progress * 5.5 + i * 1.6;
+      const worldX = position.x + Math.sin(clock * 1.6 + phase) * 1.4;
+      const worldY = position.y + Math.cos(clock * 1.3 + phase) * 1.1;
+      const screen = projectPoint(view, worldX, worldY, ground + rise);
+      if (!screen) {
+        continue;
+      }
+      const worldRadius = 1.6 + progress * 2.6 + i * 0.7;
+      const pixelRadius = Math.max(1, view.focal / screen.depth * worldRadius);
+      const alpha = 0.42 * fade * (0.5 + 0.5 * progress);
+      const gradient = context.createRadialGradient(screen.x, screen.y, 0, screen.x, screen.y, pixelRadius);
+      gradient.addColorStop(0, `rgba(70,68,64,${alpha.toFixed(3)})`);
+      gradient.addColorStop(1, 'rgba(70,68,64,0)');
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.arc(screen.x, screen.y, pixelRadius, 0, 2 * Math.PI);
+      context.fill();
+    }
   }
 
   /** The portrait a company carries, over its head. */

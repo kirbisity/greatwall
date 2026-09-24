@@ -411,23 +411,25 @@ export const HOUSES = {
   // Capacity is read off how far out the walls sit (the average distance
   // from the castle to each standing wall's midpoint), one house per this
   // many units past the castle's own footprint, up to maxHouses.
-  radialSpacing: 14,
-  maxHouses: 24,
+  radialSpacing: 8,
+  maxHouses: 40,
   // Kept clear of the castle itself and of any wall, so a house never
   // crowds either.
-  innerMargin: 10,
+  innerMargin: 8,
   wallClearance: 10,
-  placementAttempts: 8,
+  // Denser packing means a random point is more often too close to an
+  // existing house, so it gets more tries to find a clear one.
+  placementAttempts: 16,
 
   spawnIntervalSeconds: 3,
   riseSeconds: 5,
   // Coin per house, added to the base city income each payout.
   income: 5,
 
-  // How close a raider must come to set one alight, and how long it burns
-  // before it is gone for good.
+  // How close a raider must come to set one alight, and how long the fire
+  // and smoke play out before it is gone for good.
   contactRadius: 10,
-  burnSeconds: 1,
+  burnSeconds: 3,
 
   footprint: { width: 3.6, depth: 3.2, height: 2.6, roofHeight: 2, overhang: 0.6 },
 };

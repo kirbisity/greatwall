@@ -59,10 +59,10 @@ export const WALL = {
   // can be attacked the whole way up.
   buildSeconds: 10,
   initialFraction: 0.2,
-  // Redrawing over a section pays to bring it back, but not at once: it
-  // heals over this many seconds instead, the same way it went up in the
-  // first place, and the tool icon that marks the work stays over it
-  // meanwhile. See Wall#beginRepair.
+  // The Repair tool pays to bring a section back, but not at once: it heals
+  // over this many seconds instead, the same way it went up in the first
+  // place, and the tool icon that marks the work stays over it meanwhile.
+  // See Wall#beginRepair.
   repairSeconds: 10,
   // How close a wall end must come to a city edge before it snaps onto it.
   brimSnapRadius: 26,
@@ -72,6 +72,9 @@ export const WALL = {
   minLength: 30,
   maxLength: 200,
   snapRadius: 20,
+  // How close the cursor must come to a section for Raze, Repair or Fortify
+  // to count it as the one being pointed at.
+  pickRadius: 20,
   reachMargin: 2,
   // Coin per standing section, charged with the rest of the income each
   // payout — a wall is upkeep, not just a one-off purchase.
@@ -253,6 +256,25 @@ export const AVATAR = {
 };
 
 /** The banner flown over a city, planted above the tallest roof. */
+/**
+ * What the Fortify tool buys. A section keeps its identity all the way up —
+ * the same Wall grows rather than being replaced — so a fortified stretch
+ * costs the scene no more geometry than a plain one.
+ *
+ * `cost`, `health` and `upkeep` are multiples of the plain section's own, and
+ * `paid` is everything spent to reach this tier, which is what Raze gives a
+ * share of back:
+ * building plain and fortifying twice comes to 1 + 1 + 2 = four times the
+ * original price, and leaves a section with four times the health and four
+ * times the upkeep. `seconds` is how long the stone takes to grow into its
+ * new shape, during which the section still fights at its old strength.
+ */
+export const WALL_TIERS = [
+  { name: 'Wall', heightScale: 1, widthScale: 1, health: 1, upkeep: 1, cost: 0, paid: 1, seconds: 0 },
+  { name: 'Raised Wall', heightScale: 2, widthScale: 1, health: 2, upkeep: 2, cost: 1, paid: 2, seconds: 10 },
+  { name: 'Reinforced Wall', heightScale: 2, widthScale: 2, health: 4, upkeep: 4, cost: 2, paid: 4, seconds: 20 },
+];
+
 export const FLAG = {
   sprite: 'images/flags/flag_song.png',
   // Planted this far above the ground per world unit of the castle's own

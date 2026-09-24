@@ -10,6 +10,8 @@ const TOOL_BUTTONS = {
   zoom: 'zoom',
   build: 'buildTool',
   destroy: 'destroyTool',
+  repair: 'repairTool',
+  fortify: 'fortifyTool',
   upgrade: 'upgradeTool',
   attack: 'attackTool',
 };
@@ -87,8 +89,9 @@ export class Hud {
       this.shownIncome = income;
       this.incomeLabel.innerText = `$${income}`;
     }
+    // Upkeep counts units, not sections: a fortified wall is worth several.
     const formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`
-      + ` - ${breakdown.upkeepPerWall}×${breakdown.wallCount}`;
+      + ` - ${breakdown.upkeepPerWall}×${breakdown.upkeepUnits}`;
     if (formula !== this.shownIncomeFormula) {
       this.shownIncomeFormula = formula;
       this.incomeFormula.innerText = formula;

@@ -12,7 +12,6 @@ import {
   TERRAIN,
   TOWER_HEIGHT_UNITS,
   TOWER_RADIUS_UNITS,
-  WALL,
   WALL_HEIGHT_UNITS,
   WALL_THICKNESS_UNITS,
 } from './config.js';
@@ -161,7 +160,7 @@ function staggeredGrowth(overall, radiusFraction, staggerFraction) {
  * against a finished wall. A section still going up is sound, not ruined.
  */
 function wallCondition(wall) {
-  const raised = WALL.maxHealth * Math.max(wall.built, 0.01);
+  const raised = wall.maxHealth * Math.max(wall.built, 0.01);
   return Math.max(0, Math.min(1, wall.health / raised));
 }
 
@@ -346,7 +345,7 @@ export class Renderer {
       this.atmosphere.drawClouds(this.overlay);
     }
     this.drawPeggedWalls(view, game);
-    this.drawRepairingWalls(view, game);
+    this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
     this.drawCityFlags(view, game);
@@ -553,14 +552,17 @@ export class Renderer {
   }
 
   collectWalls(items, view, walls, terrain) {
-    const halfWidth = WALL_THICKNESS_UNITS / 2;
     for (const wall of walls) {
       if (wall.isPlanned) {
         continue;
       }
+      // Fortifying grows the section in place, so its tier is a scale on the
+      // one prism rather than a second one stacked on top.
+      const halfWidth = WALL_THICKNESS_UNITS * wall.widthScale / 2;
       // Height is how much has been raised; damage slumps what is standing.
       const condition = wallCondition(wall);
-      const height = WALL_HEIGHT_UNITS * wall.built * (DAMAGE_SLUMP + (1 - DAMAGE_SLUMP) * condition);
+      const height = WALL_HEIGHT_UNITS * wall.heightScale * wall.built
+        * (DAMAGE_SLUMP + (1 - DAMAGE_SLUMP) * condition);
       if (!this.isOnScreen(view, [
         wall.start, wall.end,
         { x: wall.start.x, y: wall.start.y, z: height },
@@ -579,27 +581,37 @@ export class Renderer {
     }
   }
 
-  /** Snapped wall ends share a point object, so a Set gives one tower per node. */
+  /**
+   * Snapped wall ends share a point object, so a Map gives one tower per
+   * node. A node takes the scale of the boldest section meeting it, which is
+   * what carries a fortified stretch through its own corners.
+   */
   collectTowers(items, view, walls, terrain) {
-    const nodes = new Set();
+    const nodes = new Map();
     for (const wall of walls) {
       if (wall.isPlanned) {
         continue;
       }
-      nodes.add(wall.start);
-      nodes.add(wall.end);
+      for (const node of [wall.start, wall.end]) {
+        const grown = nodes.get(node);
+        nodes.set(node, {
+          height: Math.max(grown?.height ?? 1, wall.heightScale),
+          width: Math.max(grown?.width ?? 1, wall.widthScale),
+        });
+      }
     }
-    for (const node of nodes) {
-      if (!this.isOnScreen(view, [node, { x: node.x, y: node.y, z: TOWER_HEIGHT_UNITS }])) {
+    for (const [node, scale] of nodes) {
+      const height = TOWER_HEIGHT_UNITS * scale.height;
+      const radius = TOWER_RADIUS_UNITS * scale.width;
+      if (!this.isOnScreen(view, [node, { x: node.x, y: node.y, z: height }])) {
         continue;
       }
       const footing = projectPoint(view, node.x, node.y, 0);
-      if (!footing || view.focal / footing.depth * TOWER_RADIUS_UNITS < MIN_TOWER_PIXELS) {
+      if (!footing || view.focal / footing.depth * radius < MIN_TOWER_PIXELS) {
         continue;
       }
-      const quads = squarePrism(node, TOWER_RADIUS_UNITS, TOWER_HEIGHT_UNITS,
-        terrain.heightAt(node.x, node.y));
-      const flat = this.flankPixels(view, node, TOWER_HEIGHT_UNITS) < MIN_FLANK_PIXELS;
+      const quads = squarePrism(node, radius, height, terrain.heightAt(node.x, node.y));
+      const flat = this.flankPixels(view, node, height) < MIN_FLANK_PIXELS;
       this.collectPrism(items, view, flat ? [quads[0]] : quads, TOWER);
     }
   }
@@ -878,11 +890,12 @@ export class Renderer {
   }
 
   /**
-   * A section paid to repair, health climbing back over WALL.repairSeconds —
-   * already standing, so just the pulsing tool over it, hovering above the
-   * top of the wall rather than the dashed line a pegged section gets.
+   * Masons at work: a section paid to repair, or one growing into its next
+   * tier. Both are already standing, so they get the pulsing tool hovering
+   * over the stone rather than the dashed line a pegged section gets. The
+   * anchor rides the section's own height, so it clears a raised wall.
    */
-  drawRepairingWalls(view, game) {
+  drawWorkingWalls(view, game) {
     const tool = this.imageFor(PLAN_TOOL);
     if (!tool) {
       return;
@@ -891,12 +904,13 @@ export class Renderer {
     const pulse = 0.55 + 0.45 * Math.sin(this.clock * 4);
     const size = PLAN_TOOL_SIZE;
     for (const wall of game.walls) {
-      if (!wall.isRepairing) {
+      if (!wall.isRepairing && !wall.isUpgrading) {
         continue;
       }
       const midpoint = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
       const ground = game.terrain.heightAt(midpoint.x, midpoint.y);
-      const anchor = projectPoint(view, midpoint.x, midpoint.y, ground + WALL_HEIGHT_UNITS + 1.5);
+      const top = ground + WALL_HEIGHT_UNITS * wall.heightScale + 1.5;
+      const anchor = projectPoint(view, midpoint.x, midpoint.y, top);
       if (!anchor) {
         continue;
       }

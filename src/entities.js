@@ -1,5 +1,7 @@
 import { distance } from './geometry.js';
-import { CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, HOUSES, RAIDER_TYPES, WALL } from './config.js';
+import {
+  CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, HOUSES, RAIDER_TYPES, WALL, WALL_TIERS,
+} from './config.js';
 
 export class Wall {
   /**
@@ -21,6 +23,11 @@ export class Wall {
     // affects how fast health climbs, never built, isPlanned or collision.
     this.repairSeconds = 0;
     this.repairMissing = 0;
+    // How far the Fortify tool has taken this section, and the growth still
+    // under way. The same Wall carries every tier, so fortifying adds no
+    // entity to the scene -- only scale to the one already there.
+    this.tier = 0;
+    this.upgrade = null;
   }
 
   get isPlanned() {
@@ -31,8 +38,51 @@ export class Wall {
     return this.repairSeconds > 0;
   }
 
+  get isUpgrading() {
+    return this.upgrade !== null;
+  }
+
   get isComplete() {
     return this.built >= 1;
+  }
+
+  /**
+   * The tier this section actually fights and costs at. Stone that is still
+   * growing has not earned the new strength yet, so the old one holds until
+   * the work finishes -- the same bargain a castle mid-rebuild makes.
+   */
+  get effectiveTier() {
+    return WALL_TIERS[this.tier];
+  }
+
+  get maxHealth() {
+    return WALL.maxHealth * this.effectiveTier.health;
+  }
+
+  get upkeep() {
+    return WALL.upkeepPerSection * this.effectiveTier.upkeep;
+  }
+
+  get canUpgrade() {
+    return !this.isUpgrading && this.tier + 1 < WALL_TIERS.length;
+  }
+
+  /** Scales the renderer draws at, easing from the old shape into the new. */
+  get heightScale() {
+    return this.growingScale('heightScale');
+  }
+
+  get widthScale() {
+    return this.growingScale('widthScale');
+  }
+
+  growingScale(key) {
+    const from = this.effectiveTier[key];
+    if (!this.upgrade) {
+      return from;
+    }
+    const to = WALL_TIERS[this.upgrade.toTier][key];
+    return from + (to - from) * (this.upgrade.elapsed / this.upgrade.total);
   }
 
   /** Raise the section, making good any damage taken while it went up. */
@@ -46,7 +96,7 @@ export class Wall {
       // how much was missing at any given instant — so the same order
       // always takes the same time, whether it caught the wall at 90% or 10%.
       const rate = this.repairMissing / WALL.repairSeconds;
-      this.health = Math.min(WALL.maxHealth, this.health + rate * seconds);
+      this.health = Math.min(this.maxHealth, this.health + rate * seconds);
       this.repairSeconds = Math.max(0, this.repairSeconds - seconds);
       return;
     }
@@ -56,7 +106,7 @@ export class Wall {
     // buildSeconds is the time from foundation to finished, not from nothing.
     const added = seconds * (1 - WALL.initialFraction) / WALL.buildSeconds;
     this.built = Math.min(1, this.built + added);
-    this.health = Math.min(WALL.maxHealth * this.built, this.health + WALL.maxHealth * added);
+    this.health = Math.min(this.maxHealth * this.built, this.health + this.maxHealth * added);
   }
 
   /** Pay off the remaining construction as well as the damage, right away. */
@@ -64,7 +114,7 @@ export class Wall {
     this.planSeconds = 0;
     this.repairSeconds = 0;
     this.built = 1;
-    this.health = WALL.maxHealth;
+    this.health = this.maxHealth;
   }
 
   /**
@@ -74,13 +124,48 @@ export class Wall {
    */
   beginRepair() {
     this.built = 1;
-    this.repairMissing = WALL.maxHealth - this.health;
+    this.repairMissing = this.maxHealth - this.health;
     this.repairSeconds = WALL.repairSeconds;
   }
 
-  /** Half the build price, scaled by how much of the wall is left standing. */
+  /**
+   * Order the next tier. The stone starts growing at once, but the section
+   * holds its old health and old upkeep until it has finished -- see
+   * `effectiveTier`.
+   */
+  beginUpgrade() {
+    this.upgrade = {
+      toTier: this.tier + 1,
+      elapsed: 0,
+      total: WALL_TIERS[this.tier + 1].seconds,
+    };
+  }
+
+  /** Advance the growth, taking on the new tier once it has fully risen. */
+  advanceUpgrade(seconds) {
+    if (!this.upgrade) {
+      return;
+    }
+    this.upgrade.elapsed = Math.min(this.upgrade.total, this.upgrade.elapsed + seconds);
+    if (this.upgrade.elapsed < this.upgrade.total) {
+      return;
+    }
+    // Carry the section's condition across: a wall that was whole comes out
+    // of the work whole, and one that was battered is still battered.
+    const condition = this.health / this.maxHealth;
+    this.tier = this.upgrade.toTier;
+    this.upgrade = null;
+    this.health = condition * this.maxHealth;
+  }
+
+  /**
+   * Half of everything spent on the section, scaled by how much of it is
+   * left standing. A fortified wall cost more to raise, so razing it gives
+   * back more; a plain one is unchanged, since its `paid` is 1.
+   */
   get refundValue() {
-    return Math.trunc(this.length * WALL.costPerUnit * this.health / WALL.maxHealth / 2);
+    const spent = this.length * WALL.costPerUnit * this.effectiveTier.paid;
+    return Math.trunc(spent * this.health / this.maxHealth / 2);
   }
 
   takeHit(attackPower) {

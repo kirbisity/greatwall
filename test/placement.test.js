@@ -95,33 +95,47 @@ function laySection(game, from, to) {
 
 test('a section still pegged out cannot be repaired into existence', () => {
   const game = gameWith('CC0');
-  const from = { x: 200, y: -60 };
-  const to = { x: 200, y: 60 };
-  const wall = game.buildWall(from, to).wall;
+  const at = { x: 200, y: 0 };
+  const wall = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).wall;
   const before = game.tokens;
 
-  const result = game.buildWall(from, to);
+  const result = game.repairWallAt(at);
   assert.equal(result.status, 'planning');
   assert.equal(game.tokens, before, 'nothing charged');
   assert.equal(wall.isPlanned, true, 'still only pegs');
-  assert.equal(wall.isComplete, false, 'the three seconds cannot be bought back');
-  assert.equal(game.walls.length, 1, 'no duplicate section');
+  assert.equal(wall.isComplete, false, 'the plan delay cannot be bought back');
 });
 
-test('redrawing over a damaged wall starts a repair instead of stacking a new one', () => {
+test('drawing over a section that already stands does nothing at all', () => {
   const game = gameWith('CC0');
   const from = { x: 200, y: -60 };
   const to = { x: 200, y: 60 };
   assert.equal(laySection(game, from, to).status, 'built');
   const wall = game.walls[0];
-  wall.health = WALL.maxHealth * 0.25;
+  wall.health = wall.maxHealth * 0.25;
 
   const before = game.tokens;
   const result = game.buildWall(from, to);
+  assert.equal(result.status, 'exists');
+  assert.equal(result.wall, wall, 'it points at the section already there');
+  assert.equal(game.walls.length, 1, 'no duplicate section');
+  assert.equal(game.tokens, before, 'nothing charged');
+  assert.equal(wall.health, wall.maxHealth * 0.25, 'and nothing mended');
+  assert.equal(wall.isRepairing, false);
+});
+
+test('the repair tool starts a repair on the section under it', () => {
+  const game = gameWith('CC0');
+  laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
+  const wall = game.walls[0];
+  wall.health = wall.maxHealth * 0.25;
+
+  const before = game.tokens;
+  const result = game.repairWallAt({ x: 200, y: 0 });
   assert.equal(result.status, 'repairing');
   assert.equal(game.walls.length, 1, 'no duplicate section');
   assert.equal(wall.isRepairing, true);
-  assert.equal(wall.health, WALL.maxHealth * 0.25, 'paid for, but not yet made good');
+  assert.equal(wall.health, wall.maxHealth * 0.25, 'paid for, but not yet made good');
 
   // Three quarters were missing, so three quarters of the build price.
   const expected = Math.trunc(game.wallCost(wall.length) * 0.75);
@@ -129,7 +143,7 @@ test('redrawing over a damaged wall starts a repair instead of stacking a new on
 
   // It climbs to full over the repair window, same as it went up originally.
   wall.raise(WALL.repairSeconds);
-  assert.equal(wall.health, WALL.maxHealth);
+  assert.equal(wall.health, wall.maxHealth);
   assert.equal(wall.isRepairing, false);
 });
 
@@ -140,9 +154,9 @@ test('repair is charged in proportion to the damage', () => {
   const full = game.wallCost(wall.length);
 
   const costFor = (fraction) => {
-    wall.health = WALL.maxHealth * (1 - fraction);
+    wall.health = wall.maxHealth * (1 - fraction);
     const before = game.tokens;
-    game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+    game.repairWallAt({ x: 200, y: 0 });
     wall.raise(WALL.repairSeconds); // let this order finish before the next one starts
     return before - game.tokens;
   };
@@ -150,48 +164,48 @@ test('repair is charged in proportion to the damage', () => {
   assert.equal(costFor(0.1), Math.trunc(full * 0.1));
 });
 
-test('redrawing over a wall already being repaired charges nothing more', () => {
+test('sweeping the repair tool back over the same work charges nothing more', () => {
   const game = gameWith('CC0');
   laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
   const wall = game.walls[0];
-  wall.health = WALL.maxHealth * 0.5;
-  game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  wall.health = wall.maxHealth * 0.5;
+  game.repairWallAt({ x: 200, y: 0 });
 
   const before = game.tokens;
-  const result = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
-  assert.equal(result.status, 'repairing', 'a drag chain sweeping back over it still carries on');
+  const result = game.repairWallAt({ x: 200, y: 0 });
+  assert.equal(result.status, 'repairing', 'still reads as work in hand');
   assert.equal(game.tokens, before, 'no second charge for the same order');
 });
 
-test('redrawing a finished, undamaged wall is free and changes nothing', () => {
+test('repairing a finished, undamaged wall is free and changes nothing', () => {
   const game = gameWith('CC0');
   game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).wall.finish();
   const before = game.tokens;
-  const result = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  const result = game.repairWallAt({ x: 200, y: 0 });
   assert.equal(result.status, 'intact');
   assert.equal(game.walls.length, 1);
   assert.equal(game.tokens, before);
 });
 
-test('redrawing an unfinished wall pays to finish it, health climbing rather than snapping', () => {
+test('repairing an unfinished wall pays to finish it, health climbing rather than snapping', () => {
   const game = gameWith('CC0');
   const wall = laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 }).wall;
-  const result = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
+  const result = game.repairWallAt({ x: 200, y: 0 });
   assert.equal(result.status, 'repairing');
   // The shape is whole at once -- only its condition still has to heal.
   assert.equal(wall.isComplete, true);
-  assert.ok(wall.health < WALL.maxHealth, 'not full yet');
+  assert.ok(wall.health < wall.maxHealth, 'not full yet');
   assert.equal(game.walls.length, 1, 'still one section');
 
   wall.raise(WALL.repairSeconds);
-  assert.equal(wall.health, WALL.maxHealth);
+  assert.equal(wall.health, wall.maxHealth);
 });
 
-test('a wall drawn in the reverse direction still repairs rather than stacks', () => {
+test('the repair tool finds a section whichever way it was drawn', () => {
   const game = gameWith('CC0');
-  laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
+  laySection(game, { x: 200, y: 60 }, { x: 200, y: -60 });
   game.walls[0].health = 10;
-  assert.equal(game.buildWall({ x: 200, y: 60 }, { x: 200, y: -60 }).status, 'repairing');
+  assert.equal(game.repairWallAt({ x: 200, y: 0 }).status, 'repairing');
   assert.equal(game.walls.length, 1);
 });
 
@@ -200,8 +214,18 @@ test('a repair the treasury cannot cover is refused', () => {
   laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
   game.walls[0].health = 1;
   game.tokens = 0;
-  assert.equal(game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).status, 'poor');
+  assert.equal(game.repairWallAt({ x: 200, y: 0 }).status, 'poor');
   assert.equal(game.walls[0].health, 1, 'left damaged');
+});
+
+test('pointing the repair tool at open ground does nothing', () => {
+  const game = gameWith('CC0');
+  laySection(game, { x: 200, y: -60 }, { x: 200, y: 60 });
+  game.walls[0].health = 10;
+  const before = game.tokens;
+  assert.equal(game.repairWallAt({ x: -900, y: -900 }).status, 'none');
+  assert.equal(game.tokens, before);
+  assert.equal(game.walls[0].isRepairing, false);
 });
 
 // --- upgrading clears what it builds over ---------------------------------

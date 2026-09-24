@@ -77,6 +77,8 @@ class App {
       this.input.selectTool('build');
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
+    bind('repairTool', () => this.input.selectTool('repair'));
+    bind('fortifyTool', () => this.input.selectTool('fortify'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
     bind('attackTool', (event) => {
       // Without this, the same click bubbles to the map's own click handler,

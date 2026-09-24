@@ -2,10 +2,10 @@ import { Castle, Guard, House, Raider, Wall } from './entities.js';
 import {
   closestPointOnSquare,
   distance,
-  pointToLineDistance,
   distanceSquared,
   distanceToSquare,
   isWithinSegmentBand,
+  pointToLineDistance,
   segmentEntersSquare,
   segmentsIntersect,
 } from './geometry.js';
@@ -35,6 +35,7 @@ import {
   STARTING_CASTLE_TYPE,
   STARTING_TOKENS,
   WALL,
+  WALL_TIERS,
   WINTER_BUILD_MULTIPLIER,
 } from './config.js';
 
@@ -168,6 +169,7 @@ export class Game {
     }
     for (const wall of this.walls) {
       wall.raise(1 / FPS);
+      wall.advanceUpgrade(1 / FPS);
     }
     for (const house of this.houses) {
       house.advance(1 / FPS);
@@ -230,17 +232,23 @@ export class Game {
     const houseCount = this.houses.length;
     const housePerHouse = HOUSES.income;
     const houseIncome = houseCount * housePerHouse;
+    // A fortified section costs its tier's multiple to keep, so the bill is
+    // counted in upkeep units rather than in sections: a plain wall is one
+    // unit, a reinforced one four. `wallCount` stays the plain section count,
+    // and the two agree until something is fortified.
     let wallCount = 0;
+    let wallUpkeep = 0;
     for (const wall of this.walls) {
       if (!wall.isPlanned) {
         wallCount += 1;
+        wallUpkeep += wall.upkeep;
       }
     }
     const upkeepPerWall = WALL.upkeepPerSection;
-    const wallUpkeep = wallCount * upkeepPerWall;
+    const upkeepUnits = wallUpkeep / upkeepPerWall;
     return {
       cityIncome, houseCount, housePerHouse, houseIncome,
-      wallCount, upkeepPerWall, wallUpkeep,
+      wallCount, upkeepPerWall, upkeepUnits, wallUpkeep,
       total: cityIncome + houseIncome - wallUpkeep,
     };
   }
@@ -769,11 +777,11 @@ export class Game {
     if (wall.isRepairing) {
       return { status: 'repairing', wall };
     }
-    const missing = WALL.maxHealth - wall.health;
+    const missing = wall.maxHealth - wall.health;
     if (missing <= 0) {
       return { status: 'intact', wall };
     }
-    const cost = Math.trunc(this.wallCost(wall.length) * missing / WALL.maxHealth);
+    const cost = Math.trunc(this.wallCost(wall.length) * missing / wall.maxHealth);
     if (this.tokens < cost) {
       return { status: 'poor' };
     }
@@ -790,9 +798,12 @@ export class Game {
     const start = this.snapPoint(from);
     const end = this.snapPoint(to);
 
+    // A section already spans these ends. Repair and Fortify are their own
+    // tools now, so drawing over one does nothing at all -- but the drag
+    // still carries on from here, so a chain can branch off a standing wall.
     const existing = this.findWallBetween(start, end);
     if (existing) {
-      return { ...this.repairWall(existing), start, end };
+      return { status: 'exists', wall: existing, start, end };
     }
     if (this.crossesCity(start, end)) {
       return { status: 'blocked', start, end };
@@ -832,18 +843,75 @@ export class Game {
     return cleared;
   }
 
-  removeWallAt(point) {
-    for (let index = 0; index < this.walls.length; index += 1) {
-      const wall = this.walls[index];
+  /**
+   * The section under a point: the nearest one the point actually sits on,
+   * rather than merely the first that happens to be in the neighbourhood.
+   * Raze, Repair and Fortify all aim this way, so they agree on what is
+   * being pointed at — and two runs side by side stay tellable apart, which
+   * matters when the tool spends money on whichever one it picks.
+   */
+  wallAt(point) {
+    let closest = null;
+    let closestGap = Infinity;
+    for (const wall of this.walls) {
       const reach = wall.length + WALL.reachMargin;
-      const reachSquared = reach * reach;
-      if (distanceSquared(point, wall.start) < reachSquared && distanceSquared(point, wall.end) < reachSquared) {
-        this.tokens += wall.refundValue;
-        this.walls.splice(index, 1);
-        return true;
+      if (!isWithinSegmentBand(point, wall.start, wall.end, WALL.pickRadius, reach)) {
+        continue;
+      }
+      const gap = pointToLineDistance(point, wall.start, wall.end);
+      if (gap < closestGap) {
+        closest = wall;
+        closestGap = gap;
       }
     }
-    return false;
+    return closest;
+  }
+
+  removeWallAt(point) {
+    const wall = this.wallAt(point);
+    if (!wall) {
+      return false;
+    }
+    this.tokens += wall.refundValue;
+    this.walls.splice(this.walls.indexOf(wall), 1);
+    return true;
+  }
+
+  /** The Repair tool, aimed at whatever section is under the cursor. */
+  repairWallAt(point) {
+    const wall = this.wallAt(point);
+    return wall ? this.repairWall(wall) : { status: 'none' };
+  }
+
+  /** The Fortify tool, aimed at whatever section is under the cursor. */
+  upgradeWallAt(point) {
+    const wall = this.wallAt(point);
+    return wall ? this.upgradeWall(wall) : { status: 'none' };
+  }
+
+  /**
+   * Pay to grow a section into its next tier. Nothing is replaced: the same
+   * Wall takes on the new shape over WALL_TIERS[next].seconds, and only
+   * counts as the stronger, dearer thing once it has finished growing.
+   */
+  upgradeWall(wall) {
+    if (wall.isPlanned) {
+      return { status: 'planning', wall };
+    }
+    if (wall.isUpgrading) {
+      return { status: 'working', wall };
+    }
+    const next = WALL_TIERS[wall.tier + 1];
+    if (!next) {
+      return { status: 'max', wall };
+    }
+    const cost = Math.trunc(this.wallCost(wall.length) * next.cost);
+    if (this.tokens < cost) {
+      return { status: 'poor', wall, cost, name: next.name };
+    }
+    this.tokens -= cost;
+    wall.beginUpgrade();
+    return { status: 'working', wall, cost, name: next.name };
   }
 
   undoLastWall() {

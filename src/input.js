@@ -6,12 +6,16 @@ const CURSORS = {
   zoom: 'zoom-in',
   build: 'url(images/buildBtn.png), default',
   destroy: 'url(images/destroyBtn.png), default',
+  repair: 'url(images/buildBtn.png), cell',
+  fortify: 'url(images/buildBtn.png), copy',
   upgrade: 'url(images/castleBtn.png), default',
   attack: 'url(images/attackBtn.png), crosshair',
 };
 
-// Outcomes that leave a usable end to keep drawing from.
-const CHAIN_CONTINUES = new Set(['built', 'repairing', 'intact', 'planning']);
+// Outcomes that leave a usable end to keep drawing from. Drawing over a
+// section that already stands does nothing, but the chain carries on from
+// it, so a new run can branch off a wall that is already up.
+const CHAIN_CONTINUES = new Set(['built', 'exists']);
 
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
@@ -149,6 +153,12 @@ export class Input {
       case 'destroy':
         this.dragDestroy();
         break;
+      case 'repair':
+        this.dragRepair();
+        break;
+      case 'fortify':
+        this.dragFortify();
+        break;
       default:
         this.camera.panFrom(previous, this.pointer);
     }
@@ -203,6 +213,28 @@ export class Input {
 
   dragDestroy() {
     this.game.removeWallAt(this.camera.toWorld(this.pointer));
+  }
+
+  dragRepair() {
+    const result = this.game.repairWallAt(this.camera.toWorld(this.pointer));
+    if (result.status === 'poor') {
+      this.hud.showMessage('Not enough money to repair it');
+    }
+  }
+
+  /**
+   * Sweeping the tool over a stretch fortifies each section under it. Only
+   * the outcomes worth interrupting for are announced: passing over stone
+   * that is already reinforced, or already growing, says nothing.
+   */
+  dragFortify() {
+    const result = this.game.upgradeWallAt(this.camera.toWorld(this.pointer));
+    if (result.status === 'poor') {
+      this.hud.showMessage(`${result.name} costs $${result.cost}`);
+    }
+    if (result.status === 'max') {
+      this.hud.showMessage('This wall is as strong as stone gets');
+    }
   }
 
   handleWheel(event) {

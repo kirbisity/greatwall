@@ -59,6 +59,14 @@
 			<img src="images/destroyBtn.png" alt="">
 			<span class="toolName">Raze</span>
 		</button>
+		<button id="repairTool" class="toolButton" title="Drag over a damaged wall to mend it">
+			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='2'%20y='13'%20width='20'%20height='8'%20rx='1'/%3E%3Cpath%20d='M2%2017h20M9%2013v4M16%2017v4'/%3E%3Cpath%20d='M12%202.5v8M8%206.5h8'/%3E%3C/svg%3E" alt="">
+			<span class="toolName">Repair</span>
+		</button>
+		<button id="fortifyTool" class="toolButton" title="Drag over a wall to raise it, then to widen it">
+			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='3'%20y='14'%20width='18'%20height='7'%20rx='1'/%3E%3Cpath%20d='M3%2017.5h18M9%2014v3.5M15%2017.5V21'/%3E%3Cpath%20d='M12%202.5v9M8%206.5l4-4%204%204'/%3E%3C/svg%3E" alt="">
+			<span class="toolName">Fortify</span>
+		</button>
 		<button id="attackTool" class="toolButton" title="Muster a company, then click where to send it">
 			<img src="images/attackBtn.png" alt="">
 			<span class="toolName">Attack</span>
@@ -112,7 +120,8 @@
 			<ul class="helpList">
 				<li><b>Build</b> &mdash; drag to raise a wall. Sections cost coin by length, and ends snap to other walls and to the city edge.</li>
 				<li><b>Attack</b> &mdash; pick a company's tier above the castle, then click where to send it. It will run down the nearest raiders, then come home.</li>
-				<li><b>Repair</b> &mdash; redraw over a damaged or unfinished section with Build to bring it to full strength.</li>
+				<li><b>Repair</b> &mdash; drag over a damaged or unfinished section to pay for its mending. The stone climbs back to full over the following seconds under the mason's hammer. Drawing over a section that already stands does nothing.</li>
+				<li><b>Fortify</b> &mdash; drag over a section to raise it. The first order doubles its height over ten seconds; a second doubles its width over twenty. Each doubles its strength and its upkeep, so a reinforced wall costs four times the plain one to raise and four times as much to keep. Reinforced is as far as stone goes.</li>
 				<li>A new section is pegged out for six seconds &mdash; a yellow line under the mason's hammer &mdash; and stops nothing until the stone starts rising. It takes about ten seconds more to reach full height, and can be attacked the whole way up.</li>
 				<li><b>Raze</b> &mdash; drag over a wall to demolish it. Half the price returns, less its damage.</li>
 				<li><b>Upgrade</b> &mdash; click your castle to grow it. A courtyard complex becomes a walled compound, then a moated city, unlocking heavier companies as it grows. The old buildings clear and the new ones rise over the following seconds, but the city fights and earns at its old strength until they do.</li>

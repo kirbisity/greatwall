@@ -6,6 +6,7 @@ import {
   FLAG,
   HEALTH_COLORS,
   HOUSES,
+  MOUND,
   PALETTE,
   SUN,
   TERRAIN,
@@ -100,6 +101,7 @@ const FAR_CELL_SCALE = 4;
 const GOLD_STEPS = 24;
 const TRUNK_DISTANCE = 420;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
+const PLAN_BLOCKED = 'rgba(214, 92, 72, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 const TRUNK_FILL = 'rgb(84,62,42)';
@@ -295,6 +297,9 @@ export class Renderer {
     this.overlay = structures.getContext('2d');
     this.camera = camera;
     this.paintedGround = null;
+    // The square the raise tool would act on, set by Input as the cursor
+    // moves, or null when that tool is not selected. See drawHoveredSquare.
+    this.hoveredSquare = null;
     // The section the repair or fortify tool would act on, set by Input as
     // the cursor moves. Null whenever neither tool is selected, or nothing
     // is under the cursor.
@@ -428,6 +433,7 @@ export class Renderer {
       this.atmosphere.drawClouds(this.overlay, game.seasonPhase);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
+    this.drawHoveredSquare(view, game);
     this.drawPeggedWalls(view, game);
     this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
@@ -466,7 +472,9 @@ export class Renderer {
     // the eye catches over the minute it takes.
     const gold = seasonBlend(game.seasonPhase).groundGold;
     const turned = Math.round(gold * GOLD_STEPS) / GOLD_STEPS;
-    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}`;
+    // Reshaped ground is part of what the mesh draws, so a mound climbing
+    // has to count as a change the same way the camera moving does.
+    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -1038,6 +1046,41 @@ export class Renderer {
       context.lineTo(to.x, to.y);
       context.stroke();
     }
+    context.restore();
+  }
+
+  /**
+   * The square of ground the raise tool is over, outlined on the ground
+   * itself rather than as a flat rectangle on the screen -- it follows the
+   * mound it is standing on, so the player can see what another step would
+   * be building on before paying for it.
+   */
+  drawHoveredSquare(view, game) {
+    const square = this.hoveredSquare;
+    if (!square) {
+      return;
+    }
+    const half = MOUND.size / 2;
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+      const x = square.x + half * sx;
+      const y = square.y + half * sy;
+      return projectPoint(view, x, y, game.terrain.heightAt(x, y));
+    });
+    if (corners.some((corner) => !corner)) {
+      return;
+    }
+    const context = this.overlay;
+    context.save();
+    context.lineWidth = 2;
+    context.setLineDash([7, 5]);
+    context.strokeStyle = square.allowed ? PLAN_LINE : PLAN_BLOCKED;
+    context.beginPath();
+    context.moveTo(corners[0].x, corners[0].y);
+    for (let i = 1; i < corners.length; i += 1) {
+      context.lineTo(corners[i].x, corners[i].y);
+    }
+    context.closePath();
+    context.stroke();
     context.restore();
   }
 

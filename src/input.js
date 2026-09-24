@@ -128,7 +128,28 @@ export class Input {
       this.trackPointer(event);
       this.orderAttack(this.camera.toWorld(this.pointer));
       this.onChange();
+      return;
     }
+    if (this.tool === 'raise') {
+      this.trackPointer(event);
+      this.orderRaise(this.camera.toWorld(this.pointer));
+      this.onChange();
+    }
+  }
+
+  /** One step on the square under the cursor, with a word on why not. */
+  orderRaise(point) {
+    const result = this.game.raiseGround(point);
+    if (result.status === 'poor') {
+      this.hud.showMessage(`Raising this ground costs $${result.cost}`);
+    }
+    if (result.status === 'water') {
+      this.hud.showMessage('Only dry ground can be raised');
+    }
+    if (result.status === 'highest') {
+      this.hud.showMessage('This ground is as high as it will go');
+    }
+    this.updateHover();
   }
 
   orderAttack(target) {
@@ -185,6 +206,18 @@ export class Input {
       : null;
     if (hovered !== this.renderer.hoveredWall) {
       this.renderer.hoveredWall = hovered;
+      this.onChange();
+    }
+    const square = this.tool === 'raise'
+      ? this.game.squareUnder(this.camera.toWorld(this.pointer))
+      : null;
+    const shown = this.renderer.hoveredSquare;
+    // How far the square is already raised counts as a change too: without
+    // it the outline kept saying "nothing here yet" over ground the player
+    // had just paid to raise.
+    if (square?.x !== shown?.x || square?.y !== shown?.y
+      || square?.allowed !== shown?.allowed || square?.steps !== shown?.steps) {
+      this.renderer.hoveredSquare = square;
       this.onChange();
     }
   }

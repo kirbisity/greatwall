@@ -27,6 +27,7 @@ import {
   IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
+  MOUND,
   RAIDER_SPAWN_INTERVAL_SECONDS,
   REGEN_FRACTION_PER_PAYOUT,
   SEASON_LENGTH_SECONDS,
@@ -103,6 +104,12 @@ export class Game {
   restart() {
     this.navigationCache = null;
     this.terrain.levelled = [];
+    this.terrain.zoneIndex = null;
+    // Ground the player has raised, keyed by its square on the mound grid.
+    this.mounds = new Map();
+    // Bumped whenever reshaped ground changes height, so the renderer knows
+    // its cached landscape is stale -- see Renderer#drawGround.
+    this.terrainRevision = 0;
     this.guards = [];
     this.walls = [];
     this.houses = [];
@@ -148,9 +155,135 @@ export class Game {
     });
   }
 
+  /**
+   * Raise the square of ground under a point, or order another step on the
+   * one already there.
+   *
+   * Squares snap to their own grid, so raising twice in the same place grows
+   * one mound rather than laying a second on top of a first. The step is
+   * ordered here and paid for here, but the ground only climbs over the
+   * following seconds -- see advanceMounds. That delay is the whole point of
+   * the tool: a mound is never the answer to raiders already ashore.
+   */
+  raiseGround(point) {
+    const size = MOUND.size;
+    const cellX = Math.floor(point.x / size);
+    const cellY = Math.floor(point.y / size);
+    const key = `${cellX}|${cellY}`;
+    const x = (cellX + 0.5) * size;
+    const y = (cellY + 0.5) * size;
+
+    const standing = this.mounds.get(key);
+    const steps = standing?.steps ?? 0;
+    if (steps >= MOUND.maxSteps) {
+      return { status: 'highest', mound: standing };
+    }
+    // Nothing is raised out of water, for the reason a wall is not laid in
+    // it: the island would stop being one.
+    if (!this.terrain.isAshore(x, y)) {
+      return { status: 'water' };
+    }
+    // Not on the city itself: its ground is levelled flat on purpose, and a
+    // mound shoved under it would push the keep up a hillside.
+    const onCity = this.castles.some((castle) => (
+      distanceToSquare({ x, y }, castle.position, castle.type.footprint) < MOUND.size / 2
+    ));
+    if (onCity) {
+      return { status: 'blocked' };
+    }
+    const cost = this.moundCost(steps);
+    if (this.tokens < cost) {
+      return { status: 'poor', cost };
+    }
+    this.tokens -= cost;
+
+    if (standing) {
+      standing.steps += 1;
+      standing.growing = MOUND.growSeconds;
+      return { status: 'raising', mound: standing };
+    }
+    const mound = {
+      key, x, y, steps: 1, lift: 0, growing: MOUND.growSeconds,
+      zone: this.terrain.raise(key, x, y, MOUND.size / 2, 0, MOUND.skirt),
+    };
+    this.mounds.set(key, mound);
+    return { status: 'raising', mound };
+  }
+
+  /**
+   * The square of the mound grid a point falls in, and whether a step could
+   * actually be ordered on it -- which is what the cursor outline shows
+   * before the player commits to paying for one.
+   */
+  squareUnder(point) {
+    const size = MOUND.size;
+    const cellX = Math.floor(point.x / size);
+    const cellY = Math.floor(point.y / size);
+    const x = (cellX + 0.5) * size;
+    const y = (cellY + 0.5) * size;
+    const standing = this.mounds.get(`${cellX}|${cellY}`);
+    const steps = standing?.steps ?? 0;
+    const onCity = this.castles.some((castle) => (
+      distanceToSquare({ x, y }, castle.position, castle.type.footprint) < MOUND.size / 2
+    ));
+    const allowed = steps < MOUND.maxSteps
+      && this.terrain.isAshore(x, y)
+      && !onCity
+      && this.tokens >= this.moundCost(steps);
+    return { x, y, steps, allowed };
+  }
+
+  /** What the next step on a mound this tall costs. */
+  moundCost(steps) {
+    return Math.round(MOUND.cost * MOUND.costGrowth ** steps);
+  }
+
+  /**
+   * Ground climbing towards what has been paid for. Height is written
+   * straight onto the terrain's own zone rather than through Terrain#raise,
+   * so a growing mound never rebuilds the zone index -- only its height
+   * moves, and nothing about where it sits.
+   */
+  advanceMounds(seconds) {
+    for (const mound of this.mounds.values()) {
+      const target = mound.steps * MOUND.step;
+      if (mound.lift === target) {
+        continue;
+      }
+      const pace = MOUND.step / MOUND.growSeconds;
+      mound.lift = Math.min(target, mound.lift + pace * seconds);
+      mound.growing = Math.max(0, mound.growing - seconds);
+      mound.zone.height = mound.zone.base + mound.lift;
+      // Quantised, so a step's rise costs a handful of ground repaints
+      // rather than one per frame all the way up.
+      this.terrainRevision = Math.round(this.moundTotal() * 4);
+    }
+  }
+
+  /** Every mound's lift added up, which is all the renderer's key needs. */
+  moundTotal() {
+    let total = 0;
+    for (const mound of this.mounds.values()) {
+      total += mound.lift;
+    }
+    return total;
+  }
+
   /** What a company's pace is multiplied by for the ground it is crossing. */
   paceOn(position) {
-    return 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
+    const drag = 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
+    if (this.mounds.size === 0) {
+      return drag;
+    }
+    // Raised ground is heavy going. Measured against a mound at its full
+    // height, so a first step barely tells and a finished one halves the
+    // pace of anything crossing it.
+    const lift = this.terrain.liftAt(position.x, position.y);
+    if (lift <= 0) {
+      return drag;
+    }
+    const climbed = Math.min(1, lift / (MOUND.maxSteps * MOUND.step));
+    return drag * (1 - climbed * MOUND.climbDrag);
   }
 
   get isDefeated() {
@@ -222,6 +355,7 @@ export class Game {
     for (const house of this.houses) {
       house.advance(1 / FPS);
     }
+    this.advanceMounds(1 / FPS);
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     this.moveRaiders();

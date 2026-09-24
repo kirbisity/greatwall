@@ -107,6 +107,9 @@ export const LEVELS = [
     // No landward flank: raiders row in and beach at the coves, so they
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
+    // No stone here: the Build button raises ground instead of laying wall.
+    // A prototype -- see MOUND for the pacing it is trying out.
+    tools: { build: 'raise' },
     buildings: JAPAN_BUILDINGS,
     guardTiers: {
       CC0: ['JG_ASHIGARU'],

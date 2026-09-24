@@ -110,6 +110,13 @@ const EMPTY = [];
 // reaches far past anywhere CAMERA's pan limits let the view go.
 const CELL_LIMIT = 4096;
 
+// Reshaped ground is scanned straight through up to this many zones -- a few
+// settlements never justify an index -- and bucketed past it. The bucket is
+// comfortably wider than a mound's whole reach, so a lookup lands in one.
+const ZONE_SCAN_LIMIT = 8;
+const ZONE_BUCKET = 120;
+const EMPTY_ZONES = [];
+
 /**
  * Every mountain whose cell could possibly reach this point. Bounded to the
  * cell's own neighbours because mountainMaxRadius is kept well under
@@ -179,8 +186,15 @@ export class Terrain {
       this.bands.water = channelsOf(water.color);
       this.bands.bank = channelsOf(water.bankColor);
     }
-    // Ground levelled flat, one entry per settlement.
+    // Ground the player or the game has reshaped: one entry per settlement
+    // levelled flat, plus any mound raised on top of the wild ground. Both
+    // are the same kind of thing to heightAt -- a patch pulled towards a
+    // height of its own, easing back into the hillside over a skirt.
     this.levelled = [];
+    // Zones bucketed by ground cell, so heightAt looks at the handful that
+    // could reach a point rather than every one ever made. Thrown away
+    // whenever the list changes and rebuilt on the next query.
+    this.zoneIndex = null;
     this.neighbourhoods = new Map();
   }
 
@@ -390,24 +404,108 @@ export class Terrain {
    * end in a cliff.
    */
   heightAt(x, y) {
-    let height = this.wildHeightAt(x, y);
-    for (const zone of this.levelled) {
+    return this.reshape(this.wildHeightAt(x, y), x, y);
+  }
+
+  /**
+   * How far the ground here has been reshaped -- raised into a mound or cut
+   * flat for a settlement -- above the wild ground underneath it. What the
+   * pace of anything crossing it turns on, so it is worth having without
+   * paying for the noise twice.
+   */
+  liftAt(x, y) {
+    const wild = this.wildHeightAt(x, y);
+    return this.reshape(wild, x, y) - wild;
+  }
+
+  /** The zones' pull on a height already sampled from the wild ground. */
+  reshape(wild, x, y) {
+    let height = wild;
+    const zones = this.zonesNear(x, y);
+    for (let i = 0; i < zones.length; i += 1) {
+      const zone = zones[i];
+      const skirt = zone.skirt ?? this.land.levelSkirt;
       const gap = Math.hypot(x - zone.x, y - zone.y);
-      if (gap >= zone.radius + this.land.levelSkirt) {
+      if (gap >= zone.radius + skirt) {
         continue;
       }
-      const blend = gap <= zone.radius
-        ? 1
-        : 1 - (gap - zone.radius) / this.land.levelSkirt;
+      const blend = gap <= zone.radius ? 1 : 1 - (gap - zone.radius) / skirt;
       height += (zone.height - height) * ease(blend);
     }
     return height;
+  }
+
+  /**
+   * The zones that could possibly reach this point.
+   *
+   * A settlement or two was worth walking the whole list for; a map a player
+   * has been raising mounds across all game is not -- the scan showed up as
+   * whole milliseconds per ground repaint once there were a hundred of them.
+   * Each zone is dropped into every bucket its reach covers, so a lookup is
+   * one hash and a handful of candidates however many have been made.
+   */
+  zonesNear(x, y) {
+    if (this.levelled.length <= ZONE_SCAN_LIMIT) {
+      return this.levelled;
+    }
+    if (!this.zoneIndex) {
+      this.zoneIndex = new Map();
+      for (const zone of this.levelled) {
+        const reach = zone.radius + (zone.skirt ?? this.land.levelSkirt);
+        const minX = Math.floor((zone.x - reach) / ZONE_BUCKET);
+        const maxX = Math.floor((zone.x + reach) / ZONE_BUCKET);
+        const minY = Math.floor((zone.y - reach) / ZONE_BUCKET);
+        const maxY = Math.floor((zone.y + reach) / ZONE_BUCKET);
+        for (let cellX = minX; cellX <= maxX; cellX += 1) {
+          for (let cellY = minY; cellY <= maxY; cellY += 1) {
+            const key = `${cellX}|${cellY}`;
+            const bucket = this.zoneIndex.get(key);
+            if (bucket) {
+              bucket.push(zone);
+            } else {
+              this.zoneIndex.set(key, [zone]);
+            }
+          }
+        }
+      }
+    }
+    const bucket = this.zoneIndex.get(
+      `${Math.floor(x / ZONE_BUCKET)}|${Math.floor(y / ZONE_BUCKET)}`,
+    );
+    return bucket ?? EMPTY_ZONES;
   }
 
   /** Level the ground under a settlement, replacing any earlier entry. */
   level(key, x, y, radius) {
     this.levelled = this.levelled.filter((zone) => zone.key !== key);
     this.levelled.push({ key, x, y, radius, height: this.wildHeightAt(x, y) });
+    this.zoneIndex = null;
+  }
+
+  /**
+   * Raise a patch of ground `lift` above the wild ground beneath it, or
+   * change how far an existing mound stands. Same machinery as levelling a
+   * settlement, pulled up instead of flat and with a skirt of its own --
+   * the settlement's is sixty units, which on a mound this size would spread
+   * the slope halfway across the island.
+   */
+  raise(key, x, y, radius, lift, skirt) {
+    this.levelled = this.levelled.filter((zone) => zone.key !== key);
+    // `base` is the wild ground under the mound, kept so a caller growing
+    // one can move its height without asking the noise again -- and without
+    // the zone index, which is built from where zones sit rather than how
+    // tall they are, needing to be thrown away every frame.
+    const base = this.wildHeightAt(x, y);
+    const zone = { key, x, y, radius, skirt, base, height: base + lift };
+    this.levelled.push(zone);
+    this.zoneIndex = null;
+    return zone;
+  }
+
+  /** Forget a mound entirely, leaving the wild ground it stood on. */
+  unraise(key) {
+    this.levelled = this.levelled.filter((zone) => zone.key !== key);
+    this.zoneIndex = null;
   }
 
   /**

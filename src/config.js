@@ -317,6 +317,36 @@ export const RAIDER_TYPES = {
   },
 };
 
+/**
+ * Raising ground, which the island holds instead of building walls.
+ *
+ * A mound is one square of the grid, raised a step at a time. The point of
+ * the pacing is that one raise is worth almost nothing: a mound only starts
+ * turning raiders aside once it is several steps up, which takes long enough
+ * that the player has to hold the ground with companies in the meantime
+ * rather than terraforming their way out of trouble.
+ */
+export const MOUND = {
+  // The square the player picks, snapped to its own grid. Two ground cells
+  // across: any smaller and the mesh cannot draw it (see TERRAIN.cellSize).
+  size: 18,
+  // How far the slope runs out past the square, and how much one order adds.
+  skirt: 9,
+  step: 3,
+  maxSteps: 6,
+  // How long a step takes to rise, and what it costs. The price climbs with
+  // the mound so that the sixth step is a real decision rather than a
+  // formality once the treasury is healthy.
+  growSeconds: 8,
+  cost: 70,
+  costGrowth: 1.45,
+  // What raised ground actually does: everything crossing it is slowed, in
+  // proportion to how far it has been raised, up to this much at full
+  // height. Companies are slowed by it too -- earthworks do not know whose
+  // side they are on -- but raiders are the ones who have to cross them.
+  climbDrag: 0.6,
+};
+
 export const STARTING_CASTLE_TYPE = 'CC0';
 
 /**

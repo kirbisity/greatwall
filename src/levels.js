@@ -1,4 +1,4 @@
-import { JAPAN_BUILDINGS } from './buildings/index.js';
+import { JAPAN_BUILDINGS, JAPAN_HOUSE } from './buildings/index.js';
 
 /**
  * The campaigns, one short config apiece.
@@ -108,9 +108,12 @@ export const LEVELS = [
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
     // No stone here: the Build button raises ground instead of laying wall.
-    // A prototype -- see MOUND for the pacing it is trying out.
+    // A prototype -- see PLATFORM for the pacing it is trying out.
     tools: { build: 'raise' },
     buildings: JAPAN_BUILDINGS,
+    // The settlement is little keeps rather than houses, raised on whatever
+    // platform ground the player has made for them.
+    house: JAPAN_HOUSE,
     guardTiers: {
       CC0: ['JG_ASHIGARU'],
       CC1: ['JG_ASHIGARU', 'JG_SAMURAI'],

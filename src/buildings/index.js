@@ -9,6 +9,7 @@ export const BUILDINGS = {
   CC2: large,
 };
 
+import japanHouse from './japan-house.js';
 import japanLarge from './japan-large.js';
 import japanMedium from './japan-medium.js';
 import japanSmall from './japan-small.js';
@@ -19,3 +20,6 @@ export const JAPAN_BUILDINGS = {
   CC1: japanMedium,
   CC2: japanLarge,
 };
+
+/** What an island settlement fills its platforms with. */
+export const JAPAN_HOUSE = japanHouse;

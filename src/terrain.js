@@ -112,7 +112,7 @@ const CELL_LIMIT = 4096;
 
 // Reshaped ground is scanned straight through up to this many zones -- a few
 // settlements never justify an index -- and bucketed past it. The bucket is
-// comfortably wider than a mound's whole reach, so a lookup lands in one.
+// comfortably wider than a platform's whole reach, so a lookup lands in one.
 const ZONE_SCAN_LIMIT = 8;
 const ZONE_BUCKET = 120;
 const EMPTY_ZONES = [];
@@ -187,7 +187,7 @@ export class Terrain {
       this.bands.bank = channelsOf(water.bankColor);
     }
     // Ground the player or the game has reshaped: one entry per settlement
-    // levelled flat, plus any mound raised on top of the wild ground. Both
+    // levelled flat, plus any platform raised on top of the wild ground. Both
     // are the same kind of thing to heightAt -- a patch pulled towards a
     // height of its own, easing back into the hillside over a skirt.
     this.levelled = [];
@@ -408,7 +408,7 @@ export class Terrain {
   }
 
   /**
-   * How far the ground here has been reshaped -- raised into a mound or cut
+   * How far the ground here has been reshaped -- raised into a platform or cut
    * flat for a settlement -- above the wild ground underneath it. What the
    * pace of anything crossing it turns on, so it is worth having without
    * paying for the noise twice.
@@ -425,7 +425,12 @@ export class Terrain {
     for (let i = 0; i < zones.length; i += 1) {
       const zone = zones[i];
       const skirt = zone.skirt ?? this.land.levelSkirt;
-      const gap = Math.hypot(x - zone.x, y - zone.y);
+      // A settlement eases out of a circle; a platform is a square, and has
+      // to be measured as one or its four corners fall through the gap
+      // between the circle and the tile the player actually picked.
+      const gap = zone.square
+        ? Math.max(Math.abs(x - zone.x), Math.abs(y - zone.y))
+        : Math.hypot(x - zone.x, y - zone.y);
       if (gap >= zone.radius + skirt) {
         continue;
       }
@@ -439,7 +444,7 @@ export class Terrain {
    * The zones that could possibly reach this point.
    *
    * A settlement or two was worth walking the whole list for; a map a player
-   * has been raising mounds across all game is not -- the scan showed up as
+   * has been raising platforms across all game is not -- the scan showed up as
    * whole milliseconds per ground repaint once there were a hundred of them.
    * Each zone is dropped into every bucket its reach covers, so a lookup is
    * one hash and a handful of candidates however many have been made.
@@ -478,34 +483,56 @@ export class Terrain {
   /** Level the ground under a settlement, replacing any earlier entry. */
   level(key, x, y, radius) {
     this.levelled = this.levelled.filter((zone) => zone.key !== key);
-    this.levelled.push({ key, x, y, radius, height: this.wildHeightAt(x, y) });
-    this.zoneIndex = null;
+    // Flat at whatever the ground already is here, platforms included, so a
+    // city raised onto one is levelled at the top rather than dragged back
+    // down to the wild ground underneath it.
+    this.levelled.push({ key, x, y, radius, kind: 'settlement', height: this.heightAt(x, y) });
+    this.sortZones();
   }
 
   /**
    * Raise a patch of ground `lift` above the wild ground beneath it, or
-   * change how far an existing mound stands. Same machinery as levelling a
+   * change how far an existing platform stands. Same machinery as levelling a
    * settlement, pulled up instead of flat and with a skirt of its own --
-   * the settlement's is sixty units, which on a mound this size would spread
+   * the settlement's is sixty units, which on a platform this size would spread
    * the slope halfway across the island.
    */
   raise(key, x, y, radius, lift, skirt) {
     this.levelled = this.levelled.filter((zone) => zone.key !== key);
-    // `base` is the wild ground under the mound, kept so a caller growing
+    // `base` is the wild ground under the platform, kept so a caller growing
     // one can move its height without asking the noise again -- and without
     // the zone index, which is built from where zones sit rather than how
     // tall they are, needing to be thrown away every frame.
     const base = this.wildHeightAt(x, y);
-    const zone = { key, x, y, radius, skirt, base, height: base + lift };
+    const zone = { key, x, y, radius, skirt, base, kind: 'platform', square: true, height: base + lift };
     this.levelled.push(zone);
-    this.zoneIndex = null;
+    this.sortZones();
     return zone;
   }
 
-  /** Forget a mound entirely, leaving the wild ground it stood on. */
+  /**
+   * Settlements first, platforms last.
+   *
+   * Zones are applied in order, each pulling the height it has reached so
+   * far towards its own, so the last one to touch a point is the one that
+   * decides it. A platform raised under a city has to be the one that
+   * decides, or the city's own levelling would hold it down at the ground
+   * it was founded on and the keep would sit inside the earth beneath it.
+   */
+  sortZones() {
+    this.levelled.sort((a, b) => (a.kind === 'platform' ? 1 : 0) - (b.kind === 'platform' ? 1 : 0));
+    this.zoneIndex = null;
+  }
+
+  /** Forget a platform entirely, leaving the wild ground it stood on. */
   unraise(key) {
     this.levelled = this.levelled.filter((zone) => zone.key !== key);
     this.zoneIndex = null;
+  }
+
+  /** Every platform standing, for whatever wants to know where they are. */
+  get platformZones() {
+    return this.levelled.filter((zone) => zone.kind === 'platform');
   }
 
   /**

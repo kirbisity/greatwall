@@ -27,7 +27,7 @@ import {
   IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
-  MOUND,
+  PLATFORM,
   RAIDER_SPAWN_INTERVAL_SECONDS,
   REGEN_FRACTION_PER_PAYOUT,
   SEASON_LENGTH_SECONDS,
@@ -91,6 +91,8 @@ export class Game {
     // it leaves out it inherits (see levels.js).
     this.buildings = { ...BUILDINGS, ...level.buildings };
     this.guardTiers = { ...CASTLE_GUARD_TIERS, ...level.guardTiers };
+    // Null leaves the renderer on its own default house.
+    this.houseDefinition = level.house ?? null;
     this.terrain = new Terrain(this.seed, level.land, level.river, level.sea);
     // The coves a seaborne level lands its boats at, fixed for the run: the
     // renderer beaches a hull at each, and spawnPoint puts raiders ashore
@@ -105,8 +107,8 @@ export class Game {
     this.navigationCache = null;
     this.terrain.levelled = [];
     this.terrain.zoneIndex = null;
-    // Ground the player has raised, keyed by its square on the mound grid.
-    this.mounds = new Map();
+    // Ground the player has raised, keyed by its square on the platform grid.
+    this.platforms = new Map();
     // Bumped whenever reshaped ground changes height, so the renderer knows
     // its cached landscape is stale -- see Renderer#drawGround.
     this.terrainRevision = 0;
@@ -160,38 +162,30 @@ export class Game {
    * one already there.
    *
    * Squares snap to their own grid, so raising twice in the same place grows
-   * one mound rather than laying a second on top of a first. The step is
+   * one platform rather than laying a second on top of a first. The step is
    * ordered here and paid for here, but the ground only climbs over the
-   * following seconds -- see advanceMounds. That delay is the whole point of
-   * the tool: a mound is never the answer to raiders already ashore.
+   * following seconds -- see advancePlatforms. That delay is the whole point of
+   * the tool: a platform is never the answer to raiders already ashore.
    */
   raiseGround(point) {
-    const size = MOUND.size;
+    const size = PLATFORM.size;
     const cellX = Math.floor(point.x / size);
     const cellY = Math.floor(point.y / size);
     const key = `${cellX}|${cellY}`;
     const x = (cellX + 0.5) * size;
     const y = (cellY + 0.5) * size;
 
-    const standing = this.mounds.get(key);
+    const standing = this.platforms.get(key);
     const steps = standing?.steps ?? 0;
-    if (steps >= MOUND.maxSteps) {
-      return { status: 'highest', mound: standing };
+    if (steps >= PLATFORM.maxSteps) {
+      return { status: 'highest', platform: standing };
     }
     // Nothing is raised out of water, for the reason a wall is not laid in
     // it: the island would stop being one.
     if (!this.terrain.isAshore(x, y)) {
       return { status: 'water' };
     }
-    // Not on the city itself: its ground is levelled flat on purpose, and a
-    // mound shoved under it would push the keep up a hillside.
-    const onCity = this.castles.some((castle) => (
-      distanceToSquare({ x, y }, castle.position, castle.type.footprint) < MOUND.size / 2
-    ));
-    if (onCity) {
-      return { status: 'blocked' };
-    }
-    const cost = this.moundCost(steps);
+    const cost = this.platformCost(steps);
     if (this.tokens < cost) {
       return { status: 'poor', cost };
     }
@@ -199,91 +193,142 @@ export class Game {
 
     if (standing) {
       standing.steps += 1;
-      standing.growing = MOUND.growSeconds;
-      return { status: 'raising', mound: standing };
+      standing.growing = PLATFORM.growSeconds;
+      return { status: 'raising', platform: standing };
     }
-    const mound = {
-      key, x, y, steps: 1, lift: 0, growing: MOUND.growSeconds,
-      zone: this.terrain.raise(key, x, y, MOUND.size / 2, 0, MOUND.skirt),
+    const platform = {
+      key, x, y, steps: 1, lift: 0, growing: PLATFORM.growSeconds,
+      zone: this.terrain.raise(key, x, y, PLATFORM.size / 2, 0, PLATFORM.skirt),
     };
-    this.mounds.set(key, mound);
-    return { status: 'raising', mound };
+    this.platforms.set(key, platform);
+    return { status: 'raising', platform };
   }
 
   /**
-   * The square of the mound grid a point falls in, and whether a step could
+   * The square of the platform grid a point falls in, and whether a step could
    * actually be ordered on it -- which is what the cursor outline shows
    * before the player commits to paying for one.
    */
   squareUnder(point) {
-    const size = MOUND.size;
+    const size = PLATFORM.size;
     const cellX = Math.floor(point.x / size);
     const cellY = Math.floor(point.y / size);
     const x = (cellX + 0.5) * size;
     const y = (cellY + 0.5) * size;
-    const standing = this.mounds.get(`${cellX}|${cellY}`);
+    const standing = this.platforms.get(`${cellX}|${cellY}`);
     const steps = standing?.steps ?? 0;
-    const onCity = this.castles.some((castle) => (
-      distanceToSquare({ x, y }, castle.position, castle.type.footprint) < MOUND.size / 2
-    ));
-    const allowed = steps < MOUND.maxSteps
+    const allowed = steps < PLATFORM.maxSteps
       && this.terrain.isAshore(x, y)
-      && !onCity
-      && this.tokens >= this.moundCost(steps);
+      && this.tokens >= this.platformCost(steps);
     return { x, y, steps, allowed };
   }
 
-  /** What the next step on a mound this tall costs. */
-  moundCost(steps) {
-    return Math.round(MOUND.cost * MOUND.costGrowth ** steps);
+  /** What the next step on a platform this tall costs. */
+  platformCost(steps) {
+    return Math.round(PLATFORM.cost * PLATFORM.costGrowth ** steps);
   }
 
   /**
    * Ground climbing towards what has been paid for. Height is written
    * straight onto the terrain's own zone rather than through Terrain#raise,
-   * so a growing mound never rebuilds the zone index -- only its height
+   * so a growing platform never rebuilds the zone index -- only its height
    * moves, and nothing about where it sits.
    */
-  advanceMounds(seconds) {
-    for (const mound of this.mounds.values()) {
-      const target = mound.steps * MOUND.step;
-      if (mound.lift === target) {
+  advancePlatforms(seconds) {
+    for (const platform of this.platforms.values()) {
+      const target = platform.steps * PLATFORM.step;
+      if (platform.lift === target) {
         continue;
       }
-      const pace = MOUND.step / MOUND.growSeconds;
-      mound.lift = Math.min(target, mound.lift + pace * seconds);
-      mound.growing = Math.max(0, mound.growing - seconds);
-      mound.zone.height = mound.zone.base + mound.lift;
+      const pace = PLATFORM.step / PLATFORM.growSeconds;
+      platform.lift = Math.min(target, platform.lift + pace * seconds);
+      platform.growing = Math.max(0, platform.growing - seconds);
+      platform.zone.height = platform.zone.base + platform.lift;
       // Quantised, so a step's rise costs a handful of ground repaints
       // rather than one per frame all the way up.
-      this.terrainRevision = Math.round(this.moundTotal() * 4);
+      this.terrainRevision = Math.round(this.platformTotal() * 4);
     }
   }
 
-  /** Every mound's lift added up, which is all the renderer's key needs. */
-  moundTotal() {
+  /** Every platform's lift added up, which is all the renderer's key needs. */
+  platformTotal() {
     let total = 0;
-    for (const mound of this.mounds.values()) {
-      total += mound.lift;
+    for (const platform of this.platforms.values()) {
+      total += platform.lift;
     }
     return total;
   }
 
   /** What a company's pace is multiplied by for the ground it is crossing. */
-  paceOn(position) {
+  paceOn(position, company = null) {
     const drag = 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
-    if (this.mounds.size === 0) {
+    // Only raiders are slowed by the face of a platform: the garrison
+    // raised these and knows the ways up. See PLATFORM.
+    if (this.platforms.size === 0 || !company?.avoidsWalls) {
       return drag;
     }
-    // Raised ground is heavy going. Measured against a mound at its full
-    // height, so a first step barely tells and a finished one halves the
-    // pace of anything crossing it.
-    const lift = this.terrain.liftAt(position.x, position.y);
-    if (lift <= 0) {
-      return drag;
+    return this.onPlatformFace(position) ? drag * PLATFORM.climbPace : drag;
+  }
+
+  /**
+   * Whether a point is on the face of a platform rather than its top or the
+   * open ground beside it -- the band the earth actually rises through.
+   *
+   * A platform still only a step or two up is a kerb, not a climb, and is
+   * not counted: the toll has to be something the player builds up to.
+   */
+  onPlatformFace(position) {
+    const half = PLATFORM.size / 2;
+    for (const platform of this.platforms.values()) {
+      if (platform.lift < PLATFORM.climbFrom) {
+        continue;
+      }
+      const dx = Math.abs(position.x - platform.x);
+      const dy = Math.abs(position.y - platform.y);
+      if (dx > half + PLATFORM.skirt || dy > half + PLATFORM.skirt) {
+        continue;
+      }
+      if (dx > half || dy > half) {
+        return true;
+      }
     }
-    const climbed = Math.min(1, lift / (MOUND.maxSteps * MOUND.step));
-    return drag * (1 - climbed * MOUND.climbDrag);
+    return false;
+  }
+
+  /** The platform a point stands on top of, or null out on the open ground. */
+  platformUnder(position) {
+    const half = PLATFORM.size / 2;
+    for (const platform of this.platforms.values()) {
+      if (Math.abs(position.x - platform.x) <= half && Math.abs(position.y - platform.y) <= half) {
+        return platform;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The price a raider pays for getting up onto a platform.
+   *
+   * Charged on arrival rather than over the climb, so a company that turns
+   * back partway up pays nothing, and one that commits pays once. Each
+   * raider remembers what it is standing on, which is what tells a climb
+   * from a walk along the top.
+   */
+  chargeClimbs() {
+    if (this.platforms.size === 0) {
+      return;
+    }
+    for (const raider of this.raiders) {
+      const standing = this.platformUnder(raider.position);
+      const was = raider.standingOn ?? null;
+      raider.standingOn = standing?.key ?? null;
+      if (!standing || standing.key === was || standing.lift < PLATFORM.climbFrom) {
+        continue;
+      }
+      // Straight off its health rather than through takeHit: the earth is
+      // not an attacker, and armour is no help climbing.
+      raider.health -= raider.type.maxHealth * PLATFORM.climbToll;
+    }
   }
 
   get isDefeated() {
@@ -355,11 +400,12 @@ export class Game {
     for (const house of this.houses) {
       house.advance(1 / FPS);
     }
-    this.advanceMounds(1 / FPS);
+    this.advancePlatforms(1 / FPS);
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     this.moveRaiders();
     this.moveGuards();
+    this.chargeClimbs();
     this.resolveHouseContact();
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
     this.guards = this.guards.filter((guard) => guard.isAlive);
@@ -721,7 +767,7 @@ export class Game {
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
       const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
-      guard.advance(squeeze * this.paceOn(guard.position) / FPS);
+      guard.advance(squeeze * this.paceOn(guard.position, guard) / FPS);
     }
   }
 
@@ -742,7 +788,7 @@ export class Game {
    * given up and is besieging plants itself and swings instead.
    */
   advanceAgainstWalls(navigation, raider) {
-    const pace = this.paceOn(raider.position);
+    const pace = this.paceOn(raider.position, raider);
     if (!raider.avoidsWalls) {
       raider.advance(pace / FPS);
       return;
@@ -819,11 +865,23 @@ export class Game {
     return count > 0 ? total / count : 0;
   }
 
-  /** How many houses the current wall ring can support. */
+  /**
+   * How many buildings the settlement can support.
+   *
+   * A level with platforms has no wall ring to read, so what it grows on is
+   * the flat ground the player has raised, minus whatever the castle itself
+   * is standing on. Everywhere else still reads the walls.
+   */
   houseCapacity() {
     const castle = this.castles[0];
     if (!castle) {
       return 0;
+    }
+    if (this.platforms.size > 0) {
+      const top = PLATFORM.size * PLATFORM.size;
+      const taken = Math.min(this.platforms.size * top, (castle.type.footprint * 2) ** 2);
+      const usableArea = this.platforms.size * top - taken;
+      return Math.min(HOUSES.maxHouses, Math.floor(usableArea / PLATFORM.areaPerHouse));
     }
     const usable = this.settlementRadius() - castle.type.footprint - HOUSES.innerMargin;
     if (usable <= 0) {
@@ -838,6 +896,9 @@ export class Game {
     if (!castle) {
       return null;
     }
+    if (this.platforms.size > 0) {
+      return this.pickPlatformSite(castle);
+    }
     const radius = this.settlementRadius();
     const inner = castle.type.footprint + HOUSES.innerMargin;
     if (radius <= inner) {
@@ -850,6 +911,30 @@ export class Game {
         x: castle.position.x + Math.cos(angle) * reach,
         y: castle.position.y + Math.sin(angle) * reach,
       };
+      if (this.houseSiteIsClear(point)) {
+        return point;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Somewhere on the flat top of a platform, clear of the castle and of
+   * every building already up there. Inset from the rim so nothing ends up
+   * perched half over the edge.
+   */
+  pickPlatformSite(castle) {
+    const tops = [...this.platforms.values()];
+    const reach = PLATFORM.size / 2 - HOUSES.minSpacing / 2;
+    for (let attempt = 0; attempt < HOUSES.placementAttempts; attempt += 1) {
+      const platform = tops[Math.floor(this.random() * tops.length)];
+      const point = {
+        x: platform.x + (this.random() - 0.5) * 2 * reach,
+        y: platform.y + (this.random() - 0.5) * 2 * reach,
+      };
+      if (distanceToSquare(point, castle.position, castle.type.footprint) < HOUSES.innerMargin) {
+        continue;
+      }
       if (this.houseSiteIsClear(point)) {
         return point;
       }

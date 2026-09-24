@@ -320,31 +320,41 @@ export const RAIDER_TYPES = {
 /**
  * Raising ground, which the island holds instead of building walls.
  *
- * A mound is one square of the grid, raised a step at a time. The point of
- * the pacing is that one raise is worth almost nothing: a mound only starts
- * turning raiders aside once it is several steps up, which takes long enough
- * that the player has to hold the ground with companies in the meantime
- * rather than terraforming their way out of trouble.
+ * A platform is one square of the grid, raised a step at a time. It is not a
+ * hill: the top is flat and the edge is very nearly a cliff, so a raider can
+ * only come up it slowly and arrives a third down on health. Nothing brings
+ * a platform down again -- what stops a player simply ringing their city
+ * with them is what each step costs, and how long it takes to rise.
+ *
+ * Buildings stand on whatever the ground does, so a platform raised under
+ * one carries it up (see Terrain#reshape, which applies platforms last for
+ * exactly that reason).
  */
-export const MOUND = {
+export const PLATFORM = {
   // The square the player picks, snapped to its own grid. Two ground cells
   // across: any smaller and the mesh cannot draw it (see TERRAIN.cellSize).
   size: 18,
-  // How far the slope runs out past the square, and how much one order adds.
-  skirt: 9,
+  // How far the face runs out past the square. Small enough to read as a
+  // wall of earth rather than a slope you could walk up.
+  skirt: 3,
   step: 3,
   maxSteps: 6,
   // How long a step takes to rise, and what it costs. The price climbs with
-  // the mound so that the sixth step is a real decision rather than a
+  // the platform so that the sixth step is a real decision rather than a
   // formality once the treasury is healthy.
   growSeconds: 8,
   cost: 70,
   costGrowth: 1.45,
-  // What raised ground actually does: everything crossing it is slowed, in
-  // proportion to how far it has been raised, up to this much at full
-  // height. Companies are slowed by it too -- earthworks do not know whose
-  // side they are on -- but raiders are the ones who have to cross them.
-  climbDrag: 0.6,
+  // What the face costs a raider coming up it: a crawl, and a third of its
+  // health by the time it stands on top. Only raiders pay -- the garrison
+  // knows its own earthworks. A platform this low is still a step up rather
+  // than a climb, and takes nothing.
+  climbFrom: 4,
+  climbPace: 0.18,
+  climbToll: 1 / 3,
+  // How much flat platform top one building in the settlement wants. With
+  // no walls to ring it, this is what decides how big the city can grow.
+  areaPerHouse: 190,
 };
 
 export const STARTING_CASTLE_TYPE = 'CC0';

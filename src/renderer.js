@@ -6,7 +6,7 @@ import {
   FLAG,
   HEALTH_COLORS,
   HOUSES,
-  MOUND,
+  PLATFORM,
   PALETTE,
   SUN,
   TERRAIN,
@@ -99,6 +99,11 @@ const FAR_CELL_SCALE = 4;
 // Steps autumn's turn is rounded to before it counts as a change worth
 // repainting the ground for.
 const GOLD_STEPS = 24;
+// How dark a ground tile may get for leaning away from the light. Without a
+// floor, the one-cell ramp at the foot of a platform came out very nearly
+// black -- a hole in the map rather than a slope, since the mesh has to
+// cover an 18-unit drop in a single 9-unit cell.
+const MIN_GROUND_LIGHT = 0.55;
 const TRUNK_DISTANCE = 420;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_BLOCKED = 'rgba(214, 92, 72, 0.95)';
@@ -119,6 +124,15 @@ const BOAT = {
   beachOffset: 17,
   hull: [102, 68, 44], deck: [132, 96, 62], mast: [86, 58, 38],
 };
+
+// The face of a platform: a revetment of the same stone the island's keeps
+// are built on, so raised ground reads as something built rather than a
+// lump in the landscape.
+const PLATFORM_FACE = [196, 186, 166];
+// A platform's face is mostly what the player sees of it, and two of its
+// four sides never catch the sun at all. Left at plain ambient they came out
+// near black; this is the same floor the ground mesh uses.
+const PLATFORM_FACE_MIN_LIGHT = MIN_GROUND_LIGHT;
 
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
@@ -378,10 +392,18 @@ export class Renderer {
     return result;
   }
 
-  /** The one house shape, compiled and shaded once and shared by every house. */
-  get houseModel() {
-    if (!this._houseModel) {
-      this._houseModel = compileStructure(HOUSE_DEFINITION).map((face) => {
+  /**
+   * The house shape, compiled and shaded once and shared by every house.
+   * A level may field its own -- the island's settlement is built of little
+   * keeps rather than houses -- so this is keyed on the definition.
+   */
+  houseModelFor(definition) {
+    if (!this._houseModels) {
+      this._houseModels = new Map();
+    }
+    const cached = this._houseModels.get(definition);
+    if (!cached) {
+      const model = compileStructure(definition).map((face) => {
         const normal = normalOf(face.points[0], face.points[1], face.points[2]);
         return {
           points: face.points,
@@ -392,8 +414,10 @@ export class Renderer {
           partBase: face.partBase ?? 0,
         };
       });
+      this._houseModels.set(definition, model);
+      return model;
     }
-    return this._houseModel;
+    return cached;
   }
 
   resize(width, height) {
@@ -416,11 +440,12 @@ export class Renderer {
     // Once the last castle falls, the city blackens over BREACH.collapseSeconds
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
+    this.collectPlatforms(items, view, game);
     this.collectBoats(items, view, game.landings, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
     this.collectTowers(items, view, game.walls, game.terrain);
-    this.collectHouses(items, view, game.houses, game.terrain);
+    this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
     this.collectRaiders(items, view, game.raiders, game.terrain);
     this.collectRaiders(items, view, game.guards, game.terrain);
     items.sort((a, b) => b.depth - a.depth);
@@ -472,7 +497,7 @@ export class Renderer {
     // the eye catches over the minute it takes.
     const gold = seasonBlend(game.seasonPhase).groundGold;
     const turned = Math.round(gold * GOLD_STEPS) / GOLD_STEPS;
-    // Reshaped ground is part of what the mesh draws, so a mound climbing
+    // Reshaped ground is part of what the mesh draws, so a platform climbing
     // has to count as a change the same way the camera moving does.
     const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
@@ -612,7 +637,10 @@ export class Renderer {
         const normalX = -slopeX * relief;
         const normalY = -slopeY * relief;
         const length = Math.hypot(normalX, normalY, 1);
-        const light = lightingForVector(normalX / length, normalY / length, 1 / length);
+        const light = Math.max(
+          MIN_GROUND_LIGHT,
+          lightingForVector(normalX / length, normalY / length, 1 / length),
+        );
         terrain.groundTintAt(xs[i], ys[j], tint, gold);
         const red = Math.round(tint[0] * light);
         const green = Math.round(tint[1] * light);
@@ -703,7 +731,7 @@ export class Renderer {
     return base && top ? Math.abs(base.y - top.y) : 0;
   }
 
-  collectPrism(items, view, quads, tint) {
+  collectPrism(items, view, quads, tint, minLight = 0) {
     for (const quad of quads) {
       const normal = normalOf(quad[0], quad[1], quad[2]);
       const centre = centroid(quad);
@@ -729,8 +757,55 @@ export class Renderer {
         kind: 'face',
         depth: depth / quad.length,
         points,
-        fill: shade(tint, lightingFor(normal)),
+        fill: shade(tint, Math.max(minLight, lightingFor(normal))),
       });
+    }
+  }
+
+  /**
+   * The faces of the raised platforms.
+   *
+   * The ground mesh already draws their flat tops at the right height, but
+   * it cannot draw their sides: the drop happens well inside one mesh cell,
+   * so the edge came out as a smear across a tile rather than the cliff it
+   * is meant to be. Each exposed side is drawn here as its own quad, from
+   * the wild ground at its foot to the platform at its top.
+   *
+   * A side shared with a platform standing at least as high is skipped --
+   * it is inside the earth, and drawing it would show a wall through the
+   * middle of a shelf.
+   */
+  collectPlatforms(items, view, game) {
+    if (game.platforms.size === 0) {
+      return;
+    }
+    const half = PLATFORM.size / 2;
+    for (const platform of game.platforms.values()) {
+      if (platform.lift <= 0 || !this.onScreenFor(view, platform, PLATFORM.size)) {
+        continue;
+      }
+      const top = platform.zone.base + platform.lift;
+      const [cellX, cellY] = platform.key.split('|').map(Number);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const neighbour = game.platforms.get(`${cellX + dx}|${cellY + dy}`);
+        if (neighbour && neighbour.zone.base + neighbour.lift >= top - 0.01) {
+          continue;
+        }
+        // The two corners of this side, in the order that leaves the quad
+        // wound outwards so back-face culling keeps the far sides hidden.
+        const along = { x: -dy, y: dx };
+        const mid = { x: platform.x + dx * half, y: platform.y + dy * half };
+        const a = { x: mid.x - along.x * half, y: mid.y - along.y * half };
+        const b = { x: mid.x + along.x * half, y: mid.y + along.y * half };
+        const footA = game.terrain.wildHeightAt(a.x, a.y);
+        const footB = game.terrain.wildHeightAt(b.x, b.y);
+        this.collectPrism(items, view, [[
+          { x: a.x, y: a.y, z: footA },
+          { x: b.x, y: b.y, z: footB },
+          { x: b.x, y: b.y, z: top },
+          { x: a.x, y: a.y, z: top },
+        ]], PLATFORM_FACE, PLATFORM_FACE_MIN_LIGHT);
+      }
     }
   }
 
@@ -822,10 +897,10 @@ export class Renderer {
    * Houses behind the walls. A burning one is skipped here entirely — it is
    * drawn instead as a burst of fire in drawBurningHouses, on the overlay.
    */
-  collectHouses(items, view, houses, terrain) {
-    const faces = this.houseModel;
+  collectHouses(items, view, houses, terrain, definition) {
+    const faces = this.houseModelFor(definition);
     for (const house of houses) {
-      if (house.burning || !this.onScreenFor(view, house.position, HOUSE_DEFINITION.radius)) {
+      if (house.burning || !this.onScreenFor(view, house.position, definition.radius)) {
         continue;
       }
       const ground = terrain.heightAt(house.position.x, house.position.y);
@@ -1052,7 +1127,7 @@ export class Renderer {
   /**
    * The square of ground the raise tool is over, outlined on the ground
    * itself rather than as a flat rectangle on the screen -- it follows the
-   * mound it is standing on, so the player can see what another step would
+   * platform it is standing on, so the player can see what another step would
    * be building on before paying for it.
    */
   drawHoveredSquare(view, game) {
@@ -1060,7 +1135,7 @@ export class Renderer {
     if (!square) {
       return;
     }
-    const half = MOUND.size / 2;
+    const half = PLATFORM.size / 2;
     const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
       const x = square.x + half * sx;
       const y = square.y + half * sy;

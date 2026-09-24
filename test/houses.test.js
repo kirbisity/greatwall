@@ -8,6 +8,20 @@ function fixedRandom(value = 0.5) {
   return () => value;
 }
 
+/**
+ * Spread-out but repeatable. House siting needs a random that actually
+ * moves around -- a fixed one drops every attempt on the same spot -- but
+ * leaving it to Math.random made "did the last slot get filled" a coin
+ * toss that occasionally came up short.
+ */
+function spreadRandom(seed = 1) {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+}
+
 function stepSeconds(game, seconds) {
   for (let frame = 0; frame < seconds * FPS; frame += 1) {
     game.step();
@@ -64,7 +78,7 @@ test('capacity never exceeds HOUSES.maxHouses', () => {
 test('houses spawn over time up to capacity and then stop', () => {
   // A fixed random would place every attempt at the same point, so only the
   // first house could ever find a clear site; this needs real spread.
-  const game = new Game({ random: Math.random });
+  const game = new Game({ random: spreadRandom() });
   game.tokens = 100000;
   ring(game, 200);
   const capacity = game.houseCapacity();

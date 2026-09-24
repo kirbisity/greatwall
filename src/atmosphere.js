@@ -8,6 +8,7 @@ import {
   SEASONS,
 } from './config.js';
 import { groundAt, projectPoint } from './projection.js';
+import { seasonBlend } from './season.js';
 
 /** Positive remainder, so wrapping works for negative offsets too. */
 function wrap(value, span) {
@@ -15,31 +16,6 @@ function wrap(value, span) {
 }
 
 const MAX_CLOUD_BOOST = Math.max(...SEASONS.map((season) => season.cloudBoost));
-
-/**
- * The year's atmosphere at a given moment, blended rather than switched.
- *
- * `seasonPhase` is the season index plus how far through it the game is (0
- * at the start of autumn, 1.5 at the middle of winter, and so on). Each
- * season's own haze, density and cloud cover hold exactly at its midpoint
- * and blend linearly to the next season's across the boundary between them,
- * so nothing about the sky changes on the tick a season turns.
- */
-function seasonBlend(seasonPhase) {
-  const count = SEASONS.length;
-  const raw = seasonPhase - 0.5;
-  const base = Math.floor(raw);
-  const t = raw - base;
-  const from = SEASONS[((base % count) + count) % count];
-  const to = SEASONS[(((base + 1) % count) + count) % count];
-  const fromHaze = from.haze.split(',').map(Number);
-  const toHaze = to.haze.split(',').map(Number);
-  return {
-    haze: fromHaze.map((channel, i) => Math.round(channel + (toHaze[i] - channel) * t)).join(', '),
-    hazeDensity: from.hazeDensity + (to.hazeDensity - from.hazeDensity) * t,
-    cloudBoost: from.cloudBoost + (to.cloudBoost - from.cloudBoost) * t,
-  };
-}
 
 /**
  * Distance haze and drifting cloud decks.
@@ -183,6 +159,20 @@ export class Atmosphere {
       });
     }
     return placed;
+  }
+
+  /**
+   * A wash of the season's own colour over the whole view -- summer's
+   * orange heat, and nothing at all the rest of the year. One fill, laid
+   * over the haze and cloud so it colours them too.
+   */
+  drawTint(context, seasonPhase) {
+    const { tint, tintStrength } = seasonBlend(seasonPhase);
+    if (tintStrength <= 0) {
+      return;
+    }
+    context.fillStyle = `rgba(${tint},${tintStrength.toFixed(3)})`;
+    context.fillRect(0, 0, this.camera.width, this.camera.height);
   }
 
   drawClouds(context, seasonPhase = 0) {

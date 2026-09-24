@@ -437,6 +437,14 @@ export const TERRAIN = {
   // of grass reads as textured turf rather than one flat fill.
   mottleScale: 30,
   mottleStrength: 0.18,
+
+  // Autumn turns the green bands gold -- but only in patches, picked by a
+  // noise of their own, so the map reads as woodland colour coming on
+  // unevenly rather than the whole field being repainted at once. Ground
+  // above the threshold turns, the more so the further above it sits.
+  autumnPatchScale: 55,
+  autumnPatchThreshold: 0.45,
+  autumnGold: '#c98f2c',
 };
 
 // Each season's own haze colour, how much it thickens the fog (1 is the
@@ -444,11 +452,33 @@ export const TERRAIN = {
 // year-round count in CLOUD_LAYERS). Atmosphere.seasonBlend holds these
 // exactly at a season's midpoint and blends across the turn on either side,
 // so nothing here is ever a hard cut in play.
+// `tint` is a wash laid over the whole view at `tintStrength`, and
+// `groundGold` how far the green bands have turned (see Terrain's
+// groundTintAt). Only the season that owns a look carries it: season.js
+// blends between neighbours, so summer's orange is already fading as autumn
+// arrives and autumn's gold is already creeping in before it.
 export const SEASONS = [
-  { name: 'Autumn', haze: '214, 194, 146', hazeDensity: 1, cloudBoost: 1 },
-  { name: 'Winter', haze: '236, 239, 241', hazeDensity: 1.8, cloudBoost: 1.9 },
-  { name: 'Spring', haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1 },
-  { name: 'Summer', haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1 },
+  {
+    name: 'Autumn',
+    haze: '214, 194, 146', hazeDensity: 1, cloudBoost: 1,
+    tint: '226, 150, 62', tintStrength: 0, groundGold: 1,
+  },
+  {
+    name: 'Winter',
+    // Snow coming: the thickest haze of the year, and the most cloud.
+    haze: '236, 239, 241', hazeDensity: 3.2, cloudBoost: 1.9,
+    tint: '198, 216, 236', tintStrength: 0, groundGold: 0,
+  },
+  {
+    name: 'Spring',
+    haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1,
+    tint: '168, 222, 168', tintStrength: 0, groundGold: 0,
+  },
+  {
+    name: 'Summer',
+    haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1,
+    tint: '255, 132, 40', tintStrength: 0.16, groundGold: 0,
+  },
 ];
 
 /**

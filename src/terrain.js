@@ -46,14 +46,16 @@ function hexByte(value) {
 
 // Each band both ways round, worked out once. Their colours are fixed, and
 // the mesh asks for a tile's colour thousands of times a repaint -- parsing
-// '#rrggbb' that often is pure waste.
-function band(hex) {
-  return { hex, channels: channelsOf(hex) };
+// '#rrggbb' that often is pure waste. `turns` marks the green bands, the
+// ones autumn takes gold.
+function band(hex, turns = false) {
+  return { hex, channels: channelsOf(hex), turns };
 }
-const GRASS = band(TERRAIN.grassColor);
-const MOSS = band(TERRAIN.mossColor);
+const GRASS = band(TERRAIN.grassColor, true);
+const MOSS = band(TERRAIN.mossColor, true);
 const DIRT = band(TERRAIN.dirtColor);
 const ROCK = band(TERRAIN.rockColor);
+const AUTUMN_GOLD = channelsOf(TERRAIN.autumnGold);
 
 /** Which band a patch's grain falls in. */
 function bandFor(grain) {
@@ -275,21 +277,36 @@ export class Terrain {
    * other way about, which used to mean formatting a string per tile purely
    * for the renderer to parse it straight back. `into` lets a caller drawing
    * thousands of tiles hand over one array rather than be given thousands.
+   *
+   * `gold` is how far through autumn the year has got (see season.js). It
+   * only takes the green bands, and only where its own patch noise runs
+   * high, so the turn comes on in drifts across the map rather than
+   * everywhere at once.
    */
-  groundTintAt(x, y, into = [0, 0, 0]) {
+  groundTintAt(x, y, into = [0, 0, 0], gold = 0) {
     // Ground reads as bare rock once a mountain has raised it enough to
     // matter, whatever band the noise underneath would otherwise have said
     // -- the outer skirt stays whatever it was, so a mountain rises out of
     // the ground it stands on rather than starting with a hard edge.
-    const base = (this.isMountainSlope(x, y) ? ROCK : this.bandAt(x, y)).channels;
+    const band = this.isMountainSlope(x, y) ? ROCK : this.bandAt(x, y);
+    const base = band.channels;
     // A finer noise mottles the band's colour, so a patch reads as textured
     // rather than a flat fill -- the same trick as the band itself, one size
     // down.
     const fleck = valueNoise(x / TERRAIN.mottleScale, y / TERRAIN.mottleScale, this.seed + 227);
     const scale = 1 + (fleck - 0.5) * TERRAIN.mottleStrength;
-    into[0] = toChannel(base[0] * scale);
-    into[1] = toChannel(base[1] * scale);
-    into[2] = toChannel(base[2] * scale);
+    let red = base[0] * scale;
+    let green = base[1] * scale;
+    let blue = base[2] * scale;
+    const turning = gold > 0 && band.turns ? gold * this.autumnPatchAt(x, y) : 0;
+    if (turning > 0) {
+      red += (AUTUMN_GOLD[0] - red) * turning;
+      green += (AUTUMN_GOLD[1] - green) * turning;
+      blue += (AUTUMN_GOLD[2] - blue) * turning;
+    }
+    into[0] = toChannel(red);
+    into[1] = toChannel(green);
+    into[2] = toChannel(blue);
     return into;
   }
 
@@ -297,6 +314,18 @@ export class Terrain {
   groundColorAt(x, y) {
     const tint = this.groundTintAt(x, y);
     return `#${hexByte(tint[0])}${hexByte(tint[1])}${hexByte(tint[2])}`;
+  }
+
+  /**
+   * How readily this patch turns in autumn, 0 to 1. Ground below the
+   * threshold never turns at all, which is what leaves green among the gold.
+   */
+  autumnPatchAt(x, y) {
+    const patch = valueNoise(x / TERRAIN.autumnPatchScale, y / TERRAIN.autumnPatchScale, this.seed + 331);
+    if (patch <= TERRAIN.autumnPatchThreshold) {
+      return 0;
+    }
+    return (patch - TERRAIN.autumnPatchThreshold) / (1 - TERRAIN.autumnPatchThreshold);
   }
 
   /** How thick the woodland is here, 0 to 1. */

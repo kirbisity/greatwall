@@ -25,6 +25,7 @@ import {
   projectPoint,
 } from './projection.js';
 import { Atmosphere } from './atmosphere.js';
+import { seasonBlend } from './season.js';
 import { settings } from './settings.js';
 import { BUILDINGS } from './buildings/index.js';
 import { compileStructure } from './structures.js';
@@ -95,6 +96,9 @@ const GROUND_SPAN = 1.05;
 // which is what makes covering the extra ground this cheap.
 const FAR_GROUND_SPAN = 1.8;
 const FAR_CELL_SCALE = 4;
+// Steps autumn's turn is rounded to before it counts as a change worth
+// repainting the ground for.
+const GOLD_STEPS = 24;
 const TRUNK_DISTANCE = 420;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
@@ -369,6 +373,7 @@ export class Renderer {
     if (settings.atmosphere) {
       this.atmosphere.drawFog(this.overlay, game.seasonPhase);
       this.atmosphere.drawClouds(this.overlay, game.seasonPhase);
+      this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
     this.drawWorkingWalls(view, game);
@@ -401,7 +406,14 @@ export class Renderer {
    */
   drawGround(game) {
     const { width, height, focus, distance, elevation } = this.camera;
-    const key = `${focus.x}|${focus.y}|${distance}|${elevation}`;
+    // Autumn turns the green in steps rather than continuously: the ground
+    // is only repainted when the view moves, so the turn has to be part of
+    // what counts as a change. Quantised, so a season's worth of turning
+    // costs a few dozen repaints instead of one per frame -- far finer than
+    // the eye catches over the minute it takes.
+    const gold = seasonBlend(game.seasonPhase).groundGold;
+    const turned = Math.round(gold * GOLD_STEPS) / GOLD_STEPS;
+    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -418,9 +430,9 @@ export class Renderer {
 
     // The coarse backdrop first, so the fine mesh -- and the woods, which
     // only ever stand on it -- paint over it wherever it actually matters.
-    this.drawLandscape(game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE);
+    this.drawLandscape(game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE, turned);
     const bounds = this.groundBounds(GROUND_SPAN);
-    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize);
+    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize, turned);
     this.drawWoods(game, bounds);
   }
 
@@ -465,7 +477,7 @@ export class Renderer {
    * times. The corners are walked once here instead and the tiles read back
    * from that, which is where nearly all of this pass's cost went.
    */
-  drawLandscape(terrain, bounds, cell) {
+  drawLandscape(terrain, bounds, cell, gold = 0) {
     const context = this.ground;
     const view = this.camera.view;
     const { width, height } = this.camera;
@@ -537,7 +549,7 @@ export class Renderer {
         const normalY = -slopeY * TERRAIN.slopeRelief;
         const length = Math.hypot(normalX, normalY, 1);
         const light = lightingForVector(normalX / length, normalY / length, 1 / length);
-        terrain.groundTintAt(xs[i], ys[j], tint);
+        terrain.groundTintAt(xs[i], ys[j], tint, gold);
         const red = Math.round(tint[0] * light);
         const green = Math.round(tint[1] * light);
         const blue = Math.round(tint[2] * light);

@@ -25,6 +25,14 @@ function ease(t) {
   return t * t * (3 - 2 * t);
 }
 
+/** Scale a '#rrggbb' colour's channels by `1 + amount`, clamped to a byte. */
+function mottled(hex, amount) {
+  const scale = 1 + amount;
+  const channel = (start) => Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(start, start + 2), 16) * scale)))
+    .toString(16).padStart(2, '0');
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
+
 function valueNoise(x, y, seed) {
   const cellX = Math.floor(x);
   const cellY = Math.floor(y);
@@ -86,13 +94,15 @@ export class Terrain {
    */
   groundColorAt(x, y) {
     const grain = valueNoise(x / TERRAIN.groundScale, y / TERRAIN.groundScale, this.seed + 149);
-    if (grain > TERRAIN.rockThreshold) {
-      return TERRAIN.rockColor;
-    }
-    if (grain > TERRAIN.dirtThreshold) {
-      return TERRAIN.dirtColor;
-    }
-    return TERRAIN.grassColor;
+    const base = grain > TERRAIN.rockThreshold ? TERRAIN.rockColor
+      : grain > TERRAIN.dirtThreshold ? TERRAIN.dirtColor
+        : grain > TERRAIN.mossThreshold ? TERRAIN.mossColor
+          : TERRAIN.grassColor;
+    // A finer noise mottles the band's colour, so a patch reads as textured
+    // rather than a flat fill -- the same trick as the band itself, one size
+    // down.
+    const fleck = valueNoise(x / TERRAIN.mottleScale, y / TERRAIN.mottleScale, this.seed + 227);
+    return mottled(base, (fleck - 0.5) * TERRAIN.mottleStrength);
   }
 
   /** How thick the woodland is here, 0 to 1. */

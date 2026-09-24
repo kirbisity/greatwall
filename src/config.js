@@ -395,15 +395,21 @@ export const TERRAIN = {
   // range is kept short enough that this stays cheap at any distance.
   cellSize: 9,
 
-  // Ground colour reads as patches of grass, dirt and bare rock, picked per
-  // cell from its own noise rather than tinted by season -- the year now
+  // Ground colour reads as patches of grass, moss, dirt and bare rock, picked
+  // per cell from its own noise rather than tinted by season -- the year now
   // shows through the fog, not the dirt underfoot.
   groundScale: 200,
-  dirtThreshold: 0.55,
+  mossThreshold: 0.40,
+  dirtThreshold: 0.60,
   rockThreshold: 0.78,
   grassColor: '#6f8a49',
+  mossColor: '#546b39',
   dirtColor: '#8a7350',
   rockColor: '#8c887c',
+  // A second, finer noise mottles each band's colour a little, so a patch
+  // of grass reads as textured turf rather than one flat fill.
+  mottleScale: 30,
+  mottleStrength: 0.18,
 };
 
 export const SEASONS = [

@@ -80,9 +80,19 @@ const ROUTE_OPEN = '#7fd4ff';
 const ROUTE_SHUT = '#8a8a8a';
 const ROUTE_SIEGE = '#ff8a5c';
 
-// How far the ground mesh may reach from the focus, as a multiple of camera
-// distance. Stops a low tilt asking for half the world.
+// How far the fine ground mesh may reach from the focus, as a multiple of
+// camera distance. Covers a steep tilt's whole screen with a little room,
+// but a shallow one still needs up to ~1.66x this at the farthest distance
+// this camera allows -- see FAR_GROUND_SPAN for the cheaper mesh that covers
+// the rest, rather than clipping the fine one into a visible brim short of
+// the horizon.
 const GROUND_SPAN = 1.05;
+// How far the coarse backdrop mesh reaches -- past the worst case above,
+// with room to spare -- and how much bigger its tiles are than the fine
+// mesh's. A tile sixteen times the area costs a sixteenth as much to fill,
+// which is what makes covering the extra ground this cheap.
+const FAR_GROUND_SPAN = 1.8;
+const FAR_CELL_SCALE = 4;
 const TRUNK_DISTANCE = 420;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
@@ -363,11 +373,18 @@ export class Renderer {
    * nothing at all. Ground colour is fixed by position, not by season, so
    * this never needs repainting for the year turning either — only the fog
    * over it does that.
+   *
+   * The key is the camera's exact numbers, not a rounded fingerprint of
+   * them: settling the camera snaps focus, distance and elevation to their
+   * target bit-for-bit once it arrives (see Camera.settleFocus/settleZoom),
+   * so equality here is exact at rest and never accidentally true mid-glide.
+   * A rounded key used to repaint on only some frames of a pan and not
+   * others, which read as the ground stuttering against the smooth things
+   * drawn on top of it.
    */
   drawGround(game) {
     const { width, height, focus, distance, elevation } = this.camera;
-    const key = `${Math.round(focus.x)}|${Math.round(focus.y)}`
-      + `|${Math.round(distance)}|${Math.round(elevation * 4)}|${width}x${height}`;
+    const key = `${focus.x}|${focus.y}|${distance}|${elevation}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -382,13 +399,16 @@ export class Renderer {
     this.ground.fillStyle = wash;
     this.ground.fillRect(0, 0, width, height);
 
-    const bounds = this.groundBounds();
-    this.drawLandscape(game.terrain, bounds);
+    // The coarse backdrop first, so the fine mesh -- and the woods, which
+    // only ever stand on it -- paint over it wherever it actually matters.
+    this.drawLandscape(game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE);
+    const bounds = this.groundBounds(GROUND_SPAN);
+    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize);
     this.drawWoods(game, bounds);
   }
 
-  /** The patch of ground the view covers, clamped so a low tilt cannot run away. */
-  groundBounds() {
+  /** The patch of ground the view covers, capped so a stray low tilt cannot run away. */
+  groundBounds(spanFactor) {
     const { width, height } = this.camera;
     const corners = [
       this.camera.toWorld({ x: 0, y: height }),
@@ -396,7 +416,7 @@ export class Renderer {
       this.camera.toWorld({ x: 0, y: 0 }),
       this.camera.toWorld({ x: width, y: 0 }),
     ];
-    const span = this.camera.distance * GROUND_SPAN;
+    const span = this.camera.distance * spanFactor;
     const clamp = (value, middle) => Math.max(middle - span, Math.min(middle + span, value));
     const xs = corners.map((corner) => clamp(corner.x, this.camera.focus.x));
     const ys = corners.map((corner) => clamp(corner.y, this.camera.focus.y));
@@ -406,10 +426,9 @@ export class Renderer {
     };
   }
 
-  drawLandscape(terrain, bounds) {
+  drawLandscape(terrain, bounds, cell) {
     const context = this.ground;
     const view = this.camera.view;
-    const cell = TERRAIN.cellSize;
 
     for (let x = Math.floor(bounds.minX / cell) * cell; x < bounds.maxX; x += cell) {
       for (let y = Math.floor(bounds.minY / cell) * cell; y < bounds.maxY; y += cell) {

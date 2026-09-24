@@ -115,9 +115,18 @@ export function buildNavigation(walls, castle, version) {
   };
 }
 
-/** Cheapest gateway a raider can head straight for, or null if walled in. */
-export function routeFrom(navigation, from) {
+/**
+ * Cheapest gateway a raider can head straight for, or null if walled in.
+ *
+ * `held` is the gateway it picked last time. Two gateways of near-equal cost
+ * swap places as a company walks, so always taking the cheaper one sends it
+ * shuttling between them; the one already held wins every close call. Gateways
+ * are rebuilt with the graph, so a stale `held` simply fails to match and the
+ * company chooses afresh.
+ */
+export function routeFrom(navigation, from, held = null) {
   let best = null;
+  let heldCost = Infinity;
   for (let i = 0; i < navigation.gateways.length; i += 1) {
     const toCastle = navigation.distances[i];
     if (!Number.isFinite(toCastle)) {
@@ -125,13 +134,22 @@ export function routeFrom(navigation, from) {
     }
     const gateway = navigation.gateways[i];
     const cost = distance(from, gateway) + toCastle;
-    if (best && cost >= best.cost) {
+    const cheaper = !best || cost < best.cost;
+    if (!cheaper && gateway !== held) {
       continue;
     }
     if (isBlocked(from, gateway, navigation.barriers)) {
       continue;
     }
-    best = { cost, waypoint: gateway };
+    if (gateway === held) {
+      heldCost = cost;
+    }
+    if (cheaper) {
+      best = { cost, waypoint: gateway };
+    }
+  }
+  if (best && heldCost <= best.cost + AVOIDANCE.gatewaySwitchMargin) {
+    return { cost: heldCost, waypoint: held };
   }
   return best;
 }

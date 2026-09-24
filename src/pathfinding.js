@@ -21,14 +21,35 @@ function chooseWaypoint(raider, navigation) {
   }
   if (navigation.barriers.length === 0 || !isBlocked(raider.position, castle, navigation.barriers)) {
     raider.siegeTarget = null;
+    raider.heldGateway = null;
     return castle;
   }
 
-  const givenUp = raider.stuckSeconds >= AVOIDANCE.patienceSeconds;
-  if (!givenUp) {
-    const route = routeFrom(navigation, raider.position);
-    if (route) {
+  // A company that has sworn to batter a section keeps at it. Left to think
+  // again it would drop the siege at once, set off down the very route that
+  // stranded it, give up again, and come back: the loop it was in to start.
+  const sworn = raider.siegeSeconds > 0
+    && raider.siegeTarget
+    && navigation.barriers.includes(raider.siegeTarget);
+
+  // The promise has run out. Hand its patience back, so it truly gives the
+  // way round another go instead of settling in against stone it cannot
+  // break. Batter, walk, batter: each stint long enough to be worth making.
+  if (!sworn && raider.siegeTarget) {
+    raider.stuckSeconds = 0;
+    raider.closestApproach = Infinity;
+  }
+
+  if (!sworn && raider.stuckSeconds < AVOIDANCE.patienceSeconds) {
+    const route = routeFrom(navigation, raider.position, raider.heldGateway);
+    // A way round that far outruns the direct line is not a way round worth
+    // walking; the stone is the shorter road.
+    const direct = Math.hypot(castle.x - raider.position.x, castle.y - raider.position.y);
+    const worthIt = route && (!raider.besieges
+      || route.cost <= direct * AVOIDANCE.detourTolerance);
+    if (worthIt) {
       raider.siegeTarget = null;
+      raider.heldGateway = route.waypoint;
       return route.waypoint;
     }
   }
@@ -36,12 +57,14 @@ function chooseWaypoint(raider, navigation) {
     return castle;
   }
 
-  // Walled in. Keep hitting the same section so the damage adds up.
+  // Walled in, or out of patience with the way round. Keep hitting the same
+  // section so the damage adds up, and swear to it for a stint so the blows
+  // land instead of being thought better of a frame later.
   if (!raider.siegeTarget || !navigation.barriers.includes(raider.siegeTarget)) {
     raider.siegeTarget = siegeTarget(navigation, raider.position, castle);
-    // Fresh target, fresh patience: the way may be open once it falls.
-    raider.stuckSeconds = 0;
-    raider.closestApproach = Infinity;
+  }
+  if (raider.siegeTarget && raider.siegeSeconds <= 0) {
+    raider.siegeSeconds = AVOIDANCE.siegeCommitSeconds;
   }
   return raider.siegeTarget ? midpointOf(raider.siegeTarget) : castle;
 }
@@ -86,7 +109,8 @@ function shoveOffWalls(company, waypoint, navigation) {
 }
 
 function turnTowards(raider, waypoint) {
-  const desired = Math.atan2(waypoint.y - raider.position.y, waypoint.x - raider.position.x);
+  const desired = raider.wander
+    + Math.atan2(waypoint.y - raider.position.y, waypoint.x - raider.position.x);
   let heading = raider.heading;
 
   // Shortest way round to the wanted heading.
@@ -117,12 +141,28 @@ function needsNewWaypoint(raider, navigation) {
     || distanceSquared(raider.position, raider.waypoint) < NAVIGATION.arriveRadius ** 2;
 }
 
-export function steerCompany(raider, navigation) {
+/**
+ * Drift this company's private bias on its aim by a hair. Geometry alone is
+ * perfectly repeatable, so a company that steers itself into a corner steers
+ * itself into the same corner next time round for ever. A little noise on the
+ * heading is enough to break the cycle, and stays well under the turn easing
+ * so it reads as a company wavering rather than one staggering.
+ */
+function drift(company, random) {
+  const step = (random() * 2 - 1) * AVOIDANCE.wanderStep;
+  company.wander = Math.max(
+    -AVOIDANCE.wanderRadians,
+    Math.min(AVOIDANCE.wanderRadians, company.wander + step),
+  );
+}
+
+export function steerCompany(raider, navigation, random = Math.random) {
   raider.replanCountdown -= 1;
   if (needsNewWaypoint(raider, navigation)) {
     raider.waypoint = chooseWaypoint(raider, navigation);
     raider.planVersion = navigation.version;
     raider.replanCountdown = NAVIGATION.replanFrames;
+    drift(raider, random);
   }
   const aim = raider.siegeTarget || !raider.avoidsWalls
     ? raider.waypoint

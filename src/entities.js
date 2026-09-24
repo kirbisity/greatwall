@@ -184,6 +184,9 @@ class Company {
     // Progress watch, so a company that is going nowhere can give up.
     this.closestApproach = Infinity;
     this.stuckSeconds = 0;
+    // A hair of bias on its aim, its own and drifting, so two companies in
+    // the same fix do not make the same wrong choice for ever.
+    this.wander = 0;
     // 0 in the clear, 1 astride a wall and slowed to a crawl by it.
     this.crossing = 0;
     // Navigation state, so a company thinks a few times a second rather than
@@ -242,8 +245,11 @@ export class Raider extends Company {
     super(typeId, type, position);
     this.besieges = true;
     this.avoidsWalls = true;
-    // Which section to batter when walled in.
+    // Which section to batter when walled in, the way round it is currently
+    // holding to, and how long it has sworn to keep swinging.
     this.siegeTarget = null;
+    this.heldGateway = null;
+    this.siegeSeconds = 0;
   }
 }
 

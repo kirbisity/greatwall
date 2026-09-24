@@ -113,8 +113,30 @@ export const AVOIDANCE = {
   // Giving up: a company that has not closed on its destination by
   // `progressEpsilon` within `patienceSeconds` stops hunting for a way round
   // and attacks whatever is in its way.
-  patienceSeconds: 8,
+  patienceSeconds: 7,
   progressEpsilon: 8,
+
+  // A way round longer than this multiple of the direct line is not worth
+  // walking. Raiders would rather put their shoulders to the stone than march
+  // the length of a wall that someone has drawn right across the map.
+  detourTolerance: 3,
+
+  // Sticking to a choice. Two ways round of near-equal cost trade places as a
+  // company moves, and re-picking the cheaper one every time it thinks walks
+  // it back and forth between them for ever. A new way has to beat the one it
+  // already holds by this much before it is worth swapping to.
+  gatewaySwitchMargin: 40,
+  // Having settled on a section to batter, a company stays on it this long
+  // rather than dropping the siege on its very next thought, wandering back
+  // towards a route it has already failed to walk, and starting over.
+  siegeCommitSeconds: 3,
+
+  // A hair of noise on each company's aim, drifting by `wanderStep` a thought
+  // and held inside `wanderRadians`. Identical companies in identical spots
+  // otherwise make the identical wrong choice for ever; this is what shakes a
+  // deadlocked one out of the loop without it looking drunk.
+  wanderRadians: 0.06,
+  wanderStep: 0.02,
 };
 
 /** Melee: what happens when the two sides meet. */

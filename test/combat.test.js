@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Raider, Wall } from '../src/entities.js';
 import { steerCompany } from '../src/pathfinding.js';
-import { buildNavigation } from '../src/navigation.js';
-import { FPS, WALL } from '../src/config.js';
+import { buildNavigation, routeFrom } from '../src/navigation.js';
+import { AVOIDANCE, FPS, WALL } from '../src/config.js';
 
 /** Frames a raider spends inside a wall's damage band crossing it head-on. */
 function contactFrames(raider) {
@@ -130,4 +130,67 @@ test('a badly damaged section still blocks until it is destroyed', () => {
   wall.health = 1;
   navigate(raider, [wall]);
   assert.notDeepEqual(raider.waypoint, CITY, 'a wall on its last legs is still a wall');
+});
+
+// --- not walking in circles ----------------------------------------------
+//
+// Every test below pins a rule that exists only to stop a company looping.
+// They are the cheapest place to catch a raider that has started pacing.
+
+test('a company keeps the way round it already holds through a near tie', () => {
+  const wall = new Wall({ x: 80, y: -60 }, { x: 80, y: 60 });
+  const navigation = buildNavigation([wall], CITY, 'ties');
+  const below = navigation.gateways.find((gateway) => gateway.y < 0);
+  const above = navigation.gateways.find((gateway) => gateway.y > 0);
+
+  // Just off centre. The lower way round is the cheaper of the two now, but
+  // only barely, and swapping on that would swap back a moment later.
+  const offCentre = { x: 160, y: -10 };
+  assert.equal(routeFrom(navigation, offCentre).waypoint, below, 'cheaper on the merits');
+  assert.equal(routeFrom(navigation, offCentre, above).waypoint, above, 'holds its line');
+
+  // Far enough over and the saving is worth the swap after all.
+  const wellOver = { x: 160, y: -60 };
+  assert.equal(routeFrom(navigation, wellOver, above).waypoint, below, 'worth swapping for');
+});
+
+test('a company that turns on a wall keeps swinging at it', () => {
+  const raider = approaching();
+  const wall = new Wall({ x: 80, y: -60 }, { x: 80, y: 60 });
+  raider.stuckSeconds = AVOIDANCE.patienceSeconds;
+  navigate(raider, [wall]);
+  assert.equal(raider.siegeTarget, wall, 'out of patience, so it picked the wall');
+
+  // Thinking again straight away must not undo that: the way round it would
+  // go back to is the one that stranded it in the first place.
+  raider.replanCountdown = 0;
+  navigate(raider, [wall]);
+  assert.equal(raider.siegeTarget, wall, 'still on the wall');
+
+  // Once that promise runs out it is free to look for a way round again.
+  raider.siegeSeconds = 0;
+  raider.replanCountdown = 0;
+  navigate(raider, [wall]);
+  assert.equal(raider.siegeTarget, null, 'free to try the way round again');
+});
+
+test('a way round far longer than the direct line is not worth walking', () => {
+  const raider = approaching();
+  // Drawn right across the map: both ends are open, but reaching one and
+  // coming back is an order of magnitude further than the city itself.
+  const sprawl = new Wall({ x: 80, y: -2000 }, { x: 80, y: 2000 });
+  navigate(raider, [sprawl]);
+  assert.equal(raider.siegeTarget, sprawl, 'goes through it rather than round it');
+});
+
+test('the wander on a company aim stays a hair either side of its route', () => {
+  const raider = approaching();
+  const open = buildNavigation([], CITY, 'open');
+  // The hardest one-sided push the drift can be given, over and over.
+  for (let thought = 0; thought < 50; thought += 1) {
+    raider.replanCountdown = 0;
+    steerCompany(raider, open, () => 1);
+  }
+  assert.ok(raider.wander > 0, 'it does drift');
+  assert.ok(raider.wander <= AVOIDANCE.wanderRadians, 'but never past its bound');
 });

@@ -324,7 +324,9 @@ export class Game {
       }
       raider.destination = this.raiderDestination(raider, target);
       this.trackProgress(raider, 1 / FPS);
-      steerCompany(raider, navigation);
+      // Runs down whatever siege it has sworn to; at zero it may think again.
+      raider.siegeSeconds = Math.max(0, raider.siegeSeconds - 1 / FPS);
+      steerCompany(raider, navigation, this.random);
       this.advanceAgainstWalls(navigation, raider);
       this.resolveWallContact(navigation, raider);
       if (raider.isAlive && target) {
@@ -484,7 +486,7 @@ export class Game {
       }
       guard.destination = this.guardDestination(guard);
       this.trackProgress(guard, 1 / FPS);
-      steerCompany(guard, navigation);
+      steerCompany(guard, navigation, this.random);
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
       const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);

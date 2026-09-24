@@ -381,11 +381,21 @@ export const TERRAIN = {
   // Companies lose this much of their pace in the thickest wood.
   forestDrag: 0.45,
 
-  // Mesh drawn for the ground. The cell size is chosen so one cell lands
-  // roughly this many pixels across, whatever the zoom.
-  meshCellPixels: 86,
-  minCell: 34,
-  maxCell: 240,
+  // Mesh drawn for the ground: a fixed-size tile in world units, a quarter
+  // the size of the old zoom-compensated cell. It is not resized for the
+  // camera, so a tile genuinely grows and shrinks on screen as the camera
+  // zooms rather than being held at a constant apparent size.
+  cellSize: 9,
+
+  // Fine tiles are only drawn within this radius of the camera's focus; the
+  // wash gradient underneath shows through past it. A canvas fill costs
+  // about the same regardless of a tile's size, so a fixed radius keeps the
+  // tile count -- and so the repaint cost -- flat no matter how far the
+  // camera has zoomed out, instead of growing with the visible ground area.
+  // Tiles fade out approaching the radius, past detailFadeFraction of it, so
+  // the patch reads as a soft island over the wash rather than a hard box.
+  detailRadius: 100,
+  detailFadeFraction: 0.7,
 
   // Ground colour reads as patches of grass, dirt and bare rock, picked per
   // cell from its own noise rather than tinted by season -- the year now

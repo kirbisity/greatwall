@@ -27,7 +27,6 @@ import {
 import { Atmosphere } from './atmosphere.js';
 import { seasonBlend } from './season.js';
 import { settings } from './settings.js';
-import { BUILDINGS } from './buildings/index.js';
 import { compileStructure } from './structures.js';
 import { compileUnit } from './units.js';
 
@@ -105,6 +104,19 @@ const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 const TRUNK_FILL = 'rgb(84,62,42)';
 const CANOPY_FILL = 'rgb(74,96,58)';
+
+// A beached raiding hull: how long, how wide at the stern and at the bow,
+// and how tall the freeboard, deckhouse and mast stand above the keel.
+const BOAT = {
+  length: 38, sternHalfWidth: 9, bowHalfWidth: 3.5, hullHeight: 6,
+  deckLength: 11, deckHalfWidth: 5.5, deckHeight: 4.5,
+  mastHalfWidth: 0.7, mastHeight: 20,
+  // How far seaward of the landing the hull sits, so the bow is up the sand
+  // and the stern still in the shallows rather than the whole boat parked
+  // on the grass behind the beach.
+  beachOffset: 17,
+  hull: [102, 68, 44], deck: [132, 96, 62], mast: [86, 58, 38],
+};
 
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
@@ -218,6 +230,47 @@ function squarePrism(centre, halfWidth, height, base = 0) {
   ], height, [base, base, base, base]);
 }
 
+/**
+ * The hulls the raiders came in on, run aground bow-first at each landing.
+ *
+ * `heading` is the way the boat points -- up the beach, away from the open
+ * water -- so the wide stern sits where the sea is and the narrow bow on the
+ * sand. Each corner takes its own ground height, which drops the stern into
+ * the shallows and cants the hull the way a grounded boat actually sits.
+ */
+function boatPrisms(landing, terrain) {
+  const heading = landing.bearing + Math.PI;
+  const cos = Math.cos(heading);
+  const sin = Math.sin(heading);
+  const originX = landing.x - cos * BOAT.beachOffset;
+  const originY = landing.y - sin * BOAT.beachOffset;
+  const at = (along, across) => ({
+    x: originX + cos * along - sin * across,
+    y: originY + sin * along + cos * across,
+  });
+  const half = BOAT.length / 2;
+  const hull = [
+    at(-half, -BOAT.sternHalfWidth), at(half, -BOAT.bowHalfWidth),
+    at(half, BOAT.bowHalfWidth), at(-half, BOAT.sternHalfWidth),
+  ];
+  const ground = hull.map((point) => terrain.heightAt(point.x, point.y));
+  // Everything above the keel is measured off the highest corner, so the
+  // deckhouse and mast stand square on a hull that is itself tilted.
+  const keel = Math.max(...ground);
+  const deckHalf = BOAT.deckLength / 2;
+  const deck = [
+    at(-deckHalf - 2, -BOAT.deckHalfWidth), at(deckHalf - 2, -BOAT.deckHalfWidth),
+    at(deckHalf - 2, BOAT.deckHalfWidth), at(-deckHalf - 2, BOAT.deckHalfWidth),
+  ];
+  const deckBase = keel + BOAT.hullHeight;
+  const mast = at(2, 0);
+  return [
+    { quads: prismFrom(hull, BOAT.hullHeight, ground), tint: BOAT.hull },
+    { quads: prismFrom(deck, BOAT.deckHeight, [deckBase, deckBase, deckBase, deckBase]), tint: BOAT.deck },
+    { quads: squarePrism(mast, BOAT.mastHalfWidth, BOAT.mastHeight, deckBase), tint: BOAT.mast },
+  ];
+}
+
 function prismFrom(footprint, height, ground = null) {
   const base = footprint.map((point, i) => ({ x: point.x, y: point.y, z: ground ? ground[i] : 0 }));
   const top = footprint.map((point, i) => ({
@@ -297,12 +350,11 @@ export class Renderer {
   }
 
   /** Faces plus how far the furthest part sits from the centre, for a rebuild. */
-  structureFor(typeId) {
-    const cached = this.structures.get(typeId);
+  structureFor(definition) {
+    const cached = this.structures.get(definition);
     if (cached) {
       return cached;
     }
-    const definition = BUILDINGS[typeId];
     const faces = definition ? compileStructure(definition).map((face) => {
       const normal = normalOf(face.points[0], face.points[1], face.points[2]);
       return {
@@ -317,7 +369,7 @@ export class Renderer {
     }) : [];
     const maxGrowRadius = Math.max(1, ...faces.filter((face) => !face.ground).map((face) => face.growRadius));
     const result = { faces, maxGrowRadius };
-    this.structures.set(typeId, result);
+    this.structures.set(definition, result);
     return result;
   }
 
@@ -359,7 +411,8 @@ export class Renderer {
     // Once the last castle falls, the city blackens over BREACH.collapseSeconds
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
-    this.collectCastles(items, paving, view, game.castles, game.terrain, blacken);
+    this.collectBoats(items, view, game.landings, game.terrain);
+    this.collectCastles(items, paving, view, game, game.terrain, blacken);
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectHouses(items, view, game.houses, game.terrain);
@@ -673,6 +726,18 @@ export class Renderer {
     }
   }
 
+  /** The fleet that put the raiders ashore, one hull per landing. */
+  collectBoats(items, view, landings, terrain) {
+    for (const landing of landings) {
+      if (!this.onScreenFor(view, landing, BOAT.length)) {
+        continue;
+      }
+      for (const { quads, tint } of boatPrisms(landing, terrain)) {
+        this.collectPrism(items, view, quads, tint);
+      }
+    }
+  }
+
   collectWalls(items, view, walls, terrain, hoveredWall) {
     // One pulse for the whole pass, so a hovered stretch blinks together
     // rather than each section keeping its own time.
@@ -777,28 +842,28 @@ export class Renderer {
    * it, part by part, centre first. `blacken` mixes every face towards
    * black, for the city burning down once the game is lost.
    */
-  collectCastles(items, paving, view, castles, terrain, blacken = 0) {
-    for (const castle of castles) {
+  collectCastles(items, paving, view, game, terrain, blacken = 0) {
+    for (const castle of game.castles) {
       const { x, y } = castle.position;
       const ground = terrain.heightAt(x, y);
 
       if (castle.rebuild && castle.rebuild.demolishSeconds > 0) {
-        const definition = BUILDINGS[castle.rebuild.fromTypeId];
+        const definition = game.buildings[castle.rebuild.fromTypeId];
         if (!definition || !this.onScreenFor(view, castle.position, definition.radius)) {
           continue;
         }
         const grow = castle.demolishProgress;
-        for (const face of this.structureFor(castle.rebuild.fromTypeId).faces) {
+        for (const face of this.structureFor(game.buildings[castle.rebuild.fromTypeId]).faces) {
           this.collectStructureFace(face.ground ? paving : items, view, face, castle.position, ground, { grow, blacken });
         }
         continue;
       }
 
-      const definition = BUILDINGS[castle.typeId];
+      const definition = game.buildings[castle.typeId];
       if (!definition || !this.onScreenFor(view, castle.position, definition.radius)) {
         continue;
       }
-      const { faces, maxGrowRadius } = this.structureFor(castle.typeId);
+      const { faces, maxGrowRadius } = this.structureFor(definition);
       const overall = castle.rebuild ? castle.buildProgress : 1;
       for (const face of faces) {
         const grow = castle.rebuild && !face.ground
@@ -1058,7 +1123,7 @@ export class Renderer {
   drawDamageEffects(view, game) {
     const breaching = game.isDefeated;
     for (const castle of game.castles) {
-      const definition = BUILDINGS[castle.typeId];
+      const definition = game.buildings[castle.typeId];
       if (!definition) {
         continue;
       }
@@ -1224,7 +1289,7 @@ export class Renderer {
       return;
     }
     for (const castle of game.castles) {
-      const definition = BUILDINGS[castle.typeId];
+      const definition = game.buildings[castle.typeId];
       if (!definition) {
         continue;
       }
@@ -1261,7 +1326,7 @@ export class Renderer {
 
   drawBars(view, game) {
     for (const castle of game.castles) {
-      const definition = BUILDINGS[castle.typeId];
+      const definition = game.buildings[castle.typeId];
       if (definition) {
         this.drawCastleBar(view, castle, definition);
       }

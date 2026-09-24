@@ -14,6 +14,7 @@ import { buildNavigation, wallsNear } from './navigation.js';
 import { lockEngagements, resolveMelee } from './melee.js';
 import { Terrain } from './terrain.js';
 import { LEVELS } from './levels.js';
+import { BUILDINGS } from './buildings/index.js';
 import {
   AVOIDANCE,
   BREACH,
@@ -47,6 +48,12 @@ const WALL_HINT_SECONDS = 20;
 const UPGRADE_HINT_SECONDS = 40;
 
 /** Random offset that lands outside the safe radius around the castle. */
+/** How far along a beach raiders spread either side of the boat. */
+const LANDING_SPREAD = 26;
+
+/** How finely a planned wall is sampled when checking it for water. */
+const WATER_PROBE_SPACING = 6;
+
 function spawnOffset(random) {
   const value = Math.floor(random() * SPAWN_MAX_DISTANCE * 2) - SPAWN_MAX_DISTANCE;
   if (value > 0 && value < SPAWN_MIN_DISTANCE) {
@@ -79,7 +86,17 @@ export class Game {
    */
   loadLevel(level) {
     this.level = level;
-    this.terrain = new Terrain(this.seed, level.land, level.river);
+    // A level may raise its own buildings and field its own companies; what
+    // it leaves out it inherits (see levels.js).
+    this.buildings = { ...BUILDINGS, ...level.buildings };
+    this.guardTiers = { ...CASTLE_GUARD_TIERS, ...level.guardTiers };
+    this.terrain = new Terrain(this.seed, level.land, level.river, level.sea);
+    // The coves a seaborne level lands its boats at, fixed for the run: the
+    // renderer beaches a hull at each, and spawnPoint puts raiders ashore
+    // there (see levels.js).
+    this.landings = level.landings
+      ? this.terrain.landings(level.landings.count, level.landings.inset)
+      : [];
     this.restart();
   }
 
@@ -303,12 +320,23 @@ export class Game {
   /**
    * Where the next raider rides in from.
    *
-   * A level with a `spawnArc` musters them along one stretch of horizon --
+   * A level with `landings` wades them up its beaches; one with a
+   * `spawnArc` musters them along one stretch of horizon --
    * a bearing inside the arc, at a distance in the usual band. Without one
    * they come from anywhere, by the same offset-per-axis the game has always
    * used, so a level that asks for nothing is spawned exactly as before.
    */
   spawnPoint(centre) {
+    // A level that lands boats puts its raiders ashore at one of the coves,
+    // scattered along the beach rather than stacked on the hull.
+    if (this.landings.length > 0) {
+      const landing = this.landings[Math.floor(this.random() * this.landings.length)];
+      const along = (this.random() - 0.5) * 2 * LANDING_SPREAD;
+      return {
+        x: Math.trunc(landing.x - Math.sin(landing.bearing) * along),
+        y: Math.trunc(landing.y + Math.cos(landing.bearing) * along),
+      };
+    }
     const arc = this.level.spawnArc;
     if (!arc) {
       return {
@@ -446,7 +474,7 @@ export class Game {
     if (!castle) {
       return [];
     }
-    const tierIds = CASTLE_GUARD_TIERS[castle.typeId] ?? [];
+    const tierIds = this.guardTiers[castle.typeId] ?? [];
     return tierIds.map((id) => ({ id, ...GUARD_TYPES[id] }));
   }
 
@@ -820,6 +848,33 @@ export class Game {
     ));
   }
 
+  /**
+   * Whether a section would stand in water.
+   *
+   * Sampled along the run rather than at its ends, since a short span can
+   * cross a channel without either end being wet. What this is really for is
+   * the island: without it a player simply walls out into the sea, and the
+   * whole point of an island -- that there is only so much coast to hold --
+   * goes with it.
+   */
+  entersWater(start, end) {
+    const terrain = this.terrain;
+    if (!terrain.river && !terrain.sea) {
+      return false;
+    }
+    const span = distance(start, end);
+    const steps = Math.max(2, Math.ceil(span / WATER_PROBE_SPACING));
+    for (let step = 0; step <= steps; step += 1) {
+      const t = step / steps;
+      const x = start.x + (end.x - start.x) * t;
+      const y = start.y + (end.y - start.y) * t;
+      if (!terrain.isAshore(x, y)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Restore a damaged wall, charging only for the stonework replaced. */
   /**
    * Pay for a repair, but the wall does not snap back — the order goes in
@@ -868,6 +923,9 @@ export class Game {
     }
     if (this.crossesCity(start, end)) {
       return { status: 'blocked', start, end };
+    }
+    if (this.entersWater(start, end)) {
+      return { status: 'water', start, end };
     }
     // A junction already at its limit takes no more sections. Quietly —
     // this is a layout rule, not something to interrupt the player over.

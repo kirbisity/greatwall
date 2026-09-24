@@ -253,6 +253,9 @@ export const AVATARS = {
   imperialLight: 'images/unit_avatar/avatar_chinese_light.png',
   imperialRegular: 'images/unit_avatar/avatar_chinese_regular.png',
   imperialHeavy: 'images/unit_avatar/avatar_chinese_heavy.png',
+  japanLight: 'images/unit_avatar/avatar_japanese_ashigaru.svg',
+  japanRegular: 'images/unit_avatar/avatar_japanese_samurai.svg',
+  japanHeavy: 'images/unit_avatar/avatar_japanese_sohei.svg',
 };
 
 export const AVATAR = {
@@ -333,6 +336,22 @@ export const GUARD_TYPES = {
   IG_HEAVY: {
     name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40, attack: 3,
     defense: 6, range: 2, cost: 680, avatar: AVATARS.imperialHeavy,
+  },
+  // The island garrison. Same three rungs at the same prices as the imperial
+  // army, so a level can swap the defenders it fields without also changing
+  // what the player can afford: the ashigaru trade a little armour for pace,
+  // and the sohei a little pace for reach off the wall.
+  JG_ASHIGARU: {
+    name: 'Ashigaru Spearman', speed: 8, maxHealth: 24, attack: 2,
+    defense: 3, range: 3, cost: 260, avatar: AVATARS.japanLight,
+  },
+  JG_SAMURAI: {
+    name: 'Samurai Retainer', speed: 6, maxHealth: 30, attack: 4,
+    defense: 4, range: 2, cost: 450, avatar: AVATARS.japanRegular,
+  },
+  JG_SOHEI: {
+    name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42, attack: 3,
+    defense: 6, range: 3, cost: 680, avatar: AVATARS.japanHeavy,
   },
 };
 

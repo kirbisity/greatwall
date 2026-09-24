@@ -223,6 +223,11 @@ export class Input {
       this.hud.showMessage('Walls cannot cross the city');
       return;
     }
+    if (result.status === 'water') {
+      this.chainPoint = null;
+      this.hud.showMessage('Walls cannot be laid in water');
+      return;
+    }
     if (result.status === 'crowded') {
       // A junction already at its limit — no message, just let go of the
       // tool the way it would if the player had simply let up on it.

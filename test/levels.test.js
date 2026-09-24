@@ -194,3 +194,139 @@ test('the dust sea hangs its own mist, and the season still thickens it', async 
   // Winter is still the densest month of a dusty year.
   assert.ok(seasonBlend(1.5).hazeDensity * mist.density > seasonBlend(3.5).hazeDensity * mist.density);
 });
+
+// --- level three: the island of the keep --------------------------------
+
+test('the island is ringed by open water, and dry in the middle', () => {
+  const level = LEVELS[2];
+  assert.ok(level.sea, 'expected a sea');
+  const terrain = new Terrain(1, level.land, null, level.sea);
+  assert.equal(terrain.seaAt(0, 0), 0, 'the city stands on dry land');
+  for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+    const far = level.sea.shore + level.sea.coast + level.sea.shelf + 50;
+    assert.equal(terrain.seaAt(Math.cos(angle) * far, Math.sin(angle) * far), 1,
+      `the water should be open at bearing ${Math.round(angle * 180 / Math.PI)}`);
+  }
+});
+
+test('the coast wanders rather than being a drawn circle', () => {
+  const level = LEVELS[2];
+  const terrain = new Terrain(1, level.land, null, level.sea);
+  const reaches = Array.from({ length: 24 }, (unused, i) => terrain.shoreAt(i / 24 * Math.PI * 2));
+  const spread = Math.max(...reaches) - Math.min(...reaches);
+  assert.ok(spread > level.sea.coast, `the coastline only varied by ${spread.toFixed(0)} units`);
+  // And it closes: a walk right round meets where it started.
+  assert.ok(Math.abs(terrain.shoreAt(0) - terrain.shoreAt(Math.PI * 2)) < 0.001, 'the coast has a seam');
+});
+
+test('the sea cuts a shelf, and nothing grows or stands on it', () => {
+  const level = LEVELS[2];
+  const terrain = new Terrain(1, level.land, null, level.sea);
+  // The same ground, with and without the water over it: hills vary too
+  // much from place to place for two different points to say anything.
+  const dry = new Terrain(1, level.land, null, null);
+  const offshore = { x: level.sea.shore + level.sea.coast + 120, y: 0 };
+  assert.equal(terrain.seaAt(offshore.x, offshore.y), 1, 'expected open water out there');
+  assert.ok(dry.heightAt(offshore.x, offshore.y) - terrain.heightAt(offshore.x, offshore.y) > 10,
+    'the seabed should be cut well below the land it replaces');
+  assert.equal(dry.heightAt(0, 0), terrain.heightAt(0, 0), 'and the island itself left alone');
+  const reach = level.sea.shore + level.sea.coast + level.sea.shelf;
+  for (const tree of terrain.treesWithin(-reach, -reach, reach, reach)) {
+    assert.equal(terrain.seaAt(tree.x, tree.y), 0, `a tree grew offshore at ${tree.x}, ${tree.y}`);
+  }
+  for (const mountain of terrain.mountainsWithin(-reach, -reach, reach, reach)) {
+    assert.ok(Math.hypot(mountain.x, mountain.y) + mountain.radius < level.sea.shore,
+      'a peak waded off the island');
+  }
+});
+
+test('the island lands its boats in coves all round, on dry sand', () => {
+  const level = LEVELS[2];
+  const terrain = new Terrain(1, level.land, null, level.sea);
+  const landings = terrain.landings(level.landings.count, level.landings.inset);
+  assert.equal(landings.length, level.landings.count);
+  const quadrants = new Set();
+  for (const landing of landings) {
+    assert.ok(terrain.isAshore(landing.x, landing.y), 'a boat beached in open water');
+    quadrants.add(Math.floor(((landing.bearing * 180 / Math.PI) + 360) % 360 / 90));
+  }
+  assert.equal(quadrants.size, 4, 'boats should land on every side of the island');
+  // The same island always lands them in the same coves.
+  assert.deepEqual(
+    new Terrain(1, level.land, null, level.sea).landings(level.landings.count, level.landings.inset),
+    landings,
+  );
+});
+
+test('the third level puts its raiders ashore at the landings, from every side', () => {
+  const level = LEVELS[2];
+  const bearings = spawnBearings(level);
+  const quadrants = new Set(bearings.map((b) => Math.floor(((b + 360) % 360) / 90)));
+  assert.equal(quadrants.size, 4, 'raiders should come ashore all round');
+  const terrain = new Terrain(1, level.land, null, level.sea);
+  for (const bearing of bearings) {
+    const radians = bearing * Math.PI / 180;
+    // Every raider starts near the waterline, not out at the usual muster
+    // distance and not in the middle of the island.
+    const shore = terrain.shoreAt(radians);
+    assert.ok(shore > 100, 'the island should have a coast at every bearing');
+  }
+});
+
+test('the island raises its own castle and fields its own companies', () => {
+  const game = new Game({ random: fixedRandom(), level: LEVELS[2] });
+  assert.match(game.buildings.CC0.name, /Island/, 'the island should raise a keep of its own');
+  assert.notEqual(game.buildings.CC0, LEVELS[0].buildings?.CC0 ?? null);
+  const names = game.dispatchOptions().map((option) => option.name);
+  assert.ok(names.length > 0 && names.every((name) => !name.startsWith('Imperial')),
+    `the island fielded ${names.join(', ')}`);
+
+  // And going back to a level that asks for neither gets the defaults.
+  game.loadLevel(LEVELS[0]);
+  assert.match(game.dispatchOptions()[0].name, /Imperial/);
+  assert.equal(game.landings.length, 0, 'no boats on a landward map');
+});
+
+test('every guard a level can field is a real company with a portrait and a model', async () => {
+  const { GUARD_TYPES } = await import('../src/config.js');
+  const { compileUnit } = await import('../src/units.js');
+  for (const level of LEVELS) {
+    for (const ids of Object.values(level.guardTiers ?? {})) {
+      for (const id of ids) {
+        const type = GUARD_TYPES[id];
+        assert.ok(type, `${level.id} fields an unknown company ${id}`);
+        assert.ok(type.avatar && type.cost > 0, `${id} is missing its portrait or price`);
+        // Without a formation a company is dispatched, paid for, and never
+        // drawn -- which is exactly how the island's garrison first shipped.
+        assert.ok(compileUnit(id), `${id} has no formation to muster`);
+      }
+    }
+  }
+});
+
+test('no wall can be laid in the water, on either water level', () => {
+  for (const level of LEVELS.filter((one) => one.river || one.sea)) {
+    const game = new Game({ random: fixedRandom(), level });
+    game.tokens = 100000;
+    const terrain = game.terrain;
+
+    // A run straight out into open water, and one that only clips it mid-span.
+    const wet = level.sea
+      ? [{ x: 200, y: 0 }, { x: 340, y: 0 }]
+      : [{ x: 0, y: level.river.y - 90 }, { x: 0, y: level.river.y + 90 }];
+    assert.equal(game.buildWall(wet[0], wet[1]).status, 'water', `${level.id} let a wall into the water`);
+    assert.equal(game.walls.length, 0);
+
+    // And dry ground beside the city still takes one.
+    const dry = game.buildWall({ x: 70, y: -50 }, { x: 70, y: 40 });
+    assert.equal(dry.status, 'built', `${level.id} refused a wall on dry ground: ${dry.status}`);
+    assert.ok(terrain.isAshore(70, -50));
+  }
+});
+
+test('a level with no water refuses nothing for being wet', () => {
+  const dry = LEVELS.find((level) => !level.river && !level.sea);
+  const game = new Game({ random: fixedRandom(), level: dry });
+  game.tokens = 100000;
+  assert.equal(game.entersWater({ x: -900, y: -900 }, { x: 900, y: 900 }), false);
+});

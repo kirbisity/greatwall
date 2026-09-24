@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="158" height="132" viewBox="0 0 158 132">
+  <title>Samurai Retainer (placeholder)</title>
+  <defs>
+    <clipPath id="medallion">
+      <circle cx="79" cy="66" r="58"/>
+    </clipPath>
+  </defs>
+  <circle cx="79" cy="66" r="58" fill="#d9d4cd"/>
+  <g clip-path="url(#medallion)">
+    <!-- shikoro: the flared neck guard, drawn behind the bowl -->
+    <path d="M79 32 C 34 32 24 72 22 124 L136 124 C134 72 124 32 79 32 Z" fill="#23262f"/>
+    <path d="M79 40 C 42 40 33 76 31 124 L127 124 C125 76 116 40 79 40 Z" fill="#383c48"/>
+    <!-- fukigaeshi: the turnbacks at either side -->
+    <path d="M30 70 L14 86 L30 100 Z" fill="#c2a24a"/>
+    <path d="M128 70 L144 86 L128 100 Z" fill="#c2a24a"/>
+    <!-- hachi: the helmet bowl -->
+    <path d="M79 18 C 51 18 38 42 38 64 L120 64 C120 42 107 18 79 18 Z" fill="#23262f"/>
+    <path d="M79 24 C 56 24 45 44 45 62 L113 62 C113 44 102 24 79 24 Z" fill="#383c48"/>
+    <!-- maedate: the crest over the brow -->
+    <path d="M60 26 C 52 8 44 2 34 0 C 44 10 48 18 50 28 Z" fill="#c2a24a"/><path d="M98 26 C 106 8 114 2 124 0 C 114 10 110 18 108 28 Z" fill="#c2a24a"/><circle cx="79" cy="20" r="8" fill="#c2a24a"/>
+    <!-- menpo: the face mask, in shadow under the brow -->
+    <path d="M52 66 L106 66 L100 106 C 96 116 62 116 58 106 Z" fill="#191b22"/>
+    <rect x="62" y="80" width="34" height="5" rx="2" fill="#c2a24a"/>
+    <rect x="66" y="92" width="26" height="4" rx="2" fill="#c2a24a"/>
+  </g>
+  <circle cx="79" cy="66" r="58" fill="none" stroke="#f0ece4" stroke-width="5"/>
+</svg>

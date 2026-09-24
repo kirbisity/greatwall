@@ -168,14 +168,16 @@ export class Terrain {
    * Everything downstream reads this rather than the defaults, so a desert
    * and a green valley are the same code with different numbers.
    */
-  constructor(seed = 1, land = {}, river = null) {
+  constructor(seed = 1, land = {}, river = null, sea = null) {
     this.seed = seed;
     this.land = { ...TERRAIN, ...land };
     this.river = river;
+    this.sea = sea;
     this.bands = bandsFor(this.land);
-    if (river) {
-      this.bands.water = channelsOf(river.color);
-      this.bands.bank = channelsOf(river.bankColor);
+    const water = river ?? sea;
+    if (water) {
+      this.bands.water = channelsOf(water.color);
+      this.bands.bank = channelsOf(water.bankColor);
     }
     // Ground levelled flat, one entry per settlement.
     this.levelled = [];
@@ -201,6 +203,77 @@ export class Terrain {
   }
 
   /**
+   * How far out to sea this point lies: 0 ashore, 1 in open water. The
+   * coastline is the shore radius pushed in and out by a noise of its own,
+   * so an island has bays and headlands rather than being a drawn circle.
+   */
+  seaAt(x, y) {
+    const sea = this.sea;
+    if (!sea) {
+      return 0;
+    }
+    const reach = Math.hypot(x, y);
+    const shore = this.shoreAt(Math.atan2(y, x));
+    if (reach <= shore) {
+      return 0;
+    }
+    return Math.min(1, (reach - shore) / sea.shelf);
+  }
+
+  /**
+   * How far the coast reaches along a bearing, in world units.
+   *
+   * Sampled on the ring itself rather than across the plane, so the headland
+   * north of the city has nothing to do with the bay to its south, and the
+   * two ends of the walk round the island meet without a seam.
+   */
+  shoreAt(bearing) {
+    const sea = this.sea;
+    if (!sea) {
+      return Infinity;
+    }
+    const wander = (valueNoise(
+      Math.cos(bearing) * sea.coastScale + 500,
+      Math.sin(bearing) * sea.coastScale + 500,
+      this.seed + 631,
+    ) - 0.5) * 2 * sea.coast;
+    return sea.shore + wander;
+  }
+
+  /**
+   * Where a fleet can put ashore: `count` beaches spaced round the island,
+   * each nudged off its even bearing so the ring does not read as a compass
+   * rose. Derived from the coastline alone, so the same island always lands
+   * boats in the same coves.
+   *
+   * `bearing` is the heading from the city, which is also the way a beached
+   * hull points -- bow up the sand, stern in the water.
+   */
+  landings(count, inset = 0) {
+    if (!this.sea) {
+      return [];
+    }
+    const places = [];
+    for (let i = 0; i < count; i += 1) {
+      const even = (i / count) * Math.PI * 2;
+      const jitter = (valueNoise(i * 3.7, 0.5, this.seed + 811) - 0.5) * (Math.PI * 2 / count) * 0.7;
+      const bearing = even + jitter;
+      const reach = this.shoreAt(bearing) - inset;
+      places.push({
+        x: Math.cos(bearing) * reach,
+        y: Math.sin(bearing) * reach,
+        bearing,
+      });
+    }
+    return places;
+  }
+
+  /** Whether dry land is anywhere within `radius` of this point. */
+  isAshore(x, y) {
+    return this.seaAt(x, y) === 0 && this.riverAt(x, y) === 0;
+  }
+
+  /**
    * Whether a mountain stands far enough from the water to belong here.
    *
    * A peak rising out of the middle of a river reads as a mistake, and the
@@ -210,6 +283,13 @@ export class Terrain {
    * slope stops short of the bank rather than wading into it.
    */
   standsClearOfWater(mountain) {
+    if (this.sea) {
+      // A peak that would wade off the island's edge is never placed.
+      const edge = Math.hypot(mountain.x, mountain.y) + mountain.radius + this.land.mountainSkirt;
+      if (edge > this.sea.shore - this.sea.coast) {
+        return false;
+      }
+    }
     const river = this.river;
     if (!river) {
       return true;
@@ -275,6 +355,10 @@ export class Terrain {
     const channel = this.riverAt(x, y);
     if (channel > 0) {
       height -= this.river.depth * ease(channel);
+    }
+    const offshore = this.seaAt(x, y);
+    if (offshore > 0) {
+      height -= this.sea.depth * ease(offshore);
     }
     return height;
   }
@@ -365,9 +449,9 @@ export class Terrain {
     // matter, whatever band the noise underneath would otherwise have said
     // -- the outer skirt stays whatever it was, so a mountain rises out of
     // the ground it stands on rather than starting with a hard edge.
-    const channel = this.riverAt(x, y);
+    const channel = Math.max(this.riverAt(x, y), this.seaAt(x, y));
     if (channel > 0) {
-      // Bank shading into open water, so the edge is a shore rather than a
+      // Shore shading into open water, so the edge is a beach rather than a
       // painted line.
       return this.waterTint(channel, into);
     }
@@ -452,7 +536,7 @@ export class Terrain {
         // rock, or a mountain's slope, which reads as rock regardless of
         // what the band underneath says.
         if (this.groundBandAt(x, y) !== this.land.grassColor
-          || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0) {
+          || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0) {
           continue;
         }
         if (isCleared && isCleared(x, y)) {

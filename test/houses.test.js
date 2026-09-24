@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Castle, House, Raider } from '../src/entities.js';
 import { CASTLE_TYPES, FPS, HOUSES, WALL } from '../src/config.js';
+import { LEVELS } from '../src/levels.js';
+
+// Houses have nothing to do with water, and a ring thrown out past the
+// first level's river would simply be refused (see Game#entersWater), so
+// these run on the dry level instead.
+const DRY = LEVELS.find((level) => !level.river && !level.sea);
 
 function fixedRandom(value = 0.5) {
   return () => value;
@@ -36,7 +42,9 @@ function ring(game, radius, sides = 8) {
     y: home.y + radius * Math.sin((i / sides) * 2 * Math.PI),
   }));
   for (let i = 0; i < sides; i += 1) {
-    game.buildWall(points[i], points[(i + 1) % sides]).wall.finish();
+    const built = game.buildWall(points[i], points[(i + 1) % sides]);
+    assert.ok(built.wall, `the ring was refused at side ${i}: ${built.status}`);
+    built.wall.finish();
   }
 }
 
@@ -54,11 +62,11 @@ test('no standing wall means no capacity, whatever is pegged out', () => {
 });
 
 test('a wider ring supports more houses than a tight one', () => {
-  const near = new Game({ random: fixedRandom() });
+  const near = new Game({ random: fixedRandom(), level: DRY });
   near.tokens = 100000;
   ring(near, 80);
 
-  const far = new Game({ random: fixedRandom() });
+  const far = new Game({ random: fixedRandom(), level: DRY });
   far.tokens = 100000;
   ring(far, 260);
 
@@ -67,7 +75,7 @@ test('a wider ring supports more houses than a tight one', () => {
 });
 
 test('capacity never exceeds HOUSES.maxHouses', () => {
-  const game = new Game({ random: fixedRandom() });
+  const game = new Game({ random: fixedRandom(), level: DRY });
   game.tokens = 1000000;
   ring(game, 5000);
   assert.ok(game.houseCapacity() <= HOUSES.maxHouses);

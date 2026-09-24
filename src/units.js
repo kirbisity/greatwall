@@ -27,6 +27,14 @@ const MATERIALS = {
   rider: [150, 118, 82],
   shaft: [148, 120, 84],
   blade: [186, 192, 198],
+  // The island garrison: black lacquer over deep indigo, with the sohei in
+  // undyed hemp -- the same three-rung read as the imperial gold, in a
+  // palette that tells the two apart at a glance.
+  lacquer: [54, 58, 70],
+  indigo: [62, 84, 124],
+  indigoPale: [112, 138, 182],
+  hemp: [214, 206, 186],
+  crimson: [156, 62, 56],
 };
 
 // --- solids ---------------------------------------------------------------
@@ -298,6 +306,32 @@ const FORMATIONS = {
       cloth: MATERIALS.imperialDeep,
       skin: MATERIALS.imperialTrim,
       weapon: swordArm(MATERIALS.imperialGold),
+    }),
+  }),
+  // The island's own companies, on the same formations as the imperial army
+  // -- a level swaps who holds the ground, not how a company musters.
+  JG_ASHIGARU: () => ({
+    places: grid(5, 4, at(1.55)),
+    figure: footSoldier({
+      cloth: MATERIALS.indigo,
+      skin: MATERIALS.indigoPale,
+      weapon: spearArm(2.3),
+    }),
+  }),
+  JG_SAMURAI: () => ({
+    places: grid(7, 5, at(1.6)),
+    figure: footSoldier({
+      cloth: MATERIALS.lacquer,
+      skin: MATERIALS.crimson,
+      weapon: swordArm(MATERIALS.blade),
+    }),
+  }),
+  JG_SOHEI: () => ({
+    places: grid(8, 6, at(1.65)),
+    figure: footSoldier({
+      cloth: MATERIALS.hemp,
+      skin: MATERIALS.lacquer,
+      weapon: spearArm(2.6),
     }),
   }),
 };

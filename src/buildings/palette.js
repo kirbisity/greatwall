@@ -15,6 +15,13 @@ export const MATERIALS = {
   roofTile: [108, 122, 110],
   roofTileImperial: [172, 130, 50],
   roofRidge: [78, 88, 80],
+  // For the island keep: pale lime plaster over a sloped stone base, under
+  // dark slate tile.
+  ishigaki: [138, 132, 118],
+  ishigakiDark: [112, 106, 94],
+  shikkui: [232, 228, 216],
+  roofSlate: [74, 84, 92],
+  roofSlateDark: [58, 66, 74],
 };
 
 export const DEFAULT_ROOF = { height: 4.2, overhang: 1.6, tiers: 3, material: 'roofTile' };

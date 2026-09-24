@@ -171,13 +171,19 @@ function wallTint(condition) {
   return STONE.map((channel, index) => channel * condition + RUINED[index] * (1 - condition));
 }
 
-// How far a hovered section's tint is pulled towards white -- enough to
-// pick it out, not so much it stops reading as stone.
-const HOVER_HIGHLIGHT = 0.3;
+// The section under the repair or fortify cursor pulses towards this rather
+// than sitting a steady shade paler. Stone is already pale and sunlit, so a
+// fixed lift reads as a trick of the light; a yellow that comes and goes
+// reads as the game answering the cursor. Swings between HOVER_MIN and
+// HOVER_MAX of the way to the tint, HOVER_PULSE_RATE radians a second.
+const HOVER_TINT = [255, 214, 64];
+const HOVER_PULSE_RATE = 5;
+const HOVER_MIN = 0.25;
+const HOVER_MAX = 0.85;
 
-/** Blend a tint towards white by `amount`, for whatever the cursor is over. */
-function highlighted(tint, amount) {
-  return tint.map((channel) => channel + (255 - channel) * amount);
+/** Blend a tint towards another by `amount`, 0 leaving it alone. */
+function blended(tint, towards, amount) {
+  return tint.map((channel, index) => channel + (towards[index] - channel) * amount);
 }
 
 /**
@@ -653,6 +659,10 @@ export class Renderer {
   }
 
   collectWalls(items, view, walls, terrain, hoveredWall) {
+    // One pulse for the whole pass, so a hovered stretch blinks together
+    // rather than each section keeping its own time.
+    const pulse = HOVER_MIN
+      + (HOVER_MAX - HOVER_MIN) * (0.5 + 0.5 * Math.sin(this.clock * HOVER_PULSE_RATE));
     for (const wall of walls) {
       if (wall.isPlanned) {
         continue;
@@ -679,7 +689,7 @@ export class Renderer {
       const quads = wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
       const tint = wall === hoveredWall
-        ? highlighted(wallTint(condition), HOVER_HIGHLIGHT)
+        ? blended(wallTint(condition), HOVER_TINT, pulse)
         : wallTint(condition);
       this.collectPrism(items, view, flat ? [quads[0]] : quads, tint);
     }

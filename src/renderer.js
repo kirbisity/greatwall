@@ -410,26 +410,9 @@ export class Renderer {
     const context = this.ground;
     const view = this.camera.view;
     const cell = TERRAIN.cellSize;
-    // Fine tiles only near the focus -- see TERRAIN.detailRadius -- so the
-    // wash gradient carries the ground beyond them, whatever the zoom.
-    const focus = this.camera.focus;
-    const minX = Math.max(bounds.minX, focus.x - TERRAIN.detailRadius);
-    const maxX = Math.min(bounds.maxX, focus.x + TERRAIN.detailRadius);
-    const minY = Math.max(bounds.minY, focus.y - TERRAIN.detailRadius);
-    const maxY = Math.min(bounds.maxY, focus.y + TERRAIN.detailRadius);
-    const fadeStart = TERRAIN.detailRadius * TERRAIN.detailFadeFraction;
-    const fadeSpan = TERRAIN.detailRadius - fadeStart;
 
-    for (let x = Math.floor(minX / cell) * cell; x < maxX; x += cell) {
-      for (let y = Math.floor(minY / cell) * cell; y < maxY; y += cell) {
-        const centreDistance = Math.hypot(x + cell / 2 - focus.x, y + cell / 2 - focus.y);
-        if (centreDistance > TERRAIN.detailRadius) {
-          continue;
-        }
-        const alpha = centreDistance <= fadeStart
-          ? 1
-          : 1 - (centreDistance - fadeStart) / fadeSpan;
-
+    for (let x = Math.floor(bounds.minX / cell) * cell; x < bounds.maxX; x += cell) {
+      for (let y = Math.floor(bounds.minY / cell) * cell; y < bounds.maxY; y += cell) {
         const corners = [
           { x, y }, { x: x + cell, y }, { x: x + cell, y: y + cell }, { x, y: y + cell },
         ];
@@ -462,11 +445,9 @@ export class Renderer {
         }
         context.closePath();
         context.fillStyle = shade(tint, light);
-        context.globalAlpha = alpha;
         context.fill();
       }
     }
-    context.globalAlpha = 1;
   }
 
   /** Woodland, drawn with the ground because it never moves either. */

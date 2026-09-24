@@ -9,9 +9,15 @@ export const PIXELS_PER_WORLD_UNIT = 50;
  */
 export const CAMERA = {
   focalLength: 900,
-  initialDistance: 380,
+  initialDistance: 180,
   minDistance: 110,
-  maxDistance: 800,
+  // Ground tiles are a fixed world size (TERRAIN.cellSize) drawn across the
+  // whole visible ground, so the tile count -- and the cost of a repaint --
+  // grows with the square of how far the camera has pulled back. Kept short
+  // enough that even the worst case (pulled all the way out, tilted to its
+  // shallowest) stays under ~20ms rather than the 300ms-plus a full zoom
+  // range would cost.
+  maxDistance: 220,
   initialElevation: 52,
   minElevation: 35,
   maxElevation: 55,
@@ -384,18 +390,10 @@ export const TERRAIN = {
   // Mesh drawn for the ground: a fixed-size tile in world units, a quarter
   // the size of the old zoom-compensated cell. It is not resized for the
   // camera, so a tile genuinely grows and shrinks on screen as the camera
-  // zooms rather than being held at a constant apparent size.
+  // zooms rather than being held at a constant apparent size. Drawn across
+  // the whole visible ground -- see CAMERA.maxDistance for how the zoom
+  // range is kept short enough that this stays cheap at any distance.
   cellSize: 9,
-
-  // Fine tiles are only drawn within this radius of the camera's focus; the
-  // wash gradient underneath shows through past it. A canvas fill costs
-  // about the same regardless of a tile's size, so a fixed radius keeps the
-  // tile count -- and so the repaint cost -- flat no matter how far the
-  // camera has zoomed out, instead of growing with the visible ground area.
-  // Tiles fade out approaching the radius, past detailFadeFraction of it, so
-  // the patch reads as a soft island over the wash rather than a hard box.
-  detailRadius: 100,
-  detailFadeFraction: 0.7,
 
   // Ground colour reads as patches of grass, dirt and bare rock, picked per
   // cell from its own noise rather than tinted by season -- the year now
@@ -432,10 +430,12 @@ export const FOG = {
  * faster than the ground when the view pans — no parallax constant needed.
  * Sizes and drift are world units.
  */
+// Altitudes and the field below are sized against the camera's own reach
+// (see CAMERA.maxDistance), so the sky keeps working if that reach changes.
 export const CLOUD_LAYERS = [
-  { altitude: 55, worldSize: 85, opacity: 0.10, drift: 3.5, count: 12 },
-  { altitude: 95, worldSize: 125, opacity: 0.13, drift: 5.5, count: 9 },
-  { altitude: 150, worldSize: 185, opacity: 0.16, drift: 8.5, count: 7 },
+  { altitude: 26, worldSize: 85, opacity: 0.10, drift: 3.5, count: 12 },
+  { altitude: 45, worldSize: 125, opacity: 0.13, drift: 5.5, count: 9 },
+  { altitude: 71, worldSize: 185, opacity: 0.16, drift: 8.5, count: 7 },
 ];
 
 /**
@@ -443,7 +443,7 @@ export const CLOUD_LAYERS = [
  * Sized against the ground a default view takes in, so a handful are always
  * overhead; off-screen decks cost one projection each and are then dropped.
  */
-export const CLOUD_FIELD = 900;
+export const CLOUD_FIELD = 420;
 /** A deck fades out over this last stretch as the camera descends onto it. */
 export const CLOUD_FADE_HEIGHT = 90;
 /**

@@ -36,7 +36,7 @@ function mix(from, to, t) {
 }
 
 /** Blend two 'r, g, b' strings, giving another of the same shape. */
-function mixChannels(from, to, t) {
+export function mixChannels(from, to, t) {
   const a = from.split(',');
   const b = to.split(',');
   return a.map((channel, i) => Math.round(mix(Number(channel), Number(b[i]), t))).join(', ');

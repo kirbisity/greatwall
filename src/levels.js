@@ -41,6 +41,11 @@ export const LEVELS = [
     id: 'northern-march',
     name: 'The Northern March',
     blurb: 'They ride down out of the north. The river guards your back.',
+    // Lower hills than the default: this is river country, not high ground.
+    land: {
+      mountainMinHeight: 34,
+      mountainMaxHeight: 56,
+    },
     // Raiders muster along the northern skyline only, so the south is a
     // flank you never have to hold -- see Game#spawnRaider.
     spawnArc: { centre: 90, spread: 70 },
@@ -61,6 +66,10 @@ export const LEVELS = [
     name: 'The Dust Sea',
     blurb: 'The same war, fought over sand. They come from every horizon.',
     land: DESERT,
+    // Dust hanging in the air the year round: the season still says how
+    // thick the haze is, this says what colour it is and how much more of
+    // it there is than a temperate sky would hold.
+    mist: { color: '226, 194, 112', blend: 0.8, density: 1.9, start: 0.45 },
   },
 ];
 

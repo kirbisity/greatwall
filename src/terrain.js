@@ -116,7 +116,7 @@ const CELL_LIMIT = 4096;
  * mountainSpacing -- anything two cells over is already too far away to
  * matter, so nine cells is always enough.
  */
-function neighbourhoodAt(cellX, cellY, seed, cache, land) {
+function neighbourhoodAt(cellX, cellY, seed, cache, land, standsClear) {
   const key = (cellX + CELL_LIMIT) * CELL_LIMIT * 2 + (cellY + CELL_LIMIT);
   const known = cache.get(key);
   if (known) {
@@ -126,7 +126,7 @@ function neighbourhoodAt(cellX, cellY, seed, cache, land) {
   for (let dx = -1; dx <= 1; dx += 1) {
     for (let dy = -1; dy <= 1; dy += 1) {
       const mountain = mountainAt(cellX + dx, cellY + dy, seed, land);
-      if (mountain) {
+      if (mountain && standsClear(mountain)) {
         found = found === EMPTY ? [mountain] : [...found, mountain];
       }
     }
@@ -201,6 +201,26 @@ export class Terrain {
   }
 
   /**
+   * Whether a mountain stands far enough from the water to belong here.
+   *
+   * A peak rising out of the middle of a river reads as a mistake, and the
+   * two are generated from noise that knows nothing of each other -- so
+   * where they would meet, the water wins and the mountain is simply never
+   * placed. Measured against its whole footprint, skirt included, so the
+   * slope stops short of the bank rather than wading into it.
+   */
+  standsClearOfWater(mountain) {
+    const river = this.river;
+    if (!river) {
+      return true;
+    }
+    const wander = (valueNoise(mountain.x / river.meanderScale, 0.5, this.seed + 577) - 0.5)
+      * 2 * river.meander;
+    const gap = Math.abs(mountain.y - (river.y + wander));
+    return gap > river.halfWidth + mountain.radius + this.land.mountainSkirt;
+  }
+
+  /**
    * The river as a chain of circles, for whatever needs to keep out of it
    * rather than draw it -- companies route round these exactly as they
    * route round a peak (see pathfinding's avoidMountains).
@@ -224,6 +244,7 @@ export class Terrain {
     const cell = this.land.mountainSpacing;
     return neighbourhoodAt(
       Math.floor(x / cell), Math.floor(y / cell), this.seed, this.neighbourhoods, this.land,
+      (mountain) => this.standsClearOfWater(mountain),
     );
   }
 
@@ -271,7 +292,7 @@ export class Terrain {
     for (let cellX = Math.floor((minX - pad) / cell); cellX <= Math.floor((maxX + pad) / cell); cellX += 1) {
       for (let cellY = Math.floor((minY - pad) / cell); cellY <= Math.floor((maxY + pad) / cell); cellY += 1) {
         const mountain = mountainAt(cellX, cellY, this.seed, this.land);
-        if (mountain) {
+        if (mountain && this.standsClearOfWater(mountain)) {
           mountains.push(mountain);
         }
       }

@@ -8,7 +8,7 @@ import {
   SEASONS,
 } from './config.js';
 import { groundAt, projectPoint } from './projection.js';
-import { seasonBlend } from './season.js';
+import { mixChannels, seasonBlend } from './season.js';
 
 /** Positive remainder, so wrapping works for negative offsets too. */
 function wrap(value, span) {
@@ -77,20 +77,31 @@ export class Atmosphere {
   }
 
   /**
+   * `mist` is a level's standing haze, if it has one (see levels.js).
    * `seasonPhase` blends the haze's colour and density across the year --
    * see seasonBlend. Fog also thickens with the camera's own height, so
    * pulling back and tilting up into a higher view reads as more atmosphere
    * between the eye and the ground, the way real haze does.
    */
-  drawFog(context, seasonPhase) {
+  drawFog(context, seasonPhase, mist = null) {
     const { width, height } = this.camera;
-    const { haze, hazeDensity } = seasonBlend(seasonPhase);
+    const season = seasonBlend(seasonPhase);
+    // A level's own mist pulls the season's haze towards its colour and
+    // thickens it, rather than replacing it -- winter is still the densest
+    // month of a dusty year.
+    const haze = mist ? mixChannels(season.haze, mist.color, mist.blend) : season.haze;
+    const hazeDensity = season.hazeDensity * (mist ? mist.density : 1);
+    // Where the haze starts matters more than how thick it is allowed to
+    // get: the far band is already near FOG.maxOpacity, so thickening alone
+    // has nowhere to go. Bringing the start in is what puts dust across the
+    // middle distance too.
+    const startDistance = FOG.startDistance * (mist ? mist.start : 1);
     const altitude = 1 + this.camera.view.position.z * FOG.altitudeFactor;
     const gradient = context.createLinearGradient(0, 0, 0, height);
     for (let step = 0; step <= FOG.samples; step += 1) {
       const offset = step / FOG.samples;
       const distance = this.groundDistanceAt(offset * height);
-      const beyond = Math.max(0, distance - FOG.startDistance);
+      const beyond = Math.max(0, distance - startDistance);
       const density = 1 - Math.exp(-beyond * FOG.falloff);
       const alpha = Math.min(FOG.maxOpacity, density * FOG.maxAlpha * hazeDensity * altitude);
       gradient.addColorStop(offset, `rgba(${haze},${alpha.toFixed(3)})`);

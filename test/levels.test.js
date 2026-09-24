@@ -146,3 +146,51 @@ test('a level that asks for nothing gets the defaults', () => {
   assert.equal(plain.land.grassColor, TERRAIN.grassColor);
   assert.equal(plain.land.hillHeight, TERRAIN.hillHeight);
 });
+
+test('no mountain stands in the river', () => {
+  const level = LEVELS[0];
+  const terrain = new Terrain(1, level.land, level.river);
+  const mountains = terrain.mountainsWithin(-1200, -1200, 1200, 1200);
+  assert.ok(mountains.length > 0, 'expected some mountains to survive the filter');
+  for (const mountain of mountains) {
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+      const x = mountain.x + Math.cos(angle) * mountain.radius;
+      const y = mountain.y + Math.sin(angle) * mountain.radius;
+      assert.equal(terrain.riverAt(x, y), 0,
+        `a peak at ${Math.round(mountain.x)}, ${Math.round(mountain.y)} reaches the water`);
+    }
+  }
+});
+
+test('dropping the river back in leaves more mountains standing', () => {
+  const level = LEVELS[0];
+  const withWater = new Terrain(1, level.land, level.river).mountainsWithin(-1200, -1200, 1200, 1200);
+  const without = new Terrain(1, level.land, null).mountainsWithin(-1200, -1200, 1200, 1200);
+  assert.ok(without.length > withWater.length, 'the water should have displaced some peaks');
+});
+
+test('the first level keeps its hills lower than the default', () => {
+  assert.ok(LEVELS[0].land.mountainMaxHeight < TERRAIN.mountainMaxHeight);
+  const terrain = new Terrain(1, LEVELS[0].land, LEVELS[0].river);
+  for (const mountain of terrain.mountainsWithin(-900, -900, 900, 900)) {
+    assert.ok(mountain.height <= LEVELS[0].land.mountainMaxHeight,
+      `a peak stood ${mountain.height.toFixed(0)} high`);
+  }
+});
+
+test('the dust sea hangs its own mist, and the season still thickens it', async () => {
+  const { seasonBlend, mixChannels } = await import('../src/season.js');
+  const mist = LEVELS[1].mist;
+  assert.ok(mist, 'expected the desert to carry a mist');
+  assert.ok(mist.density > 1, 'and for it to be thicker than a temperate sky');
+
+  // Its colour pulls the season's haze towards the dust, without replacing it.
+  const summer = seasonBlend(3.5);
+  const dusty = mixChannels(summer.haze, mist.color, mist.blend);
+  assert.notEqual(dusty, summer.haze);
+  const channels = dusty.split(',').map(Number);
+  assert.ok(channels[0] > channels[2], 'dust should read warm, not blue');
+
+  // Winter is still the densest month of a dusty year.
+  assert.ok(seasonBlend(1.5).hazeDensity * mist.density > seasonBlend(3.5).hazeDensity * mist.density);
+});

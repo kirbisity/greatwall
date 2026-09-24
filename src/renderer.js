@@ -371,7 +371,7 @@ export class Renderer {
 
     // Haze and cloud sit above the world but below the readouts.
     if (settings.atmosphere) {
-      this.atmosphere.drawFog(this.overlay, game.seasonPhase);
+      this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.level.mist);
       this.atmosphere.drawClouds(this.overlay, game.seasonPhase);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }

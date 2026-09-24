@@ -125,3 +125,34 @@ test('no tree grows on a mountain\'s slope, even where the band beneath is grass
     assert.ok(dist >= mountain.radius * 0.5, `a tree grew practically on the peak at distance ${dist.toFixed(1)}`);
   }
 });
+
+test('groundTintAt and groundColorAt describe the same colour', () => {
+  const terrain = new Terrain(1);
+  for (let x = -600; x < 600; x += 37) {
+    const y = x * 0.6;
+    const tint = terrain.groundTintAt(x, y);
+    const hex = terrain.groundColorAt(x, y);
+    assert.deepEqual(tint, channels(hex), `mismatch at ${x}, ${y}`);
+  }
+});
+
+test('groundTintAt fills an array it is handed rather than making one', () => {
+  const terrain = new Terrain(1);
+  const scratch = [0, 0, 0];
+  const returned = terrain.groundTintAt(120, -80, scratch);
+  assert.equal(returned, scratch, 'should hand back the very array it was given');
+  assert.deepEqual(scratch, terrain.groundTintAt(120, -80));
+});
+
+test('the mountain cache answers the same as working it out afresh', () => {
+  const cached = new Terrain(1);
+  for (let x = -900; x < 900; x += 97) {
+    for (let y = -900; y < 900; y += 97) {
+      // A terrain with an empty cache has to derive the neighbourhood; one
+      // that has been walked over already reads it back. Both must agree.
+      const fresh = new Terrain(1);
+      assert.equal(cached.heightAt(x, y), fresh.heightAt(x, y), `height at ${x}, ${y}`);
+      assert.equal(cached.groundColorAt(x, y), fresh.groundColorAt(x, y), `colour at ${x}, ${y}`);
+    }
+  }
+});

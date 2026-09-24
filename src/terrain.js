@@ -4,11 +4,11 @@ import { TERRAIN } from './config.js';
  * The ground: rolling height and patchy woodland, both generated rather than
  * stored.
  *
- * Nothing about the landscape is kept in memory. Height, forest cover and
- * mountains are all read from noise, and trees are hashed out of their own
- * position, so any patch of ground can be asked about without the rest
- * existing. The only state is the list of places the ground has been
- * levelled — under a city — which is short.
+ * None of the landscape is stored as such. Height, forest cover and mountains
+ * are all read from noise, and trees are hashed out of their own position, so
+ * any patch of ground can be asked about without the rest existing. The only
+ * state is the list of places the ground has been levelled — under a city —
+ * and a cache of which mountains sit near which lattice cell, both short.
  *
  * The simulation stays flat: height is scenery that things are drawn sitting
  * on, not something they climb. Forest slows a company down; a mountain
@@ -27,12 +27,40 @@ function ease(t) {
   return t * t * (3 - 2 * t);
 }
 
-/** Scale a '#rrggbb' colour's channels by `1 + amount`, clamped to a byte. */
-function mottled(hex, amount) {
-  const scale = 1 + amount;
-  const channel = (start) => Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(start, start + 2), 16) * scale)))
-    .toString(16).padStart(2, '0');
-  return `#${channel(1)}${channel(3)}${channel(5)}`;
+/** A '#rrggbb' colour as [r, g, b]. */
+function channelsOf(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
+function toChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function hexByte(value) {
+  return value.toString(16).padStart(2, '0');
+}
+
+// Each band both ways round, worked out once. Their colours are fixed, and
+// the mesh asks for a tile's colour thousands of times a repaint -- parsing
+// '#rrggbb' that often is pure waste.
+function band(hex) {
+  return { hex, channels: channelsOf(hex) };
+}
+const GRASS = band(TERRAIN.grassColor);
+const MOSS = band(TERRAIN.mossColor);
+const DIRT = band(TERRAIN.dirtColor);
+const ROCK = band(TERRAIN.rockColor);
+
+/** Which band a patch's grain falls in. */
+function bandFor(grain) {
+  return grain > TERRAIN.rockThreshold ? ROCK
+    : grain > TERRAIN.dirtThreshold ? DIRT
+      : grain > TERRAIN.mossThreshold ? MOSS
+        : GRASS;
 }
 
 function valueNoise(x, y, seed) {
@@ -73,25 +101,38 @@ function mountainAt(cellX, cellY, seed) {
   };
 }
 
+// Mountains never move, so a cell's neighbourhood is worth keeping once it
+// has been worked out: heights are asked for thousands of times a repaint,
+// almost always about ground a cell or two across. Cells are 300 units and
+// the view is held inside CAMERA's own pan limits, so this settles at a few
+// dozen entries rather than growing without end.
+const EMPTY = [];
+// Room for cells either side of the origin, which at mountainSpacing across
+// reaches far past anywhere CAMERA's pan limits let the view go.
+const CELL_LIMIT = 4096;
+
 /**
  * Every mountain whose cell could possibly reach this point. Bounded to the
  * cell's own neighbours because mountainMaxRadius is kept well under
  * mountainSpacing -- anything two cells over is already too far away to
- * matter, so nine hashes is always enough.
+ * matter, so nine cells is always enough.
  */
-function mountainsNear(x, y, seed) {
-  const cell = TERRAIN.mountainSpacing;
-  const cellX = Math.floor(x / cell);
-  const cellY = Math.floor(y / cell);
-  const found = [];
+function neighbourhoodAt(cellX, cellY, seed, cache) {
+  const key = (cellX + CELL_LIMIT) * CELL_LIMIT * 2 + (cellY + CELL_LIMIT);
+  const known = cache.get(key);
+  if (known) {
+    return known;
+  }
+  let found = EMPTY;
   for (let dx = -1; dx <= 1; dx += 1) {
     for (let dy = -1; dy <= 1; dy += 1) {
       const mountain = mountainAt(cellX + dx, cellY + dy, seed);
       if (mountain) {
-        found.push(mountain);
+        found = found === EMPTY ? [mountain] : [...found, mountain];
       }
     }
   }
+  cache.set(key, found);
   return found;
 }
 
@@ -121,20 +162,35 @@ function mountainBumpAt(mountain, x, y) {
   return mountain.height * ease(1 - distance / reach);
 }
 
-/**
- * Whether a mountain has raised this point enough to count as its slope --
- * bare rock underfoot, and no woodland, whatever the band noise underneath
- * would otherwise have said.
- */
-function isMountainSlope(x, y, seed) {
-  return mountainsNear(x, y, seed).some((mountain) => mountainBumpAt(mountain, x, y) > TERRAIN.mountainRockBump);
-}
-
 export class Terrain {
   constructor(seed = 1) {
     this.seed = seed;
     // Ground levelled flat, one entry per settlement.
     this.levelled = [];
+    this.neighbourhoods = new Map();
+  }
+
+  /** Every mountain whose cell could possibly reach this point. */
+  mountainsNear(x, y) {
+    const cell = TERRAIN.mountainSpacing;
+    return neighbourhoodAt(
+      Math.floor(x / cell), Math.floor(y / cell), this.seed, this.neighbourhoods,
+    );
+  }
+
+  /**
+   * Whether a mountain has raised this point enough to count as its slope --
+   * bare rock underfoot, and no woodland, whatever the band noise underneath
+   * would otherwise have said.
+   */
+  isMountainSlope(x, y) {
+    const mountains = this.mountainsNear(x, y);
+    for (let i = 0; i < mountains.length; i += 1) {
+      if (mountainBumpAt(mountains[i], x, y) > TERRAIN.mountainRockBump) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Raw landscape height, before anything has been built on it. */
@@ -142,8 +198,9 @@ export class Terrain {
     const broad = valueNoise(x / TERRAIN.hillScale, y / TERRAIN.hillScale, this.seed);
     const fine = valueNoise(x / TERRAIN.detailScale, y / TERRAIN.detailScale, this.seed + 17);
     let height = (broad - 0.5) * TERRAIN.hillHeight + (fine - 0.5) * TERRAIN.detailHeight;
-    for (const mountain of mountainsNear(x, y, this.seed)) {
-      height += mountainBumpAt(mountain, x, y);
+    const mountains = this.mountainsNear(x, y);
+    for (let i = 0; i < mountains.length; i += 1) {
+      height += mountainBumpAt(mountains[i], x, y);
     }
     return height;
   }
@@ -202,25 +259,44 @@ export class Terrain {
    * of season, lighting or anything else that changes over time.
    */
   groundBandAt(x, y) {
-    const grain = valueNoise(x / TERRAIN.groundScale, y / TERRAIN.groundScale, this.seed + 149);
-    return grain > TERRAIN.rockThreshold ? TERRAIN.rockColor
-      : grain > TERRAIN.dirtThreshold ? TERRAIN.dirtColor
-        : grain > TERRAIN.mossThreshold ? TERRAIN.mossColor
-          : TERRAIN.grassColor;
+    return this.bandAt(x, y).hex;
   }
 
-  /** The ground colour here, in `'#rrggbb'`, mottled for texture. */
-  groundColorAt(x, y) {
+  /** The band itself, for a caller that wants its channels rather than hex. */
+  bandAt(x, y) {
+    return bandFor(valueNoise(x / TERRAIN.groundScale, y / TERRAIN.groundScale, this.seed + 149));
+  }
+
+  /**
+   * The ground colour here as `[r, g, b]`, mottled for texture.
+   *
+   * The mesh asks for this once per tile and wants numbers, so this is the
+   * form that does the work; '#rrggbb' is built from it rather than the
+   * other way about, which used to mean formatting a string per tile purely
+   * for the renderer to parse it straight back. `into` lets a caller drawing
+   * thousands of tiles hand over one array rather than be given thousands.
+   */
+  groundTintAt(x, y, into = [0, 0, 0]) {
     // Ground reads as bare rock once a mountain has raised it enough to
     // matter, whatever band the noise underneath would otherwise have said
     // -- the outer skirt stays whatever it was, so a mountain rises out of
     // the ground it stands on rather than starting with a hard edge.
-    const base = isMountainSlope(x, y, this.seed) ? TERRAIN.rockColor : this.groundBandAt(x, y);
+    const base = (this.isMountainSlope(x, y) ? ROCK : this.bandAt(x, y)).channels;
     // A finer noise mottles the band's colour, so a patch reads as textured
     // rather than a flat fill -- the same trick as the band itself, one size
     // down.
     const fleck = valueNoise(x / TERRAIN.mottleScale, y / TERRAIN.mottleScale, this.seed + 227);
-    return mottled(base, (fleck - 0.5) * TERRAIN.mottleStrength);
+    const scale = 1 + (fleck - 0.5) * TERRAIN.mottleStrength;
+    into[0] = toChannel(base[0] * scale);
+    into[1] = toChannel(base[1] * scale);
+    into[2] = toChannel(base[2] * scale);
+    return into;
+  }
+
+  /** The ground colour here, in `'#rrggbb'`, mottled for texture. */
+  groundColorAt(x, y) {
+    const tint = this.groundTintAt(x, y);
+    return `#${hexByte(tint[0])}${hexByte(tint[1])}${hexByte(tint[2])}`;
   }
 
   /** How thick the woodland is here, 0 to 1. */
@@ -251,7 +327,7 @@ export class Terrain {
         // Woodland only takes root on open grass -- not moss, dirt, bare
         // rock, or a mountain's slope, which reads as rock regardless of
         // what the band underneath says.
-        if (this.groundBandAt(x, y) !== TERRAIN.grassColor || isMountainSlope(x, y, this.seed)) {
+        if (this.groundBandAt(x, y) !== TERRAIN.grassColor || this.isMountainSlope(x, y)) {
           continue;
         }
         if (isCleared && isCleared(x, y)) {

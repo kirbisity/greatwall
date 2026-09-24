@@ -19,7 +19,9 @@ import {
   centroid,
   facesCamera,
   lightingFor,
+  lightingForVector,
   normalOf,
+  projectCorners,
   projectPoint,
 } from './projection.js';
 import { Atmosphere } from './atmosphere.js';
@@ -99,15 +101,6 @@ const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 const TRUNK_FILL = 'rgb(84,62,42)';
 const CANOPY_FILL = 'rgb(74,96,58)';
-
-/** Parse a '#rrggbb' colour into the channels shade() wants. */
-function shadeOf(hex) {
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
-}
 
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
@@ -245,6 +238,11 @@ export class Renderer {
     this.hoveredWall = null;
     this.units = new Map();
     this.images = new Map();
+    // Scratch for the ground mesh, grown to fit and then reused: a repaint
+    // walks thousands of corners, and allocating that afresh every time is
+    // what turned an even frame cost into a jittery one.
+    this.mesh = null;
+    this.meshTint = [0, 0, 0];
     this.startedAt = performance.now();
     this.atmosphere = new Atmosphere(camera);
     // Building geometry never changes, so each type is compiled and shaded once.
@@ -420,6 +418,19 @@ export class Renderer {
     this.drawWoods(game, bounds);
   }
 
+  /** Mesh scratch big enough for `count` corners, kept between repaints. */
+  meshBuffers(count) {
+    if (!this.mesh || this.mesh.heights.length < count) {
+      this.mesh = {
+        heights: new Float64Array(count),
+        screenX: new Float64Array(count),
+        screenY: new Float64Array(count),
+        usable: new Uint8Array(count),
+      };
+    }
+    return this.mesh;
+  }
+
   /** The patch of ground the view covers, capped so a stray low tilt cannot run away. */
   groundBounds(spanFactor) {
     const { width, height } = this.camera;
@@ -439,44 +450,104 @@ export class Renderer {
     };
   }
 
+  /**
+   * The mesh, one flat-filled tile per cell.
+   *
+   * Every corner is shared by up to four tiles, and each tile also leans on
+   * two of its neighbours' corners for its slope, so sampling per tile asks
+   * the terrain for the same height seven times over and projects it four
+   * times. The corners are walked once here instead and the tiles read back
+   * from that, which is where nearly all of this pass's cost went.
+   */
   drawLandscape(terrain, bounds, cell) {
     const context = this.ground;
     const view = this.camera.view;
+    const { width, height } = this.camera;
 
+    // Accumulated exactly as the tile loops used to walk, so the mesh lands
+    // on the same points to the last bit rather than merely near them.
+    const xs = [];
     for (let x = Math.floor(bounds.minX / cell) * cell; x < bounds.maxX; x += cell) {
-      for (let y = Math.floor(bounds.minY / cell) * cell; y < bounds.maxY; y += cell) {
-        const corners = [
-          { x, y }, { x: x + cell, y }, { x: x + cell, y: y + cell }, { x, y: y + cell },
-        ];
-        const points = [];
-        let usable = true;
-        for (const corner of corners) {
-          const screen = projectPoint(view, corner.x, corner.y, terrain.heightAt(corner.x, corner.y));
-          if (!screen) {
-            usable = false;
-            break;
-          }
-          points.push(screen);
+      xs.push(x);
+    }
+    const ys = [];
+    for (let y = Math.floor(bounds.minY / cell) * cell; y < bounds.maxY; y += cell) {
+      ys.push(y);
+    }
+    if (xs.length === 0 || ys.length === 0) {
+      return;
+    }
+    // One more corner along each axis closes the last row and column.
+    xs.push(xs[xs.length - 1] + cell);
+    ys.push(ys[ys.length - 1] + cell);
+
+    const down = ys.length;
+    const mesh = this.meshBuffers(xs.length * down);
+    const { heights, screenX, screenY, usable } = mesh;
+    for (let i = 0; i < xs.length; i += 1) {
+      for (let j = 0; j < down; j += 1) {
+        heights[i * down + j] = terrain.heightAt(xs[i], ys[j]);
+      }
+    }
+    projectCorners(view, xs, ys, mesh);
+    const tint = this.meshTint;
+
+    // A tile's colour is rounded to whole channels, so a run of them often
+    // lands on the very same fill. Assigning fillStyle parses the colour
+    // afresh every time, which is worth skipping when nothing changed.
+    let lastRed = -1;
+    let lastGreen = -1;
+    let lastBlue = -1;
+
+    for (let i = 0; i + 1 < xs.length; i += 1) {
+      for (let j = 0; j + 1 < down; j += 1) {
+        const corner = i * down + j;
+        const right = corner + down;
+        if (!usable[corner] || !usable[right] || !usable[right + 1] || !usable[corner + 1]) {
+          continue;
         }
-        if (!usable) {
+        const x0 = screenX[corner];
+        const x1 = screenX[right];
+        const x2 = screenX[right + 1];
+        const x3 = screenX[corner + 1];
+        const y0 = screenY[corner];
+        const y1 = screenY[right];
+        const y2 = screenY[right + 1];
+        const y3 = screenY[corner + 1];
+        // A tile wholly off one edge of the canvas cannot colour a pixel on
+        // it -- the tile is convex, so all four corners past an edge puts
+        // the whole of it past that edge.
+        if ((x0 < 0 && x1 < 0 && x2 < 0 && x3 < 0)
+          || (x0 > width && x1 > width && x2 > width && x3 > width)
+          || (y0 < 0 && y1 < 0 && y2 < 0 && y3 < 0)
+          || (y0 > height && y1 > height && y2 > height && y3 > height)) {
           continue;
         }
         // Shade by how the cell leans, which is what reads as a hill.
-        const a = terrain.heightAt(x, y);
-        const slopeX = (terrain.heightAt(x + cell, y) - a) / cell;
-        const slopeY = (terrain.heightAt(x, y + cell) - a) / cell;
-        const normal = { x: -slopeX * TERRAIN.slopeRelief, y: -slopeY * TERRAIN.slopeRelief, z: 1 };
-        const length = Math.hypot(normal.x, normal.y, normal.z);
-        const light = lightingFor({ x: normal.x / length, y: normal.y / length, z: normal.z / length });
-        const tint = shadeOf(terrain.groundColorAt(x, y));
+        const a = heights[corner];
+        const slopeX = (heights[right] - a) / cell;
+        const slopeY = (heights[corner + 1] - a) / cell;
+        const normalX = -slopeX * TERRAIN.slopeRelief;
+        const normalY = -slopeY * TERRAIN.slopeRelief;
+        const length = Math.hypot(normalX, normalY, 1);
+        const light = lightingForVector(normalX / length, normalY / length, 1 / length);
+        terrain.groundTintAt(xs[i], ys[j], tint);
+        const red = Math.round(tint[0] * light);
+        const green = Math.round(tint[1] * light);
+        const blue = Math.round(tint[2] * light);
 
         context.beginPath();
-        context.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < 4; i += 1) {
-          context.lineTo(points[i].x, points[i].y);
-        }
+        context.moveTo(x0, y0);
+        context.lineTo(x1, y1);
+        context.lineTo(x2, y2);
+        context.lineTo(x3, y3);
         context.closePath();
-        context.fillStyle = shade(tint, light);
+        if (red !== lastRed || green !== lastGreen || blue !== lastBlue) {
+          context.fillStyle = `rgb(${red},${green},${blue})`;
+          lastRed = red;
+          lastGreen = green;
+          lastBlue = blue;
+        }
         context.fill();
       }
     }

@@ -7,7 +7,9 @@ import {
   groundAt,
   groundJacobian,
   lightingFor,
+  lightingForVector,
   normalOf,
+  projectCorners,
   projectPoint,
 } from '../src/projection.js';
 import { Camera } from '../src/camera.js';
@@ -189,4 +191,63 @@ test('the horizon stays off screen at the lowest allowed tilt', () => {
   const v = view({ elevation: CAMERA.minElevation, height });
   const horizonY = v.centreY - v.focal * Math.tan(CAMERA.minElevation * Math.PI / 180);
   assert.ok(horizonY < 0, `horizon at ${horizonY.toFixed(0)}px should be above the viewport`);
+});
+
+test('projectCorners agrees with projectPoint on every corner of a lattice', () => {
+  const v = view();
+  const xs = [-90, -45, 0, 45, 90, 135];
+  const ys = [-60, -20, 20, 60, 100];
+  const count = xs.length * ys.length;
+  const into = {
+    heights: new Float64Array(count),
+    screenX: new Float64Array(count),
+    screenY: new Float64Array(count),
+    usable: new Uint8Array(count),
+  };
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = 0; j < ys.length; j += 1) {
+      into.heights[i * ys.length + j] = Math.sin(xs[i] * 0.01) * 30 + Math.cos(ys[j] * 0.02) * 12;
+    }
+  }
+  projectCorners(v, xs, ys, into);
+
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = 0; j < ys.length; j += 1) {
+      const slot = i * ys.length + j;
+      const one = projectPoint(v, xs[i], ys[j], into.heights[slot]);
+      if (!one) {
+        assert.equal(into.usable[slot], 0, `corner ${slot} is behind the camera and should be unusable`);
+        continue;
+      }
+      assert.equal(into.usable[slot], 1);
+      assert.equal(into.screenX[slot], one.x, `corner ${slot} x`);
+      assert.equal(into.screenY[slot], one.y, `corner ${slot} y`);
+    }
+  }
+});
+
+test('projectCorners marks corners behind the camera unusable, leaving no stale flag', () => {
+  const v = view();
+  const xs = [0, 40];
+  // Far enough behind the camera to fall through the near plane.
+  const ys = [-4000, 40];
+  const count = xs.length * ys.length;
+  const into = {
+    heights: new Float64Array(count),
+    screenX: new Float64Array(count),
+    screenY: new Float64Array(count),
+    usable: new Uint8Array(count).fill(1),
+  };
+  projectCorners(v, xs, ys, into);
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = 0; j < ys.length; j += 1) {
+      const slot = i * ys.length + j;
+      assert.equal(Boolean(into.usable[slot]), projectPoint(v, xs[i], ys[j], 0) !== null);
+    }
+  }
+});
+
+test('lightingForVector matches lightingFor for the same normal', () => {
+  const normal = normalOf({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0.3 }, { x: 0, y: 1, z: -0.2 });
+  assert.equal(lightingForVector(normal.x, normal.y, normal.z), lightingFor(normal));
 });

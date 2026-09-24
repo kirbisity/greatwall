@@ -43,6 +43,40 @@ export function project(view, point) {
   return projectPoint(view, point.x, point.y, point.z ?? 0);
 }
 
+/**
+ * Project a lattice of ground corners at once, into flat arrays rather than
+ * a point object apiece.
+ *
+ * The ground mesh projects thousands of corners per repaint and reads only
+ * their screen position, so handing back an object each would be that many
+ * short-lived allocations a frame -- enough churn to show up as stutter
+ * whenever the collector caught up with it. `into` holds the caller's own
+ * arrays for the same reason, reused from one repaint to the next.
+ * `usable` is 0 where a corner falls behind the camera, which is the null
+ * projectPoint returns there.
+ */
+export function projectCorners(view, xs, ys, into) {
+  const { heights, screenX, screenY, usable } = into;
+  const down = ys.length;
+  for (let i = 0; i < xs.length; i += 1) {
+    const relX = xs[i] - view.position.x;
+    for (let j = 0; j < down; j += 1) {
+      const slot = i * down + j;
+      const relY = ys[j] - view.position.y;
+      const relZ = heights[slot] - view.position.z;
+      const depth = relY * view.forward.y + relZ * view.forward.z;
+      if (depth <= CAMERA.nearPlane) {
+        usable[slot] = 0;
+        continue;
+      }
+      const perspective = view.focal / depth;
+      screenX[slot] = view.centreX + relX * perspective;
+      screenY[slot] = view.centreY - (relY * view.up.y + relZ * view.up.z) * perspective;
+      usable[slot] = 1;
+    }
+  }
+}
+
 /** Where the ray through a pixel meets the ground plane. */
 export function groundAt(view, screenX, screenY) {
   const u = (screenX - view.centreX) / view.focal;
@@ -97,7 +131,12 @@ export function facesCamera(view, normal, centre) {
 
 /** Lambert term in [AMBIENT_LIGHT, 1] for a face with this normal. */
 export function lightingFor(normal) {
-  const lambert = Math.max(0, normal.x * SUN.x + normal.y * SUN.y + normal.z * SUN.z);
+  return lightingForVector(normal.x, normal.y, normal.z);
+}
+
+/** As lightingFor, for a caller that has the components and no object. */
+export function lightingForVector(x, y, z) {
+  const lambert = Math.max(0, x * SUN.x + y * SUN.y + z * SUN.z);
   return AMBIENT_LIGHT + (1 - AMBIENT_LIGHT) * lambert;
 }
 

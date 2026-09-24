@@ -1,4 +1,4 @@
-import { distanceSquared, pointToLineDistance } from './geometry.js';
+import { distance, distanceSquared, distanceToSegment, pointToLineDistance } from './geometry.js';
 import { AVOIDANCE, NAVIGATION, RAIDER_STEERING_RADIANS, TURN_EASE } from './config.js';
 import { isBlocked, routeFrom, siegeTarget, wallsNear } from './navigation.js';
 
@@ -9,11 +9,53 @@ function midpointOf(wall) {
 }
 
 /**
+ * If a straight run from `from` to `to` would cut through a mountain's
+ * repel circle, redirect round it by whichever tangent point keeps the
+ * whole trip shortest.
+ *
+ * This is deliberately geometry, not a steering force: a force only nudges
+ * the aim, and against something as wide as a mountain a raider can still
+ * be turning towards clear ground well after it has already walked through
+ * the peak -- the turn is rate-limited, the approach is not. A tangent point
+ * is somewhere the direct line to it provably clears the mountain, so
+ * following it -- however fast the turn towards it happens -- eventually
+ * does too. Re-picked with every replan, so it keeps pace with wherever the
+ * raider actually is rather than committing to a single detour up front.
+ */
+function avoidMountains(from, to, mountains) {
+  let target = to;
+  for (const mountain of mountains) {
+    const reach = mountain.radius + AVOIDANCE.mountainRepelMargin;
+    const centre = { x: mountain.x, y: mountain.y };
+    const gap = distance(from, centre);
+    // Already inside the mountain's own reach -- nothing to route round
+    // from here; the way out is however it got in.
+    if (gap <= reach || distanceToSegment(centre, from, target) >= reach) {
+      continue;
+    }
+    const baseAngle = Math.atan2(centre.y - from.y, centre.x - from.x);
+    const offset = Math.asin(Math.min(1, reach / gap));
+    const tangentLength = Math.sqrt(gap * gap - reach * reach);
+    const tangents = [baseAngle + offset, baseAngle - offset].map((angle) => ({
+      x: from.x + Math.cos(angle) * tangentLength,
+      y: from.y + Math.sin(angle) * tangentLength,
+    }));
+    target = distance(tangents[0], to) <= distance(tangents[1], to) ? tangents[0] : tangents[1];
+  }
+  return target;
+}
+
+/**
  * Where this raider should head next: straight at the city when the way is
  * open, otherwise the cheapest gateway round the walls, and failing that the
- * wall barring its path.
+ * wall barring its path. A mountain between here and there detours round it
+ * regardless -- see avoidMountains.
  */
 function chooseWaypoint(raider, navigation) {
+  return avoidMountains(raider.position, pickWaypoint(raider, navigation), navigation.mountains);
+}
+
+function pickWaypoint(raider, navigation) {
   const castle = raider.destination;
   // Companies that pass through walls have nothing to route around.
   if (!raider.avoidsWalls) {
@@ -72,7 +114,8 @@ function chooseWaypoint(raider, navigation) {
 /**
  * Nudge the aim away from any wall the company is crowding. This is what turns
  * a graze along the stone into an arc around it, and it stacks with whatever
- * route the graph handed down.
+ * route the graph handed down. Mountains do not need this: avoidMountains
+ * already routes the waypoint itself clear of one.
  */
 function shoveOffWalls(company, waypoint, navigation) {
   let shiftX = 0;
@@ -98,8 +141,8 @@ function shoveOffWalls(company, waypoint, navigation) {
   }
   // Hold the push below the pull of the waypoint, so it bends the approach
   // rather than replacing it and walking the company round in a circle.
-  const reach = Math.hypot(waypoint.x - company.position.x, waypoint.y - company.position.y);
-  const cap = reach * AVOIDANCE.maxShoveFraction;
+  const pull = Math.hypot(waypoint.x - company.position.x, waypoint.y - company.position.y);
+  const cap = pull * AVOIDANCE.maxShoveFraction;
   const shove = Math.hypot(shiftX, shiftY);
   if (shove > cap) {
     shiftX *= cap / shove;

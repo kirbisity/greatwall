@@ -63,3 +63,65 @@ test('a different seed grows a different patchwork', () => {
   }
   assert.ok(differs, 'expected the two seeds to disagree somewhere');
 });
+
+test('there are a few mountains, not none and not a range', () => {
+  const terrain = new Terrain(1);
+  const mountains = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
+  assert.ok(mountains.length > 0, 'expected at least one mountain in a 2000x2000 span');
+  assert.ok(mountains.length < 60, `expected a handful, not ${mountains.length} -- that reads as a mountain range`);
+});
+
+test('mountainsWithin is stable for the same span and seed', () => {
+  const terrain = new Terrain(3);
+  const first = terrain.mountainsWithin(0, 0, 1500, 1500);
+  const second = terrain.mountainsWithin(0, 0, 1500, 1500);
+  assert.deepEqual(first, second);
+});
+
+test('a mountain peak stands well above the rolling hills around it', () => {
+  const terrain = new Terrain(1);
+  const [mountain] = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
+  const peakHeight = terrain.wildHeightAt(mountain.x, mountain.y);
+  const farHeight = terrain.wildHeightAt(mountain.x + 5000, mountain.y);
+  assert.ok(peakHeight > farHeight + 50,
+    `expected the peak (${peakHeight.toFixed(1)}) to clear ordinary ground (${farHeight.toFixed(1)}) by a mountain's worth`);
+});
+
+test('height eases back to the ordinary ground past a mountain\'s reach', () => {
+  const terrain = new Terrain(1);
+  const [mountain] = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
+  const farAway = { x: mountain.x + 3000, y: mountain.y };
+  const atDistance = terrain.wildHeightAt(farAway.x, farAway.y);
+  const bareGround = terrain.wildHeightAt(farAway.x + 1, farAway.y);
+  assert.ok(Math.abs(atDistance - bareGround) < 5, 'well clear of any peak, height should read as ordinary hills');
+});
+
+test('the ground reads as bare rock on a mountain\'s slope', () => {
+  const terrain = new Terrain(1);
+  const [mountain] = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
+  const ROCK_BAND = BANDS.length - 1;
+  assert.equal(bandOf(terrain.groundColorAt(mountain.x, mountain.y)), ROCK_BAND);
+});
+
+test('trees only stand where the ground band is grass', () => {
+  const terrain = new Terrain(1);
+  const trees = terrain.treesWithin(-1500, -1500, 1500, 1500);
+  assert.ok(trees.length > 0, 'expected some trees over a span this size');
+  for (const tree of trees) {
+    assert.equal(terrain.groundBandAt(tree.x, tree.y), TERRAIN.grassColor,
+      `a tree grew on a non-grass band at (${tree.x}, ${tree.y})`);
+  }
+});
+
+test('no tree grows on a mountain\'s slope, even where the band beneath is grass', () => {
+  const terrain = new Terrain(1);
+  const [mountain] = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
+  const trees = terrain.treesWithin(
+    mountain.x - mountain.radius, mountain.y - mountain.radius,
+    mountain.x + mountain.radius, mountain.y + mountain.radius,
+  );
+  for (const tree of trees) {
+    const dist = Math.hypot(tree.x - mountain.x, tree.y - mountain.y);
+    assert.ok(dist >= mountain.radius * 0.5, `a tree grew practically on the peak at distance ${dist.toFixed(1)}`);
+  }
+});

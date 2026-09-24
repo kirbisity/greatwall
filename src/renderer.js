@@ -178,6 +178,15 @@ function wallTint(condition) {
   return STONE.map((channel, index) => channel * condition + RUINED[index] * (1 - condition));
 }
 
+// How far a hovered section's tint is pulled towards white -- enough to
+// pick it out, not so much it stops reading as stone.
+const HOVER_HIGHLIGHT = 0.3;
+
+/** Blend a tint towards white by `amount`, for whatever the cursor is over. */
+function highlighted(tint, amount) {
+  return tint.map((channel) => channel + (255 - channel) * amount);
+}
+
 /**
  * The prism a wall segment occupies. Wound counter-clockwise seen from above so
  * face normals point outwards and back-face culling keeps the roof.
@@ -230,6 +239,10 @@ export class Renderer {
     this.overlay = structures.getContext('2d');
     this.camera = camera;
     this.paintedGround = null;
+    // The section the repair or fortify tool would act on, set by Input as
+    // the cursor moves. Null whenever neither tool is selected, or nothing
+    // is under the cursor.
+    this.hoveredWall = null;
     this.units = new Map();
     this.images = new Map();
     this.startedAt = performance.now();
@@ -339,7 +352,7 @@ export class Renderer {
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
     this.collectCastles(items, paving, view, game.castles, game.terrain, blacken);
-    this.collectWalls(items, view, game.walls, game.terrain);
+    this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectHouses(items, view, game.houses, game.terrain);
     this.collectRaiders(items, view, game.raiders, game.terrain);
@@ -568,7 +581,7 @@ export class Renderer {
     }
   }
 
-  collectWalls(items, view, walls, terrain) {
+  collectWalls(items, view, walls, terrain, hoveredWall) {
     for (const wall of walls) {
       if (wall.isPlanned) {
         continue;
@@ -594,7 +607,10 @@ export class Renderer {
       const ground = [startGround, endGround, endGround, startGround];
       const quads = wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
-      this.collectPrism(items, view, flat ? [quads[0]] : quads, wallTint(condition));
+      const tint = wall === hoveredWall
+        ? highlighted(wallTint(condition), HOVER_HIGHLIGHT)
+        : wallTint(condition);
+      this.collectPrism(items, view, flat ? [quads[0]] : quads, tint);
     }
   }
 

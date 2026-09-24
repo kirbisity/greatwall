@@ -93,11 +93,11 @@ function routeDistances(gateways, castle, barriers) {
  * with how far it still is to the castle. Depends only on wall layout, so it
  * is rebuilt when walls change rather than every frame.
  */
-export function buildNavigation(walls, castle, version) {
+export function buildNavigation(walls, castle, version, mountains = []) {
   // Every standing section blocks, so the wall list is the barrier list.
   const barriers = walls;
   if (!castle) {
-    return { version, barriers: [], grid: new Map(), gateways: [], distances: [] };
+    return { version, barriers: [], grid: new Map(), gateways: [], distances: [], mountains };
   }
 
   // Keep the nearest ends when a sprawling network would make the graph large.
@@ -112,6 +112,7 @@ export function buildNavigation(walls, castle, version) {
     grid: buildWallGrid(barriers),
     gateways,
     distances: routeDistances(gateways, castle, barriers),
+    mountains,
   };
 }
 

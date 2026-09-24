@@ -4,6 +4,7 @@ import { Raider, Wall } from '../src/entities.js';
 import { steerCompany } from '../src/pathfinding.js';
 import { buildNavigation, routeFrom } from '../src/navigation.js';
 import { AVOIDANCE, FPS, WALL } from '../src/config.js';
+import { distance } from '../src/geometry.js';
 
 /** Frames a raider spends inside a wall's damage band crossing it head-on. */
 function contactFrames(raider) {
@@ -80,6 +81,44 @@ test('a raider routes to the open end of a wall barring its way', () => {
   navigate(raider, [wall]);
   assert.notDeepEqual(raider.waypoint, CITY, 'does not charge the wall');
   assert.ok(Math.abs(raider.waypoint.y) > 60, 'aims past one of the wall ends');
+});
+
+test('a raider routes round a mountain sitting directly on its way', () => {
+  const mountain = { x: 80, y: 0, radius: 40 };
+  const navigation = buildNavigation([], CITY, 'mountain', [mountain]);
+  const raider = approaching(200, 0);
+  steerCompany(raider, navigation);
+  assert.notDeepEqual(raider.waypoint, CITY, 'does not walk straight through the peak');
+  const reach = mountain.radius + AVOIDANCE.mountainRepelMargin;
+  const onReachCircle = Math.abs(distance(raider.waypoint, mountain) - reach) < 1e-6;
+  assert.ok(onReachCircle, `expected a point tangent to the mountain's reach, got ${JSON.stringify(raider.waypoint)}`);
+});
+
+test('the tangent point chosen keeps the whole trip round the mountain shortest', () => {
+  // Above the axis, so the shorter way round is the tangent on that same
+  // side rather than the far one, which would backtrack under the peak.
+  const mountain = { x: 80, y: 0, radius: 40 };
+  const navigation = buildNavigation([], CITY, 'mountain-side', [mountain]);
+  const raider = approaching(200, 30);
+  steerCompany(raider, navigation);
+  assert.ok(raider.waypoint.y > 0, `expected the near-side tangent (y > 0), got ${JSON.stringify(raider.waypoint)}`);
+});
+
+test('a mountain well off the route is ignored', () => {
+  const mountain = { x: 80, y: 400, radius: 40 };
+  const navigation = buildNavigation([], CITY, 'mountain-aside', [mountain]);
+  const raider = approaching();
+  steerCompany(raider, navigation);
+  assert.deepEqual(raider.waypoint, CITY, 'a mountain nowhere near the path should not detour it');
+});
+
+test('a company already standing inside a mountain\'s reach is left to walk out on its own', () => {
+  const mountain = { x: 100, y: 0, radius: 40 };
+  const navigation = buildNavigation([], CITY, 'mountain-inside', [mountain]);
+  const raider = new Raider('CR0', { x: 110, y: 0 });
+  raider.aimAt(CITY);
+  steerCompany(raider, navigation);
+  assert.deepEqual(raider.waypoint, CITY, 'no tangent to compute from inside the reach circle itself');
 });
 
 test('a wall that does not bar the way is ignored', () => {

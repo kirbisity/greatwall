@@ -17,14 +17,19 @@ const CURSORS = {
 // it, so a new run can branch off a wall that is already up.
 const CHAIN_CONTINUES = new Set(['built', 'exists']);
 
+// Tools that pick out a single section rather than acting on open ground, so
+// hovering is worth showing before a click commits to anything.
+const HOVER_TOOLS = new Set(['repair', 'fortify']);
+
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
 
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {
-  constructor({ game, camera, hud, onChange, onMenu }) {
+  constructor({ game, camera, renderer, hud, onChange, onMenu }) {
     this.game = game;
     this.camera = camera;
+    this.renderer = renderer;
     this.hud = hud;
     this.onChange = onChange;
     this.onMenu = onMenu;
@@ -91,6 +96,9 @@ export class Input {
   applyTool() {
     this.hud.setCursor(CURSORS[this.tool]);
     this.hud.setActiveTool(this.tool);
+    // Leaving a picking tool drops whatever it had picked out, rather than
+    // leaving a stale section glowing under a different tool.
+    this.renderer.hoveredWall = null;
   }
 
   isOverMap(event) {
@@ -140,6 +148,7 @@ export class Input {
       return;
     }
     const previous = this.trackPointer(event);
+    this.updateHover();
     if (!this.pointerDown) {
       return;
     }
@@ -163,6 +172,21 @@ export class Input {
         this.camera.panFrom(previous, this.pointer);
     }
     this.onChange();
+  }
+
+  /**
+   * Which section the repair or fortify tool would act on right now, so the
+   * renderer can pick it out before a click commits to anything. Any other
+   * tool leaves nothing highlighted.
+   */
+  updateHover() {
+    const hovered = HOVER_TOOLS.has(this.tool)
+      ? this.game.wallAt(this.camera.toWorld(this.pointer))
+      : null;
+    if (hovered !== this.renderer.hoveredWall) {
+      this.renderer.hoveredWall = hovered;
+      this.onChange();
+    }
   }
 
   dragZoom(previous) {

@@ -115,6 +115,9 @@ export const AVOIDANCE = {
   // makes them arc around an obstacle rather than scrape along it.
   repelDistance: 26,
   repelStrength: 0.7,
+  // How far clear of a mountain's own radius a route round it should pass --
+  // see pathfinding.js's avoidMountains.
+  mountainRepelMargin: 30,
   // The push may only bend the aim this far off the waypoint. Without a cap it
   // can overpower the waypoint entirely and walk the company round in circles.
   maxShoveFraction: 0.55,
@@ -376,9 +379,10 @@ export const TERRAIN = {
   levelSkirt: 60,
 
   // Woodland. Cover above the threshold grows trees, thicker towards 1.
+  // Only grass grows any -- see Terrain.treesWithin.
   forestScale: 240,
-  forestThreshold: 0.62,
-  treeSpacing: 26,
+  forestThreshold: 0.50,
+  treeSpacing: 18,
   treeSize: 5.4,
 
   // Trees are felled this near a wall, and anywhere a city stands.
@@ -386,6 +390,29 @@ export const TERRAIN = {
 
   // Companies lose this much of their pace in the thickest wood.
   forestDrag: 0.45,
+
+  // Mountains: a few, rough-shaped, standing well above the rolling hills.
+  // One lattice cell (mountainSpacing across) has mountainChance of holding
+  // one at all, so most cells are empty and the ones that aren't are spread
+  // out -- see Terrain's mountainAt. Kept comfortably under mountainSpacing
+  // so a point only ever needs to check its own cell's neighbours.
+  mountainSpacing: 300,
+  mountainChance: 0.35,
+  mountainMinRadius: 45,
+  mountainMaxRadius: 100,
+  mountainMinHeight: 90,
+  mountainMaxHeight: 150,
+  // How far past its silhouette a mountain's slope keeps easing down to the
+  // surrounding ground, rather than ending at a cliff.
+  mountainSkirt: 40,
+  // Noise scale for the wobble on a mountain's outline -- how many bumps a
+  // trip around it passes through, roughly.
+  mountainShapeScale: 2.2,
+  // Ground reads as bare rock once a mountain has raised it by this much.
+  mountainRockBump: 14,
+  // How far out from a settlement mountains are worth asking about at all --
+  // comfortably past where a raider could ever spawn.
+  mountainFieldRadius: 500,
 
   // Mesh drawn for the ground: a fixed-size tile in world units, a quarter
   // the size of the old zoom-compensated cell. It is not resized for the

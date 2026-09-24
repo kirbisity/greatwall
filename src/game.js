@@ -315,10 +315,13 @@ export class Game {
     }
     const version = `${this.walls.length}:${standing}`;
     if (this.navigationCache?.version !== version) {
+      const castle = this.castles[0]?.position;
+      const reach = TERRAIN.mountainFieldRadius;
       this.navigationCache = buildNavigation(
         this.walls.filter((wall) => !wall.isPlanned),
-        this.castles[0]?.position,
+        castle,
         version,
+        castle ? this.terrain.mountainsWithin(castle.x - reach, castle.y - reach, castle.x + reach, castle.y + reach) : [],
       );
     }
     return this.navigationCache;

@@ -32,6 +32,7 @@ class App {
     this.input = new Input({
       game: this.game,
       camera: this.camera,
+      renderer: this.renderer,
       hud: this.hud,
       onChange: () => { this.needsDraw = true; },
       onMenu: () => this.openMenu(),

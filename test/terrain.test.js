@@ -83,7 +83,7 @@ test('a mountain peak stands well above the rolling hills around it', () => {
   const [mountain] = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
   const peakHeight = terrain.wildHeightAt(mountain.x, mountain.y);
   const farHeight = terrain.wildHeightAt(mountain.x + 5000, mountain.y);
-  assert.ok(peakHeight > farHeight + 50,
+  assert.ok(peakHeight > farHeight + TERRAIN.mountainMinHeight - 5,
     `expected the peak (${peakHeight.toFixed(1)}) to clear ordinary ground (${farHeight.toFixed(1)}) by a mountain's worth`);
 });
 

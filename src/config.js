@@ -400,8 +400,8 @@ export const TERRAIN = {
   mountainChance: 0.35,
   mountainMinRadius: 45,
   mountainMaxRadius: 100,
-  mountainMinHeight: 90,
-  mountainMaxHeight: 150,
+  mountainMinHeight: 45,
+  mountainMaxHeight: 75,
   // How far past its silhouette a mountain's slope keeps easing down to the
   // surrounding ground, rather than ending at a cliff.
   mountainSkirt: 40,

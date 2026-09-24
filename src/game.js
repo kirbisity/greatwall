@@ -168,64 +168,46 @@ export class Game {
    * the tool: a platform is never the answer to raiders already ashore.
    */
   raiseGround(point) {
+    const square = this.squareUnder(point);
+    if (square.raised) {
+      return { status: 'raised', platform: this.platforms.get(square.key) };
+    }
+    // Nothing is raised out of water, for the reason a wall is not laid in
+    // it: the island would stop being one.
+    if (!this.terrain.isAshore(square.x, square.y)) {
+      return { status: 'water' };
+    }
+    if (this.tokens < PLATFORM.cost) {
+      return { status: 'poor', cost: PLATFORM.cost };
+    }
+    this.tokens -= PLATFORM.cost;
+
+    const platform = {
+      key: square.key,
+      x: square.x,
+      y: square.y,
+      lift: 0,
+      zone: this.terrain.raise(square.key, square.x, square.y, PLATFORM.size / 2, 0, PLATFORM.skirt),
+    };
+    this.platforms.set(square.key, platform);
+    return { status: 'raising', platform };
+  }
+
+  /**
+   * The square of the platform grid a point falls in, whether it is already
+   * raised, and whether one could be ordered here -- which is what the
+   * cursor outline shows before the player commits to paying for it.
+   */
+  squareUnder(point) {
     const size = PLATFORM.size;
     const cellX = Math.floor(point.x / size);
     const cellY = Math.floor(point.y / size);
     const key = `${cellX}|${cellY}`;
     const x = (cellX + 0.5) * size;
     const y = (cellY + 0.5) * size;
-
-    const standing = this.platforms.get(key);
-    const steps = standing?.steps ?? 0;
-    if (steps >= PLATFORM.maxSteps) {
-      return { status: 'highest', platform: standing };
-    }
-    // Nothing is raised out of water, for the reason a wall is not laid in
-    // it: the island would stop being one.
-    if (!this.terrain.isAshore(x, y)) {
-      return { status: 'water' };
-    }
-    const cost = this.platformCost(steps);
-    if (this.tokens < cost) {
-      return { status: 'poor', cost };
-    }
-    this.tokens -= cost;
-
-    if (standing) {
-      standing.steps += 1;
-      standing.growing = PLATFORM.growSeconds;
-      return { status: 'raising', platform: standing };
-    }
-    const platform = {
-      key, x, y, steps: 1, lift: 0, growing: PLATFORM.growSeconds,
-      zone: this.terrain.raise(key, x, y, PLATFORM.size / 2, 0, PLATFORM.skirt),
-    };
-    this.platforms.set(key, platform);
-    return { status: 'raising', platform };
-  }
-
-  /**
-   * The square of the platform grid a point falls in, and whether a step could
-   * actually be ordered on it -- which is what the cursor outline shows
-   * before the player commits to paying for one.
-   */
-  squareUnder(point) {
-    const size = PLATFORM.size;
-    const cellX = Math.floor(point.x / size);
-    const cellY = Math.floor(point.y / size);
-    const x = (cellX + 0.5) * size;
-    const y = (cellY + 0.5) * size;
-    const standing = this.platforms.get(`${cellX}|${cellY}`);
-    const steps = standing?.steps ?? 0;
-    const allowed = steps < PLATFORM.maxSteps
-      && this.terrain.isAshore(x, y)
-      && this.tokens >= this.platformCost(steps);
-    return { x, y, steps, allowed };
-  }
-
-  /** What the next step on a platform this tall costs. */
-  platformCost(steps) {
-    return Math.round(PLATFORM.cost * PLATFORM.costGrowth ** steps);
+    const raised = this.platforms.has(key);
+    const allowed = !raised && this.terrain.isAshore(x, y) && this.tokens >= PLATFORM.cost;
+    return { key, x, y, raised, allowed };
   }
 
   /**
@@ -236,16 +218,14 @@ export class Game {
    */
   advancePlatforms(seconds) {
     for (const platform of this.platforms.values()) {
-      const target = platform.steps * PLATFORM.step;
-      if (platform.lift === target) {
+      if (platform.lift === PLATFORM.height) {
         continue;
       }
-      const pace = PLATFORM.step / PLATFORM.growSeconds;
-      platform.lift = Math.min(target, platform.lift + pace * seconds);
-      platform.growing = Math.max(0, platform.growing - seconds);
+      const pace = PLATFORM.height / PLATFORM.growSeconds;
+      platform.lift = Math.min(PLATFORM.height, platform.lift + pace * seconds);
       platform.zone.height = platform.zone.base + platform.lift;
-      // Quantised, so a step's rise costs a handful of ground repaints
-      // rather than one per frame all the way up.
+      // Quantised, so a rise costs a handful of ground repaints rather than
+      // one per frame all the way up.
       this.terrainRevision = Math.round(this.platformTotal() * 4);
     }
   }
@@ -307,12 +287,14 @@ export class Game {
   }
 
   /**
-   * The price a raider pays for getting up onto a platform.
+   * The price a raider pays for getting up onto the platforms.
    *
    * Charged on arrival rather than over the climb, so a company that turns
-   * back partway up pays nothing, and one that commits pays once. Each
-   * raider remembers what it is standing on, which is what tells a climb
-   * from a walk along the top.
+   * back partway up pays nothing and one that commits pays once. What is
+   * remembered is whether the raider was up at all, not which square it was
+   * on: every platform stands at the same height, so crossing from one to
+   * its neighbour is a walk along the top and costs nothing. Only coming up
+   * off open ground is a climb.
    */
   chargeClimbs() {
     if (this.platforms.size === 0) {
@@ -320,9 +302,10 @@ export class Game {
     }
     for (const raider of this.raiders) {
       const standing = this.platformUnder(raider.position);
-      const was = raider.standingOn ?? null;
-      raider.standingOn = standing?.key ?? null;
-      if (!standing || standing.key === was || standing.lift < PLATFORM.climbFrom) {
+      const isUp = standing !== null && standing.lift >= PLATFORM.climbFrom;
+      const wasUp = raider.standingOn === true;
+      raider.standingOn = isUp;
+      if (!isUp || wasUp) {
         continue;
       }
       // Straight off its health rather than through takeHit: the earth is

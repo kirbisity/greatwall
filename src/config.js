@@ -320,11 +320,11 @@ export const RAIDER_TYPES = {
 /**
  * Raising ground, which the island holds instead of building walls.
  *
- * A platform is one square of the grid, raised a step at a time. It is not a
- * hill: the top is flat and the edge is very nearly a cliff, so a raider can
- * only come up it slowly and arrives a third down on health. Nothing brings
- * a platform down again -- what stops a player simply ringing their city
- * with them is what each step costs, and how long it takes to rise.
+ * A platform is one square of the grid, raised to a fixed height. It is not
+ * a hill: the top is flat and the edge is very nearly a cliff, so a raider
+ * can only come up it slowly and arrives a third down on health. Nothing
+ * brings a platform down again -- what stops a player simply ringing their
+ * city with them is what one costs, and how long it takes to rise.
  *
  * Buildings stand on whatever the ground does, so a platform raised under
  * one carries it up (see Terrain#reshape, which applies platforms last for
@@ -337,18 +337,18 @@ export const PLATFORM = {
   // How far the face runs out past the square. Small enough to read as a
   // wall of earth rather than a slope you could walk up.
   skirt: 3,
-  step: 3,
-  maxSteps: 6,
-  // How long a step takes to rise, and what it costs. The price climbs with
-  // the platform so that the sixth step is a real decision rather than a
-  // formality once the treasury is healthy.
-  growSeconds: 8,
-  cost: 70,
-  costGrowth: 1.45,
+  // Every platform stands at the same height. There is nothing to stack, so
+  // a square is either raised or it is not, and the decision the player
+  // makes is where rather than how high.
+  height: 18,
+  // How long one takes to rise, and what it costs.
+  growSeconds: 10,
+  cost: 280,
   // What the face costs a raider coming up it: a crawl, and a third of its
   // health by the time it stands on top. Only raiders pay -- the garrison
-  // knows its own earthworks. A platform this low is still a step up rather
-  // than a climb, and takes nothing.
+  // knows its own earthworks. Charged once for getting up off open ground,
+  // never again for crossing between platforms already up there. Ground
+  // still on its way up and lower than this is a step rather than a climb.
   climbFrom: 4,
   climbPace: 0.18,
   climbToll: 1 / 3,

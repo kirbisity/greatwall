@@ -146,8 +146,8 @@ export class Input {
     if (result.status === 'water') {
       this.hud.showMessage('Only dry ground can be raised');
     }
-    if (result.status === 'highest') {
-      this.hud.showMessage('This ground is as high as it will go');
+    if (result.status === 'raised') {
+      this.hud.showMessage('This ground is already raised');
     }
     this.updateHover();
   }
@@ -212,11 +212,11 @@ export class Input {
       ? this.game.squareUnder(this.camera.toWorld(this.pointer))
       : null;
     const shown = this.renderer.hoveredSquare;
-    // How far the square is already raised counts as a change too: without
+    // Whether the square is already raised counts as a change too: without
     // it the outline kept saying "nothing here yet" over ground the player
     // had just paid to raise.
     if (square?.x !== shown?.x || square?.y !== shown?.y
-      || square?.allowed !== shown?.allowed || square?.steps !== shown?.steps) {
+      || square?.allowed !== shown?.allowed || square?.raised !== shown?.raised) {
       this.renderer.hoveredSquare = square;
       this.onChange();
     }

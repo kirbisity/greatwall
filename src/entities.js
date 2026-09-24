@@ -274,9 +274,9 @@ class Company {
     this.wander = 0;
     // 0 in the clear, 1 astride a wall and slowed to a crawl by it.
     this.crossing = 0;
-    // Which platform this company is standing on top of, so climbing onto
-    // one can be told from walking about on it -- see Game#chargeClimbs.
-    this.standingOn = null;
+    // Whether this company is up on the platforms, so climbing onto them
+    // can be told from walking about up there -- see Game#chargeClimbs.
+    this.standingOn = false;
     // Navigation state, so a company thinks a few times a second rather than
     // every frame.
     this.planVersion = null;

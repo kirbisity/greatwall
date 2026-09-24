@@ -20,7 +20,7 @@ function island(tokens = 100000) {
 
 /** Run a game until every platform has finished climbing. */
 function settle(game) {
-  for (let frame = 0; frame < 60 * PLATFORM.growSeconds * PLATFORM.maxSteps + 120; frame += 1) {
+  for (let frame = 0; frame < 60 * PLATFORM.growSeconds + 120; frame += 1) {
     game.step();
   }
 }
@@ -34,13 +34,15 @@ test('the island is the level that raises ground instead of laying wall', () => 
   }
 });
 
-test('raising snaps to a grid, so the same square grows one platform', () => {
+test('raising snaps to a grid, and a square is raised once and once only', () => {
   const game = island();
   const first = game.raiseGround({ x: 91, y: 4 });
+  const spent = 100000 - game.tokens;
   const again = game.raiseGround({ x: 98, y: 11 });
   assert.equal(game.platforms.size, 1, 'two orders in one square should be one platform');
-  assert.equal(first.platform, again.platform);
-  assert.equal(again.platform.steps, 2);
+  assert.equal(again.status, 'raised', 'a square already raised takes no more');
+  assert.equal(again.platform, first.platform);
+  assert.equal(100000 - game.tokens, spent, 'and is not charged for again');
 
   // And a neighbouring square is its own platform.
   game.raiseGround({ x: 91 + PLATFORM.size, y: 4 });
@@ -56,27 +58,26 @@ test('ground climbs over seconds rather than jumping, and stops where paid for',
     game.step();
   }
   const halfway = platform.lift;
-  assert.ok(halfway > 0 && halfway < PLATFORM.step, `half a step in, expected part-risen, got ${halfway}`);
+  assert.ok(halfway > 0 && halfway < PLATFORM.height, `halfway up, expected part-risen, got ${halfway}`);
 
   settle(game);
-  assert.ok(Math.abs(platform.lift - PLATFORM.step) < 1e-9, 'one order buys exactly one step');
+  assert.equal(platform.lift, PLATFORM.height, 'every platform settles at the one fixed height');
   assert.ok(
-    Math.abs(game.terrain.liftAt(platform.x, platform.y) - PLATFORM.step) < 0.01,
+    Math.abs(game.terrain.liftAt(platform.x, platform.y) - PLATFORM.height) < 0.01,
     'and the ground under it actually stands that high',
   );
 });
 
-test('a platform tops out, and every step costs more than the last', () => {
+test('every platform stands at the same height, for the same price', () => {
   const game = island(1000000);
-  const costs = [];
-  for (let order = 0; order < PLATFORM.maxSteps; order += 1) {
-    costs.push(game.platformCost(order));
-    assert.equal(game.raiseGround({ x: 91, y: 4 }).status, 'raising');
-  }
-  assert.equal(game.raiseGround({ x: 91, y: 4 }).status, 'highest');
-  for (let i = 1; i < costs.length; i += 1) {
-    assert.ok(costs[i] > costs[i - 1], `step ${i} should cost more than step ${i - 1}`);
-  }
+  const before = game.tokens;
+  game.raiseGround({ x: 91, y: 4 });
+  assert.equal(before - game.tokens, PLATFORM.cost);
+  game.raiseGround({ x: 91 + PLATFORM.size * 3, y: 4 });
+  settle(game);
+  const heights = [...game.platforms.values()].map((one) => one.lift);
+  assert.equal(heights.length, 2);
+  assert.deepEqual(heights, [PLATFORM.height, PLATFORM.height]);
 });
 
 test('nothing is raised out of the sea, or without the money', () => {
@@ -92,13 +93,15 @@ test('nothing is raised out of the sea, or without the money', () => {
 test('the square under the cursor says whether it could be raised', () => {
   const game = island();
   const open = game.squareUnder({ x: 91, y: 4 });
-  assert.equal(open.steps, 0);
+  assert.equal(open.raised, false);
   assert.ok(open.allowed);
   // It names the square, not the point asked about.
   assert.equal(open.x % PLATFORM.size, PLATFORM.size / 2);
 
   game.raiseGround({ x: 91, y: 4 });
-  assert.equal(game.squareUnder({ x: 91, y: 4 }).steps, 1, 'the outline follows what has been ordered');
+  const taken = game.squareUnder({ x: 91, y: 4 });
+  assert.equal(taken.raised, true, 'the outline follows what has been ordered');
+  assert.equal(taken.allowed, false, 'and offers nothing more on a square already up');
   assert.equal(game.squareUnder({ x: 400, y: 0 }).allowed, false, 'the sea is never allowed');
 });
 
@@ -108,9 +111,7 @@ test('the face of a platform is a climb for raiders, and the top is not', () => 
   // point to point and would otherwise be what the comparison measured.
   const centre = game.squareUnder({ x: 91, y: 4 });
   const flat = game.paceOn(centre, { avoidsWalls: true });
-  for (let order = 0; order < PLATFORM.maxSteps; order += 1) {
-    game.raiseGround({ x: 91, y: 4 });
-  }
+  game.raiseGround({ x: 91, y: 4 });
   settle(game);
   const platform = [...game.platforms.values()][0];
   const half = PLATFORM.size / 2;
@@ -133,18 +134,19 @@ test('the face of a platform is a climb for raiders, and the top is not', () => 
 test('a platform too low to be a climb takes no toll at all', () => {
   const game = island(1000000);
   game.raiseGround({ x: 91, y: 4 });
-  settle(game);
+  // Only part way up: caught while it is still rising, before it is a climb.
+  for (let frame = 0; frame < 20; frame += 1) {
+    game.step();
+  }
   const platform = [...game.platforms.values()][0];
-  assert.ok(platform.lift < PLATFORM.climbFrom, 'one step is a kerb, not a climb');
+  assert.ok(platform.lift < PLATFORM.climbFrom, 'barely off the ground is a kerb, not a climb');
   const face = { x: platform.x + PLATFORM.size / 2 + 1, y: platform.y };
   assert.equal(game.paceOn(face, { avoidsWalls: true }), game.paceOn(face, { avoidsWalls: false }));
 });
 
 test('a raider climbing onto a platform loses a third of its health, once', () => {
   const game = island(1000000);
-  for (let order = 0; order < PLATFORM.maxSteps; order += 1) {
-    game.raiseGround({ x: 91, y: 4 });
-  }
+  game.raiseGround({ x: 91, y: 4 });
   settle(game);
   const platform = [...game.platforms.values()][0];
 
@@ -173,11 +175,50 @@ test('a raider climbing onto a platform loses a third of its health, once', () =
   assert.ok(Math.abs(raider.health - full * (1 - PLATFORM.climbToll)) < 1e-9, 'the toll is charged once');
 });
 
+test('walking from one platform to the next is not another climb', () => {
+  const game = island(1000000);
+  // Three in a row, so a raider can cross two boundaries up on top.
+  for (let i = 0; i < 3; i += 1) {
+    game.raiseGround({ x: 91 + i * PLATFORM.size, y: 4 });
+  }
+  settle(game);
+  const row = [...game.platforms.values()].sort((a, b) => a.x - b.x);
+  assert.equal(row.length, 3);
+
+  game.raiders.length = 0;
+  game.spawnRaider();
+  const raider = game.raiders[0];
+  const full = raider.type.maxHealth;
+  raider.health = full;
+
+  // Up onto the first, then along the row.
+  raider.position.x = row[0].x - PLATFORM.size;
+  raider.position.y = row[0].y;
+  game.chargeClimbs();
+  for (const platform of row) {
+    raider.position.x = platform.x;
+    raider.position.y = platform.y;
+    game.chargeClimbs();
+  }
+  assert.ok(
+    Math.abs(raider.health - full * (1 - PLATFORM.climbToll)) < 1e-9,
+    `crossing three platforms should cost one climb, health is ${raider.health} of ${full}`,
+  );
+
+  // Back down to open ground and up again is a second climb, though.
+  raider.position.x = row[0].x - PLATFORM.size;
+  game.chargeClimbs();
+  raider.position.x = row[0].x;
+  game.chargeClimbs();
+  assert.ok(
+    Math.abs(raider.health - full * (1 - 2 * PLATFORM.climbToll)) < 1e-9,
+    'going down and coming up again is a fresh climb',
+  );
+});
+
 test('the garrison climbs its own platforms for nothing', () => {
   const game = island(1000000);
-  for (let order = 0; order < PLATFORM.maxSteps; order += 1) {
-    game.raiseGround({ x: 91, y: 4 });
-  }
+  game.raiseGround({ x: 91, y: 4 });
   settle(game);
   const platform = [...game.platforms.values()][0];
   game.sendGuard(game.dispatchOptions()[0].id, { x: platform.x, y: platform.y });
@@ -217,9 +258,9 @@ test('the zone index answers exactly what a full scan would', () => {
 
 test('a platform keeps its slope to itself', () => {
   const terrain = new Terrain(1, ISLAND.land, null, ISLAND.sea);
-  terrain.raise('m', 90, 0, PLATFORM.size / 2, PLATFORM.step * PLATFORM.maxSteps, PLATFORM.skirt);
+  terrain.raise('m', 90, 0, PLATFORM.size / 2, PLATFORM.height, PLATFORM.skirt);
   const reach = PLATFORM.size / 2 + PLATFORM.skirt;
-  assert.ok(terrain.liftAt(90, 0) > PLATFORM.step * PLATFORM.maxSteps - 0.01, 'full height on top');
+  assert.ok(terrain.liftAt(90, 0) > PLATFORM.height - 0.01, 'full height on top');
   assert.equal(terrain.liftAt(90 + reach + 1, 0), 0, 'and none at all past its skirt');
   // The settlement skirt is far wider; a platform borrowing it would smear.
   assert.ok(reach < terrain.land.levelSkirt, 'a platform should not use the settlement skirt');
@@ -241,27 +282,23 @@ test('a platform raised under the city carries the city up with it', () => {
   const keep = game.castles[0].position;
   const before = game.terrain.heightAt(keep.x, keep.y);
   for (const [dx, dy] of [[-9, -9], [9, -9], [9, 9], [-9, 9]]) {
-    for (let order = 0; order < PLATFORM.maxSteps; order += 1) {
-      game.raiseGround({ x: keep.x + dx, y: keep.y + dy });
-    }
+    game.raiseGround({ x: keep.x + dx, y: keep.y + dy });
   }
   settle(game);
   const lifted = game.terrain.heightAt(keep.x, keep.y) - before;
   assert.ok(
-    Math.abs(lifted - PLATFORM.step * PLATFORM.maxSteps) < 0.5,
+    Math.abs(lifted - PLATFORM.height) < 0.5,
     `the keep should stand a full platform higher, got ${lifted.toFixed(2)}`,
   );
 });
 
 test('a platform is a square with a cliff for an edge, not a hill', () => {
   const game = island(1000000);
-  for (let order = 0; order < PLATFORM.maxSteps; order += 1) {
-    game.raiseGround({ x: 91, y: 4 });
-  }
+  game.raiseGround({ x: 91, y: 4 });
   settle(game);
   const platform = [...game.platforms.values()][0];
   const half = PLATFORM.size / 2;
-  const full = PLATFORM.step * PLATFORM.maxSteps;
+  const full = PLATFORM.height;
 
   // Flat right out to the rim, corners included -- a circular zone would
   // have let the corners sag back to the wild ground.

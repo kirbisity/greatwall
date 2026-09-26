@@ -217,6 +217,109 @@ export class Terrain {
   }
 
   /**
+   * The level's own central rise, on top of whatever the noise is doing.
+   *
+   * A dome rather than another band of noise, because the whole of the
+   * island level is built around it: the keep stands on its summit and the
+   * walls terrace up it, and both need a shape that is the same every time
+   * and the same all the way round. Eased, so it meets the flat ground at
+   * its foot without a crease.
+   */
+  hillAt(x, y) {
+    const hill = this.land.hill;
+    if (!hill) {
+      return 0;
+    }
+    const reach = Math.hypot(x, y);
+    if (reach >= hill.radius) {
+      return 0;
+    }
+    return hill.height * ease(1 - reach / hill.radius);
+  }
+
+  /**
+   * The heights a wall may stand at, from the hill's foot to its summit.
+   *
+   * A wall does not follow the ground on this level; it takes the nearest of
+   * these and its whole run shares it, which is what makes a ring of them
+   * read as one terrace rather than a fence draped over a hillside. Level
+   * with each other all the way round, and a tier apart from the ring above.
+   */
+  get contours() {
+    const hill = this.land.hill;
+    if (!hill) {
+      return null;
+    }
+    if (!this.contourCache) {
+      // Measured between the ground actually around the hill and its summit,
+      // rather than between the summit and the dome's own base. The noise
+      // under the hill does not sit at zero, so a range worked out from the
+      // dome alone put the lowest contour below any ground a wall could be
+      // built on, and the outermost terrace was unreachable.
+      let rim = 0;
+      const samples = 8;
+      for (let i = 0; i < samples; i += 1) {
+        const angle = (i / samples) * Math.PI * 2;
+        rim += this.wildHeightAt(Math.cos(angle) * hill.radius, Math.sin(angle) * hill.radius);
+      }
+      const foot = rim / samples;
+      const summit = this.wildHeightAt(0, 0);
+      const steps = hill.tiers - 1;
+      this.contourCache = Array.from(
+        { length: hill.tiers },
+        (unused, i) => foot + ((summit - foot) * i) / steps,
+      );
+    }
+    return this.contourCache;
+  }
+
+  /** How far one terrace stands above the one below it. */
+  get contourStep() {
+    const contours = this.contours;
+    return contours ? contours[1] - contours[0] : 0;
+  }
+
+  /**
+   * The lowest terrace standing at or above a height, or the height itself
+   * where there are no terraces or none reaches that far.
+   *
+   * This is what a wall's crest takes. Snapping to the *nearest* terrace
+   * instead looked right on paper and was wrong on the ground: a wall whose
+   * crest rounded down to the terrace below it had almost no height left,
+   * and a ring of them read as a road painted on the hillside.
+   */
+  contourAbove(height) {
+    const contours = this.contours;
+    if (!contours) {
+      return height;
+    }
+    for (let i = 0; i < contours.length; i += 1) {
+      if (contours[i] >= height) {
+        return contours[i];
+      }
+    }
+    return height;
+  }
+
+  /** The contour nearest a height, or the height itself off a terraced level. */
+  snapToContour(height) {
+    const contours = this.contours;
+    if (!contours) {
+      return height;
+    }
+    let best = contours[0];
+    let gap = Math.abs(height - best);
+    for (let i = 1; i < contours.length; i += 1) {
+      const other = Math.abs(height - contours[i]);
+      if (other < gap) {
+        gap = other;
+        best = contours[i];
+      }
+    }
+    return best;
+  }
+
+  /**
    * How far out to sea this point lies: 0 ashore, 1 in open water. The
    * coastline is the shore radius pushed in and out by a noise of its own,
    * so an island has bays and headlands rather than being a drawn circle.
@@ -362,6 +465,7 @@ export class Terrain {
     const broad = valueNoise(x / this.land.hillScale, y / this.land.hillScale, this.seed);
     const fine = valueNoise(x / this.land.detailScale, y / this.land.detailScale, this.seed + 17);
     let height = (broad - 0.5) * this.land.hillHeight + (fine - 0.5) * this.land.detailHeight;
+    height += this.hillAt(x, y);
     const mountains = this.mountainsNear(x, y);
     for (let i = 0; i < mountains.length; i += 1) {
       height += mountainBumpAt(mountains[i], x, y, this.land);

@@ -19,6 +19,7 @@ import {
   AVOIDANCE,
   BREACH,
   CASTLE_GUARD_TIERS,
+  CASTLE_TYPES,
   FEAR,
   FPS,
   TERRAIN,
@@ -27,7 +28,7 @@ import {
   IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
-  PLATFORM,
+  CASTLE_PLATFORM,
   RAIDER_SPAWN_INTERVAL_SECONDS,
   REGEN_FRACTION_PER_PAYOUT,
   SEASON_LENGTH_SECONDS,
@@ -90,6 +91,14 @@ export class Game {
     // A level may raise its own buildings and field its own companies; what
     // it leaves out it inherits (see levels.js).
     this.buildings = { ...BUILDINGS, ...level.buildings };
+    // Terraced stonework costs more to keep standing than a rampart on the
+    // flat, so a level may charge a multiple of the usual upkeep.
+    this.wallUpkeep = level.wallUpkeep ?? 1;
+    // Merged tier by tier, so a level says only what is different about its
+    // castles and keeps the costs, health and upgrade chain as they are.
+    this.castleTypes = Object.fromEntries(
+      Object.entries(CASTLE_TYPES).map(([id, type]) => [id, { ...type, ...level.castleTypes?.[id] }]),
+    );
     this.guardTiers = { ...CASTLE_GUARD_TIERS, ...level.guardTiers };
     // Null leaves the renderer on its own default house.
     this.houseDefinition = level.house ?? null;
@@ -107,8 +116,9 @@ export class Game {
     this.navigationCache = null;
     this.terrain.levelled = [];
     this.terrain.zoneIndex = null;
-    // Ground the player has raised, keyed by its square on the platform grid.
-    this.platforms = new Map();
+    // The stone terrace under each castle, keyed by its index, which rises
+    // when the city is founded and again each time it grows.
+    this.terraces = new Map();
     // Bumped whenever reshaped ground changes height, so the renderer knows
     // its cached landscape is stale -- see Renderer#drawGround.
     this.terrainRevision = 0;
@@ -116,7 +126,7 @@ export class Game {
     this.walls = [];
     this.houses = [];
     this.houseSpawnCountdown = HOUSES.spawnIntervalSeconds;
-    this.castles = [new Castle(STARTING_CASTLE_TYPE)];
+    this.castles = [new Castle(STARTING_CASTLE_TYPE, { x: 0, y: 0 }, { types: this.castleTypes })];
     this.levelUnderCities();
     this.raiders = [];
     this.tokens = STARTING_TOKENS;
@@ -128,10 +138,38 @@ export class Game {
     this.breachSeconds = null;
   }
 
-  /** Settlements stand on levelled ground, and clear the wood around them. */
+  /**
+   * Settlements stand on levelled ground, and clear the wood around them.
+   *
+   * On a terraced level the city does not merely flatten the ground: it
+   * stands on a squared stone platform of its own, raised to the topmost
+   * contour, which is what puts the keep above its own walls. The platform
+   * grows with the castle, so upgrading widens the terrace as well as the
+   * building on it.
+   */
   levelUnderCities() {
+    const contours = this.terrain.contours;
     for (const [index, castle] of this.castles.entries()) {
-      this.terrain.level(index, castle.position.x, castle.position.y, castle.type.footprint);
+      const { x, y } = castle.position;
+      if (!contours) {
+        this.terrain.level(index, x, y, castle.type.footprint);
+        continue;
+      }
+      const key = `castle${index}`;
+      const radius = castle.type.footprint + CASTLE_PLATFORM.margin;
+      const standing = this.terraces.get(key);
+      const zone = this.terrain.raise(
+        key, x, y, radius, standing?.lift ?? 0, CASTLE_PLATFORM.skirt,
+      );
+      // A step above the summit rather than level with it: the top contour
+      // is the ground the keep already stands on, so a terrace built to it
+      // would add nothing at all.
+      const target = Math.max(
+        0,
+        contours[contours.length - 1] - zone.base
+          + this.terrain.contourStep * CASTLE_PLATFORM.riseInTiers,
+      );
+      this.terraces.set(key, { key, zone, lift: standing?.lift ?? 0, target });
     }
   }
 
@@ -158,160 +196,39 @@ export class Game {
   }
 
   /**
-   * Raise the square of ground under a point, or order another step on the
-   * one already there.
-   *
-   * Squares snap to their own grid, so raising twice in the same place grows
-   * one platform rather than laying a second on top of a first. The step is
-   * ordered here and paid for here, but the ground only climbs over the
-   * following seconds -- see advancePlatforms. That delay is the whole point of
-   * the tool: a platform is never the answer to raiders already ashore.
+   * The castle terraces climbing towards their full height. Height is
+   * written straight onto the terrain's own zone, so a rising terrace never
+   * rebuilds the zone index -- only its height moves, and nothing about
+   * where it sits.
    */
-  raiseGround(point) {
-    const square = this.squareUnder(point);
-    if (square.raised) {
-      return { status: 'raised', platform: this.platforms.get(square.key) };
-    }
-    // Nothing is raised out of water, for the reason a wall is not laid in
-    // it: the island would stop being one.
-    if (!this.terrain.isAshore(square.x, square.y)) {
-      return { status: 'water' };
-    }
-    if (this.tokens < PLATFORM.cost) {
-      return { status: 'poor', cost: PLATFORM.cost };
-    }
-    this.tokens -= PLATFORM.cost;
-
-    const platform = {
-      key: square.key,
-      x: square.x,
-      y: square.y,
-      lift: 0,
-      zone: this.terrain.raise(square.key, square.x, square.y, PLATFORM.size / 2, 0, PLATFORM.skirt),
-    };
-    this.platforms.set(square.key, platform);
-    return { status: 'raising', platform };
-  }
-
-  /**
-   * The square of the platform grid a point falls in, whether it is already
-   * raised, and whether one could be ordered here -- which is what the
-   * cursor outline shows before the player commits to paying for it.
-   */
-  squareUnder(point) {
-    const size = PLATFORM.size;
-    const cellX = Math.floor(point.x / size);
-    const cellY = Math.floor(point.y / size);
-    const key = `${cellX}|${cellY}`;
-    const x = (cellX + 0.5) * size;
-    const y = (cellY + 0.5) * size;
-    const raised = this.platforms.has(key);
-    const allowed = !raised && this.terrain.isAshore(x, y) && this.tokens >= PLATFORM.cost;
-    return { key, x, y, raised, allowed };
-  }
-
-  /**
-   * Ground climbing towards what has been paid for. Height is written
-   * straight onto the terrain's own zone rather than through Terrain#raise,
-   * so a growing platform never rebuilds the zone index -- only its height
-   * moves, and nothing about where it sits.
-   */
-  advancePlatforms(seconds) {
-    for (const platform of this.platforms.values()) {
-      if (platform.lift === PLATFORM.height) {
+  advanceTerraces(seconds) {
+    for (const terrace of this.terraces.values()) {
+      if (terrace.lift === terrace.target) {
         continue;
       }
-      const pace = PLATFORM.height / PLATFORM.growSeconds;
-      platform.lift = Math.min(PLATFORM.height, platform.lift + pace * seconds);
-      platform.zone.height = platform.zone.base + platform.lift;
+      const pace = Math.abs(terrace.target) / CASTLE_PLATFORM.growSeconds || 1;
+      const gap = terrace.target - terrace.lift;
+      const step = Math.sign(gap) * Math.min(Math.abs(gap), pace * seconds);
+      terrace.lift += step;
+      terrace.zone.height = terrace.zone.base + terrace.lift;
       // Quantised, so a rise costs a handful of ground repaints rather than
       // one per frame all the way up.
-      this.terrainRevision = Math.round(this.platformTotal() * 4);
+      this.terrainRevision = Math.round(this.terraceTotal() * 4);
     }
   }
 
-  /** Every platform's lift added up, which is all the renderer's key needs. */
-  platformTotal() {
+  /** Every terrace's lift added up, which is all the renderer's key needs. */
+  terraceTotal() {
     let total = 0;
-    for (const platform of this.platforms.values()) {
-      total += platform.lift;
+    for (const terrace of this.terraces.values()) {
+      total += terrace.lift;
     }
     return total;
   }
 
   /** What a company's pace is multiplied by for the ground it is crossing. */
-  paceOn(position, company = null) {
-    const drag = 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
-    // Only raiders are slowed by the face of a platform: the garrison
-    // raised these and knows the ways up. See PLATFORM.
-    if (this.platforms.size === 0 || !company?.avoidsWalls) {
-      return drag;
-    }
-    return this.onPlatformFace(position) ? drag * PLATFORM.climbPace : drag;
-  }
-
-  /**
-   * Whether a point is on the face of a platform rather than its top or the
-   * open ground beside it -- the band the earth actually rises through.
-   *
-   * A platform still only a step or two up is a kerb, not a climb, and is
-   * not counted: the toll has to be something the player builds up to.
-   */
-  onPlatformFace(position) {
-    const half = PLATFORM.size / 2;
-    for (const platform of this.platforms.values()) {
-      if (platform.lift < PLATFORM.climbFrom) {
-        continue;
-      }
-      const dx = Math.abs(position.x - platform.x);
-      const dy = Math.abs(position.y - platform.y);
-      if (dx > half + PLATFORM.skirt || dy > half + PLATFORM.skirt) {
-        continue;
-      }
-      if (dx > half || dy > half) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** The platform a point stands on top of, or null out on the open ground. */
-  platformUnder(position) {
-    const half = PLATFORM.size / 2;
-    for (const platform of this.platforms.values()) {
-      if (Math.abs(position.x - platform.x) <= half && Math.abs(position.y - platform.y) <= half) {
-        return platform;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * The price a raider pays for getting up onto the platforms.
-   *
-   * Charged on arrival rather than over the climb, so a company that turns
-   * back partway up pays nothing and one that commits pays once. What is
-   * remembered is whether the raider was up at all, not which square it was
-   * on: every platform stands at the same height, so crossing from one to
-   * its neighbour is a walk along the top and costs nothing. Only coming up
-   * off open ground is a climb.
-   */
-  chargeClimbs() {
-    if (this.platforms.size === 0) {
-      return;
-    }
-    for (const raider of this.raiders) {
-      const standing = this.platformUnder(raider.position);
-      const isUp = standing !== null && standing.lift >= PLATFORM.climbFrom;
-      const wasUp = raider.standingOn === true;
-      raider.standingOn = isUp;
-      if (!isUp || wasUp) {
-        continue;
-      }
-      // Straight off its health rather than through takeHit: the earth is
-      // not an attacker, and armour is no help climbing.
-      raider.health -= raider.type.maxHealth * PLATFORM.climbToll;
-    }
+  paceOn(position) {
+    return 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
   }
 
   get isDefeated() {
@@ -383,12 +300,11 @@ export class Game {
     for (const house of this.houses) {
       house.advance(1 / FPS);
     }
-    this.advancePlatforms(1 / FPS);
+    this.advanceTerraces(1 / FPS);
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     this.moveRaiders();
     this.moveGuards();
-    this.chargeClimbs();
     this.resolveHouseContact();
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
     this.guards = this.guards.filter((guard) => guard.isAlive);
@@ -452,10 +368,10 @@ export class Game {
     for (const wall of this.walls) {
       if (!wall.isPlanned) {
         wallCount += 1;
-        wallUpkeep += wall.upkeep;
+        wallUpkeep += wall.upkeep * this.wallUpkeep;
       }
     }
-    const upkeepPerWall = WALL.upkeepPerSection;
+    const upkeepPerWall = WALL.upkeepPerSection * this.wallUpkeep;
     const upkeepUnits = wallUpkeep / upkeepPerWall;
     return {
       cityIncome, houseCount, housePerHouse, houseIncome,
@@ -750,7 +666,7 @@ export class Game {
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
       const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
-      guard.advance(squeeze * this.paceOn(guard.position, guard) / FPS);
+      guard.advance(squeeze * this.paceOn(guard.position) / FPS);
     }
   }
 
@@ -771,7 +687,7 @@ export class Game {
    * given up and is besieging plants itself and swings instead.
    */
   advanceAgainstWalls(navigation, raider) {
-    const pace = this.paceOn(raider.position, raider);
+    const pace = this.paceOn(raider.position);
     if (!raider.avoidsWalls) {
       raider.advance(pace / FPS);
       return;
@@ -848,23 +764,11 @@ export class Game {
     return count > 0 ? total / count : 0;
   }
 
-  /**
-   * How many buildings the settlement can support.
-   *
-   * A level with platforms has no wall ring to read, so what it grows on is
-   * the flat ground the player has raised, minus whatever the castle itself
-   * is standing on. Everywhere else still reads the walls.
-   */
+  /** How many houses the current wall ring can support. */
   houseCapacity() {
     const castle = this.castles[0];
     if (!castle) {
       return 0;
-    }
-    if (this.platforms.size > 0) {
-      const top = PLATFORM.size * PLATFORM.size;
-      const taken = Math.min(this.platforms.size * top, (castle.type.footprint * 2) ** 2);
-      const usableArea = this.platforms.size * top - taken;
-      return Math.min(HOUSES.maxHouses, Math.floor(usableArea / PLATFORM.areaPerHouse));
     }
     const usable = this.settlementRadius() - castle.type.footprint - HOUSES.innerMargin;
     if (usable <= 0) {
@@ -879,9 +783,6 @@ export class Game {
     if (!castle) {
       return null;
     }
-    if (this.platforms.size > 0) {
-      return this.pickPlatformSite(castle);
-    }
     const radius = this.settlementRadius();
     const inner = castle.type.footprint + HOUSES.innerMargin;
     if (radius <= inner) {
@@ -894,30 +795,6 @@ export class Game {
         x: castle.position.x + Math.cos(angle) * reach,
         y: castle.position.y + Math.sin(angle) * reach,
       };
-      if (this.houseSiteIsClear(point)) {
-        return point;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Somewhere on the flat top of a platform, clear of the castle and of
-   * every building already up there. Inset from the rim so nothing ends up
-   * perched half over the edge.
-   */
-  pickPlatformSite(castle) {
-    const tops = [...this.platforms.values()];
-    const reach = PLATFORM.size / 2 - HOUSES.minSpacing / 2;
-    for (let attempt = 0; attempt < HOUSES.placementAttempts; attempt += 1) {
-      const platform = tops[Math.floor(this.random() * tops.length)];
-      const point = {
-        x: platform.x + (this.random() - 0.5) * 2 * reach,
-        y: platform.y + (this.random() - 0.5) * 2 * reach,
-      };
-      if (distanceToSquare(point, castle.position, castle.type.footprint) < HOUSES.innerMargin) {
-        continue;
-      }
       if (this.houseSiteIsClear(point)) {
         return point;
       }
@@ -1270,6 +1147,7 @@ export class Game {
       health: current.health,
       previousTypeId: current.typeId,
       previousType: current.effectiveType,
+      types: this.castleTypes,
     });
     if (this.tokens < upgraded.type.cost) {
       this.onMessage(`You need $${upgraded.type.cost} to upgrade the castle.`);

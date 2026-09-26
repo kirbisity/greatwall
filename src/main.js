@@ -78,9 +78,7 @@ class App {
     bind('zoom', () => this.input.selectTool('zoom'));
     bind('buildTool', () => {
       this.game.wallHintShown = true;
-      // A level may put another tool on this button -- the island raises
-      // ground where everywhere else lays wall (see levels.js).
-      this.input.selectTool(this.game.level.tools?.build ?? 'build');
+      this.input.selectTool('build');
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
     bind('repairTool', () => this.input.selectTool('repair'));

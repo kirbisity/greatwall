@@ -6,7 +6,6 @@ import {
   FLAG,
   HEALTH_COLORS,
   HOUSES,
-  PLATFORM,
   PALETTE,
   SUN,
   TERRAIN,
@@ -106,7 +105,6 @@ const GOLD_STEPS = 24;
 const MIN_GROUND_LIGHT = 0.55;
 const TRUNK_DISTANCE = 420;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
-const PLAN_BLOCKED = 'rgba(214, 92, 72, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 const TRUNK_FILL = 'rgb(84,62,42)';
@@ -208,6 +206,11 @@ function wallTint(condition) {
 // fixed lift reads as a trick of the light; a yellow that comes and goes
 // reads as the game answering the cursor. Swings between HOVER_MIN and
 // HOVER_MAX of the way to the tint, HOVER_PULSE_RATE radians a second.
+// How far a terrace wall's foot spreads past its crest on the outer face,
+// as a multiple of its half-width. Enough to read as a batter at a glance
+// without the wall swallowing the ground in front of it.
+const WALL_BATTER = 1.6;
+
 const HOVER_TINT = [255, 214, 64];
 const HOVER_PULSE_RATE = 5;
 const HOVER_MIN = 0.25;
@@ -287,6 +290,52 @@ function boatPrisms(landing, terrain) {
   ];
 }
 
+/**
+ * A wall on a terraced level: battered on the outer face, sheer on the
+ * inner, and flat on top.
+ *
+ * The top sits at one height for the whole run -- the contour the section
+ * was snapped to, plus the wall's own height -- while the foot follows the
+ * real ground at either end. That is what makes a ring of sections read as
+ * one terrace cut into the hill rather than a fence draped over it, and it
+ * is why this cannot be the plain box every other level uses.
+ *
+ * `outward` is the side facing away from the city, which is the side that
+ * leans; behind it the wall rises sheer out of the terrace it retains.
+ */
+function terraceWallQuads(start, end, halfWidth, lean, outward, ground, topZ) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  // Perpendicular, turned to point away from the city.
+  const px = -dy / length;
+  const py = dx / length;
+  const sign = px * outward.x + py * outward.y >= 0 ? 1 : -1;
+  const outX = px * sign;
+  const outY = py * sign;
+
+  const spread = (at, reach) => ({ x: at.x + outX * reach, y: at.y + outY * reach });
+  // Wound as prismFrom winds its own -- inner side first -- so the quads
+  // come out facing outwards rather than inside out. Corners 0 and 3 belong
+  // to the start and 1 and 2 to the end, which is the order `ground` is in.
+  const foot = [
+    spread(start, -halfWidth), spread(end, -halfWidth),
+    spread(end, halfWidth + lean), spread(start, halfWidth + lean),
+  ];
+  const crest = [
+    spread(start, -halfWidth), spread(end, -halfWidth),
+    spread(end, halfWidth), spread(start, halfWidth),
+  ];
+  const base = foot.map((point, i) => ({ x: point.x, y: point.y, z: Math.min(ground[i], topZ) }));
+  const top = crest.map((point) => ({ x: point.x, y: point.y, z: topZ }));
+  const quads = [top];
+  for (let i = 0; i < 4; i += 1) {
+    const j = (i + 1) % 4;
+    quads.push([base[i], base[j], top[j], top[i]]);
+  }
+  return quads;
+}
+
 function prismFrom(footprint, height, ground = null) {
   const base = footprint.map((point, i) => ({ x: point.x, y: point.y, z: ground ? ground[i] : 0 }));
   const top = footprint.map((point, i) => ({
@@ -311,9 +360,6 @@ export class Renderer {
     this.overlay = structures.getContext('2d');
     this.camera = camera;
     this.paintedGround = null;
-    // The square the raise tool would act on, set by Input as the cursor
-    // moves, or null when that tool is not selected. See drawHoveredSquare.
-    this.hoveredSquare = null;
     // The section the repair or fortify tool would act on, set by Input as
     // the cursor moves. Null whenever neither tool is selected, or nothing
     // is under the cursor.
@@ -440,9 +486,13 @@ export class Renderer {
     // Once the last castle falls, the city blackens over BREACH.collapseSeconds
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
-    this.collectPlatforms(items, view, game);
+    // Into the paving pass rather than the sorted scene: a terrace is ground,
+    // and it is wide enough that its average depth beat the keep standing in
+    // the middle of it, so the near face was painted over the castle.
+    this.collectTerraces(paving, view, game);
     this.collectBoats(items, view, game.landings, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
+    this.gameHome = game.castles[0]?.position ?? null;
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
@@ -458,7 +508,6 @@ export class Renderer {
       this.atmosphere.drawClouds(this.overlay, game.seasonPhase);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
-    this.drawHoveredSquare(view, game);
     this.drawPeggedWalls(view, game);
     this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
@@ -763,45 +812,35 @@ export class Renderer {
   }
 
   /**
-   * The faces of the raised platforms.
+   * The revetted sides of each castle terrace.
    *
    * The ground mesh already draws their flat tops at the right height, but
    * it cannot draw their sides: the drop happens well inside one mesh cell,
-   * so the edge came out as a smear across a tile rather than the cliff it
-   * is meant to be. Each exposed side is drawn here as its own quad, from
-   * the wild ground at its foot to the platform at its top.
-   *
-   * A side shared with a platform standing at least as high is skipped --
-   * it is inside the earth, and drawing it would show a wall through the
-   * middle of a shelf.
+   * so the edge came out as a smear across a tile rather than the wall of
+   * stone it is meant to be. Each of the four sides is drawn here as its own
+   * quad, from the wild ground at its foot to the terrace at its top.
    */
-  collectPlatforms(items, view, game) {
-    if (game.platforms.size === 0) {
+  collectTerraces(paving, view, game) {
+    if (game.terraces.size === 0) {
       return;
     }
-    const half = PLATFORM.size / 2;
-    for (const platform of game.platforms.values()) {
-      if (platform.lift <= 0 || !this.onScreenFor(view, platform, PLATFORM.size)) {
+    for (const terrace of game.terraces.values()) {
+      const zone = terrace.zone;
+      if (terrace.lift <= 0 || !this.onScreenFor(view, zone, zone.radius * 2)) {
         continue;
       }
-      const top = platform.zone.base + platform.lift;
-      const [cellX, cellY] = platform.key.split('|').map(Number);
+      const top = zone.base + terrace.lift;
+      const half = zone.radius;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const neighbour = game.platforms.get(`${cellX + dx}|${cellY + dy}`);
-        if (neighbour && neighbour.zone.base + neighbour.lift >= top - 0.01) {
-          continue;
-        }
         // The two corners of this side, in the order that leaves the quad
         // wound outwards so back-face culling keeps the far sides hidden.
         const along = { x: -dy, y: dx };
-        const mid = { x: platform.x + dx * half, y: platform.y + dy * half };
+        const mid = { x: zone.x + dx * half, y: zone.y + dy * half };
         const a = { x: mid.x - along.x * half, y: mid.y - along.y * half };
         const b = { x: mid.x + along.x * half, y: mid.y + along.y * half };
-        const footA = game.terrain.wildHeightAt(a.x, a.y);
-        const footB = game.terrain.wildHeightAt(b.x, b.y);
-        this.collectPrism(items, view, [[
-          { x: a.x, y: a.y, z: footA },
-          { x: b.x, y: b.y, z: footB },
+        this.collectPrism(paving, view, [[
+          { x: a.x, y: a.y, z: game.terrain.wildHeightAt(a.x, a.y) },
+          { x: b.x, y: b.y, z: game.terrain.wildHeightAt(b.x, b.y) },
           { x: b.x, y: b.y, z: top },
           { x: a.x, y: a.y, z: top },
         ]], PLATFORM_FACE, PLATFORM_FACE_MIN_LIGHT);
@@ -821,7 +860,36 @@ export class Renderer {
     }
   }
 
+  /**
+   * A section's geometry: a plain box, or a battered terrace wall on a level
+   * that has contours to snap to.
+   */
+  wallQuads(wall, terrain, halfWidth, height, startGround, endGround, home) {
+    const ground = [startGround, endGround, endGround, startGround];
+    if (!terrain.contours || !home) {
+      return wallPrism(wall.start, wall.end, halfWidth, height, ground);
+    }
+    // One crest for the whole section, taken at its middle, so a run laid
+    // across a slope does not twist between its two ends. The crest is the
+    // first terrace that clears the wall's own height above the ground, so a
+    // ring of sections comes out level with itself and stands at least as
+    // tall as a wall anywhere else -- taller where it is holding back more
+    // of the hill.
+    const midX = (wall.start.x + wall.end.x) / 2;
+    const midY = (wall.start.y + wall.end.y) / 2;
+    const crest = terrain.contourAbove(terrain.heightAt(midX, midY) + height);
+    const outward = { x: midX - home.x, y: midY - home.y };
+    if (outward.x === 0 && outward.y === 0) {
+      outward.x = 1;
+    }
+    // `ground` is in the order the footprint is wound, start then end, which
+    // is the order the box uses too.
+    const lean = halfWidth * WALL_BATTER;
+    return terraceWallQuads(wall.start, wall.end, halfWidth, lean, outward, ground, crest);
+  }
+
   collectWalls(items, view, walls, terrain, hoveredWall) {
+    const home = this.gameHome;
     // One pulse for the whole pass, so a hovered stretch blinks together
     // rather than each section keeping its own time.
     const pulse = HOVER_MIN
@@ -848,8 +916,7 @@ export class Renderer {
       // a section laid across a slope follows it rather than floating.
       const startGround = terrain.heightAt(wall.start.x, wall.start.y);
       const endGround = terrain.heightAt(wall.end.x, wall.end.y);
-      const ground = [startGround, endGround, endGround, startGround];
-      const quads = wallPrism(wall.start, wall.end, halfWidth, height, ground);
+      const quads = this.wallQuads(wall, terrain, halfWidth, height, startGround, endGround, home);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
       const tint = wall === hoveredWall
         ? blended(wallTint(condition), HOVER_TINT, pulse)
@@ -1121,41 +1188,6 @@ export class Renderer {
       context.lineTo(to.x, to.y);
       context.stroke();
     }
-    context.restore();
-  }
-
-  /**
-   * The square of ground the raise tool is over, outlined on the ground
-   * itself rather than as a flat rectangle on the screen -- it follows the
-   * platform it is standing on, so the player can see what another step would
-   * be building on before paying for it.
-   */
-  drawHoveredSquare(view, game) {
-    const square = this.hoveredSquare;
-    if (!square) {
-      return;
-    }
-    const half = PLATFORM.size / 2;
-    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
-      const x = square.x + half * sx;
-      const y = square.y + half * sy;
-      return projectPoint(view, x, y, game.terrain.heightAt(x, y));
-    });
-    if (corners.some((corner) => !corner)) {
-      return;
-    }
-    const context = this.overlay;
-    context.save();
-    context.lineWidth = 2;
-    context.setLineDash([7, 5]);
-    context.strokeStyle = square.allowed ? PLAN_LINE : PLAN_BLOCKED;
-    context.beginPath();
-    context.moveTo(corners[0].x, corners[0].y);
-    for (let i = 1; i < corners.length; i += 1) {
-      context.lineTo(corners[i].x, corners[i].y);
-    }
-    context.closePath();
-    context.stroke();
     context.restore();
   }
 

@@ -180,7 +180,12 @@ export class Castle {
    * stats until the new structure has actually finished rising.
    */
   constructor(typeId, position = { x: 0, y: 0 }, options = {}) {
-    const type = CASTLE_TYPES[typeId];
+    // A level may field castles of its own size -- the island's keeps are a
+    // fraction of the imperial city's, and a footprint meant for the latter
+    // would fence walls out of half the hill (see levels.js).
+    const types = options.types ?? CASTLE_TYPES;
+    this.types = types;
+    const type = types[typeId];
     if (!type) {
       throw new Error(`Unknown castle type: ${typeId}`);
     }
@@ -190,7 +195,7 @@ export class Castle {
     this.health = options.health ?? type.maxHealth;
     this.rebuild = options.previousTypeId ? {
       fromTypeId: options.previousTypeId,
-      fromType: options.previousType ?? CASTLE_TYPES[options.previousTypeId],
+      fromType: options.previousType ?? types[options.previousTypeId],
       demolishSeconds: CASTLE_REBUILD.demolishSeconds,
       demolishTotal: CASTLE_REBUILD.demolishSeconds,
       buildElapsed: 0,

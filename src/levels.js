@@ -89,6 +89,10 @@ export const LEVELS = [
       mountainMinHeight: 26,
       mountainMaxHeight: 44,
       mountainSkirt: 26,
+      // The rise the whole level is built around: the keep stands on its
+      // summit, and walls terrace up it in `tiers` steps rather than
+      // following the ground (see Terrain#contours).
+      hill: { radius: 230, height: 45, tiers: 4 },
     },
     sea: {
       // Land out to roughly this radius, give or take the coves `coast`
@@ -107,10 +111,19 @@ export const LEVELS = [
     // No landward flank: raiders row in and beach at the coves, so they
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
-    // No stone here: the Build button raises ground instead of laying wall.
-    // A prototype -- see PLATFORM for the pacing it is trying out.
-    tools: { build: 'raise' },
+    // Revetted stone cut into a hillside, kept by a garrison: dearer to
+    // hold than a rampart thrown up on the flat.
+    wallUpkeep: 3,
     buildings: JAPAN_BUILDINGS,
+    // The island's keeps are a fraction of the size of the imperial city's,
+    // so they claim a fraction of the ground. Left at the imperial figures a
+    // grown castle fenced walls out of the whole hilltop and stood on a
+    // terrace nearly two hundred units across.
+    castleTypes: {
+      CC0: { footprint: 16, hitbox: 10 },
+      CC1: { footprint: 22, hitbox: 14 },
+      CC2: { footprint: 30, hitbox: 18 },
+    },
     // The settlement is little keeps rather than houses, raised on whatever
     // platform ground the player has made for them.
     house: JAPAN_HOUSE,

@@ -83,7 +83,9 @@ export const WALL = {
   pickRadius: 20,
   reachMargin: 2,
   // Coin per standing section, charged with the rest of the income each
-  // payout — a wall is upkeep, not just a one-off purchase.
+  // payout — a wall is upkeep, not just a one-off purchase. A level may
+  // charge a multiple of it: terraced stonework costs more to keep than a
+  // rampart on the flat (see levels.js).
   upkeepPerSection: 1,
   // A junction may not gather more than this many sections. Past it, a
   // build attempt is simply refused — see Game#buildWall.
@@ -318,43 +320,26 @@ export const RAIDER_TYPES = {
 };
 
 /**
- * Raising ground, which the island holds instead of building walls.
+ * The stone platform a castle stands on.
  *
- * A platform is one square of the grid, raised to a fixed height. It is not
- * a hill: the top is flat and the edge is very nearly a cliff, so a raider
- * can only come up it slowly and arrives a third down on health. Nothing
- * brings a platform down again -- what stops a player simply ringing their
- * city with them is what one costs, and how long it takes to rise.
- *
- * Buildings stand on whatever the ground does, so a platform raised under
- * one carries it up (see Terrain#reshape, which applies platforms last for
- * exactly that reason).
+ * The island's keep is not set on the turf: it sits on a squared-off terrace
+ * of its own, revetted in stone, which grows with the castle. This is the
+ * same reshaped-ground machinery a settlement levels itself with (see
+ * Terrain#raise), pulled up rather than flat.
  */
-export const PLATFORM = {
-  // The square the player picks, snapped to its own grid. Two ground cells
-  // across: any smaller and the mesh cannot draw it (see TERRAIN.cellSize).
-  size: 18,
-  // How far the face runs out past the square. Small enough to read as a
-  // wall of earth rather than a slope you could walk up.
+export const CASTLE_PLATFORM = {
+  // How far the terrace reaches past the castle's own footprint, and how far
+  // its face runs out past that. A short skirt is what makes it read as a
+  // revetment rather than a bank of earth.
+  margin: 6,
   skirt: 3,
-  // Every platform stands at the same height. There is nothing to stack, so
-  // a square is either raised or it is not, and the decision the player
-  // makes is where rather than how high.
-  height: 18,
-  // How long one takes to rise, and what it costs.
-  growSeconds: 10,
-  cost: 280,
-  // What the face costs a raider coming up it: a crawl, and a third of its
-  // health by the time it stands on top. Only raiders pay -- the garrison
-  // knows its own earthworks. Charged once for getting up off open ground,
-  // never again for crossing between platforms already up there. Ground
-  // still on its way up and lower than this is a step rather than a climb.
-  climbFrom: 4,
-  climbPace: 0.18,
-  climbToll: 1 / 3,
-  // How much flat platform top one building in the settlement wants. With
-  // no walls to ring it, this is what decides how big the city can grow.
-  areaPerHouse: 190,
+  // How long the terrace takes to rise when the castle is founded or grown.
+  growSeconds: 6,
+  // How far it stands above the ground it is cut into, as a multiple of the
+  // gap between two terraces. The keep ends up a step above the highest wall
+  // the player can build, which is what puts it at the top of the tiers
+  // rather than level with the last of them.
+  riseInTiers: 1,
 };
 
 export const STARTING_CASTLE_TYPE = 'CC0';
@@ -436,6 +421,10 @@ export const TERRAIN = {
 
   // Ground under a settlement is levelled, easing back into the hillside.
   levelSkirt: 60,
+  // A deliberate rise at the middle of the map, on top of whatever the noise
+  // is doing. Null everywhere but the island, which is built around one --
+  // see Terrain#hillAt and the contours walls terrace up it.
+  hill: null,
 
   // Woodland. Cover above the threshold grows trees, thicker towards 1.
   // Only grass grows any -- see Terrain.treesWithin.

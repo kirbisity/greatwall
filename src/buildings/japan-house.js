@@ -6,15 +6,15 @@
  */
 export default {
   name: 'Yagura',
-  radius: 7,
+  radius: 5.5,
   parts: [
     {
-      type: 'building', x: 0, y: 0, width: 9, depth: 9, height: 4.5,
-      material: 'shikkui', roof: { height: 1.7, overhang: 1.4, tiers: 2, material: 'roofSlate' },
+      type: 'building', x: 0, y: 0, width: 7, depth: 7, height: 3.6,
+      material: 'shikkui', roof: { height: 1.35, overhang: 1.1, tiers: 2, material: 'roofSlate' },
     },
     {
-      type: 'building', x: 0, y: 0, width: 6, depth: 6, height: 3.2, base: 4.5,
-      material: 'shikkui', roof: { height: 1.6, overhang: 1.1, tiers: 2, material: 'roofSlateDark' },
+      type: 'building', x: 0, y: 0, width: 4.8, depth: 4.8, height: 2.55, base: 3.6,
+      material: 'shikkui', roof: { height: 1.3, overhang: 0.9, tiers: 2, material: 'roofSlateDark' },
     },
   ],
 };

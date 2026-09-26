@@ -57,7 +57,17 @@ test('the island rises to a hill at its middle', () => {
 test('the hill is high enough to climb, and tops out where the keep stands', () => {
   const terrain = islandTerrain();
   const hill = ISLAND.land.hill;
-  assert.ok(hill.height > 50, `expected a tall hill, got ${hill.height}`);
+  // Measured against the ground it actually stands in rather than a fixed
+  // number, so the hill can be resized without this saying anything untrue.
+  let around = 0;
+  const samples = 8;
+  for (let i = 0; i < samples; i += 1) {
+    const bearing = (i / samples) * Math.PI * 2;
+    around += terrain.heightAt(Math.cos(bearing) * hill.radius, Math.sin(bearing) * hill.radius);
+  }
+  const rise = terrain.heightAt(0, 0) - around / samples;
+  assert.ok(rise > hill.height * 0.6, `the summit only stands ${rise.toFixed(0)} above its own foot`);
+
   // Exactly, not nearly: the keep is placed on the summit, so the roughness
   // on its flanks must not eat into the height the level asked for.
   assert.equal(terrain.hillAt(0, 0), hill.height);

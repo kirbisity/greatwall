@@ -94,12 +94,12 @@ export const LEVELS = [
       // with the direction and `grain` how rough its surface is, which is
       // what keeps it from reading as a dome.
       hill: {
-        radius: 185,
-        height: 62,
-        spurs: 42,
+        radius: 150,
+        height: 50,
+        spurs: 34,
         spurScale: 2.4,
-        grain: 9,
-        grainScale: 85,
+        grain: 7.5,
+        grainScale: 70,
       },
     },
     sea: {
@@ -125,9 +125,9 @@ export const LEVELS = [
     // grown castle fenced walls out of the whole hilltop and stood on a
     // terrace nearly two hundred units across.
     castleTypes: {
-      CC0: { footprint: 16, hitbox: 10 },
-      CC1: { footprint: 22, hitbox: 14 },
-      CC2: { footprint: 30, hitbox: 18 },
+      CC0: { footprint: 13, hitbox: 8 },
+      CC1: { footprint: 18, hitbox: 11 },
+      CC2: { footprint: 24, hitbox: 14 },
     },
     // The settlement is little keeps rather than houses, raised on whatever
     // platform ground the player has made for them.

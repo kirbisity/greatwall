@@ -90,8 +90,17 @@ export const LEVELS = [
       mountainMaxHeight: 44,
       mountainSkirt: 26,
       // The rise the whole level is built around: the keep stands on its
-      // summit and the walls climb it, following the ground as they go.
-      hill: { radius: 230, height: 62 },
+      // summit and the walls climb it. `spurs` is how far its reach wanders
+      // with the direction and `grain` how rough its surface is, which is
+      // what keeps it from reading as a dome.
+      hill: {
+        radius: 185,
+        height: 62,
+        spurs: 42,
+        spurScale: 2.4,
+        grain: 9,
+        grainScale: 85,
+      },
     },
     sea: {
       // Land out to roughly this radius, give or take the coves `coast`
@@ -110,12 +119,6 @@ export const LEVELS = [
     // No landward flank: raiders row in and beach at the coves, so they
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
-    // Walls here are revetments in the island's own style: battered on the
-    // face they show the sea, sheer and flat-topped behind.
-    wallStyle: 'battered',
-    // Revetted stone cut into a hillside, kept by a garrison: dearer to
-    // hold than a rampart thrown up on the flat.
-    wallUpkeep: 3,
     buildings: JAPAN_BUILDINGS,
     // The island's keeps are a fraction of the size of the imperial city's,
     // so they claim a fraction of the ground. Left at the imperial figures a

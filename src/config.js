@@ -83,9 +83,7 @@ export const WALL = {
   pickRadius: 20,
   reachMargin: 2,
   // Coin per standing section, charged with the rest of the income each
-  // payout — a wall is upkeep, not just a one-off purchase. A level may
-  // charge a multiple of it: terraced stonework costs more to keep than a
-  // rampart on the flat (see levels.js).
+  // payout — a wall is upkeep, not just a one-off purchase.
   upkeepPerSection: 1,
   // A junction may not gather more than this many sections. Past it, a
   // build attempt is simply refused — see Game#buildWall.

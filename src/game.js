@@ -90,9 +90,6 @@ export class Game {
     // A level may raise its own buildings and field its own companies; what
     // it leaves out it inherits (see levels.js).
     this.buildings = { ...BUILDINGS, ...level.buildings };
-    // Terraced stonework costs more to keep standing than a rampart on the
-    // flat, so a level may charge a multiple of the usual upkeep.
-    this.wallUpkeep = level.wallUpkeep ?? 1;
     // Merged tier by tier, so a level says only what is different about its
     // castles and keeps the costs, health and upgrade chain as they are.
     this.castleTypes = Object.fromEntries(
@@ -312,10 +309,10 @@ export class Game {
     for (const wall of this.walls) {
       if (!wall.isPlanned) {
         wallCount += 1;
-        wallUpkeep += wall.upkeep * this.wallUpkeep;
+        wallUpkeep += wall.upkeep;
       }
     }
-    const upkeepPerWall = WALL.upkeepPerSection * this.wallUpkeep;
+    const upkeepPerWall = WALL.upkeepPerSection;
     const upkeepUnits = wallUpkeep / upkeepPerWall;
     return {
       cityIncome, houseCount, housePerHouse, houseIncome,

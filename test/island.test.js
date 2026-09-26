@@ -3,15 +3,8 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
-import { WALL, WALL_HEIGHT_UNITS } from '../src/config.js';
 import { compileStructure } from '../src/structures.js';
 import { JAPAN_BUILDINGS, JAPAN_HOUSE } from '../src/buildings/index.js';
-import { Renderer } from '../src/renderer.js';
-
-/** The renderer's geometry needs none of its canvases, only its methods. */
-function wallShapes() {
-  return Object.create(Renderer.prototype);
-}
 
 const ISLAND = LEVELS.find((level) => level.land.hill);
 
@@ -47,14 +40,6 @@ function ring(game, radius, sides = 10) {
   return laid;
 }
 
-function normalOf(a, b, c) {
-  const u = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
-  const v = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
-  const n = { x: u.y * v.z - u.z * v.y, y: u.z * v.x - u.x * v.z, z: u.x * v.y - u.y * v.x };
-  const length = Math.hypot(n.x, n.y, n.z) || 1;
-  return { x: n.x / length, y: n.y / length, z: n.z / length };
-}
-
 // --- the hill -----------------------------------------------------------
 
 test('the island rises to a hill at its middle', () => {
@@ -69,14 +54,47 @@ test('the island rises to a hill at its middle', () => {
   assert.equal(terrain.hillAt(hill.radius + 1, 0), 0, 'and be flat again past its foot');
 });
 
-test('the hill is high enough to climb, and the keep sits on the ground of it', () => {
+test('the hill is high enough to climb, and tops out where the keep stands', () => {
   const terrain = islandTerrain();
   const hill = ISLAND.land.hill;
   assert.ok(hill.height > 50, `expected a tall hill, got ${hill.height}`);
-  assert.ok(
-    terrain.hillAt(0, 0) - terrain.hillAt(hill.radius * 0.75, 0) > 30,
-    'it should climb sharply enough to be worth walling in stages',
-  );
+  // Exactly, not nearly: the keep is placed on the summit, so the roughness
+  // on its flanks must not eat into the height the level asked for.
+  assert.equal(terrain.hillAt(0, 0), hill.height);
+});
+
+test('the hill is shaped rather than a dome', () => {
+  const terrain = islandTerrain();
+  const hill = ISLAND.land.hill;
+
+  // Its reach wanders with the direction, giving it spurs and hollows.
+  const reaches = [];
+  for (let i = 0; i < 16; i += 1) {
+    const bearing = (i / 16) * Math.PI * 2;
+    let reach = 0;
+    while (reach < 400 && terrain.hillAt(Math.cos(bearing) * reach, Math.sin(bearing) * reach) > 0.01) {
+      reach += 2;
+    }
+    reaches.push(reach);
+  }
+  assert.ok(Math.max(...reaches) - Math.min(...reaches) > 40,
+    `the foot only varied by ${Math.max(...reaches) - Math.min(...reaches)} units`);
+
+  // And no ring around it stands at one height.
+  let worst = 0;
+  for (let reach = 20; reach < hill.radius * 0.9; reach += 10) {
+    const ring = [];
+    for (let i = 0; i < 24; i += 1) {
+      const bearing = (i / 24) * Math.PI * 2;
+      ring.push(terrain.hillAt(Math.cos(bearing) * reach, Math.sin(bearing) * reach));
+    }
+    worst = Math.max(worst, Math.max(...ring) - Math.min(...ring));
+  }
+  assert.ok(worst > 10, `the contours are near enough circles, varying only ${worst.toFixed(1)}`);
+
+  // The walk right round it still closes, and it meets the flat ground.
+  assert.ok(Math.abs(terrain.hillAt(120, 0) - terrain.hillAt(120, -0.0001)) < 0.01);
+  assert.equal(terrain.hillAt(400, 0), 0);
 });
 
 test('nothing snaps walls to fixed levels any more', () => {
@@ -89,71 +107,25 @@ test('nothing snaps walls to fixed levels any more', () => {
 
 // --- walls ---------------------------------------------------------------
 
-test('a wall follows the ground it is built on', () => {
-  const game = island(1000000);
-  const walls = ring(game, 120);
-  assert.ok(walls.length > 6, 'expected a ring to go up');
-
-  const grounds = walls.map((wall) => game.terrain.heightAt(wall.start.x, wall.start.y));
-  assert.ok(Math.max(...grounds) - Math.min(...grounds) > 1, 'the hillside itself varies');
-
-  // Every section's crest is its own ground plus the wall's height, rather
-  // than a level shared with the rest of the ring.
-  const renderer = wallShapes();
-  const crests = walls.map((wall) => {
-    const startGround = game.terrain.heightAt(wall.start.x, wall.start.y);
-    const endGround = game.terrain.heightAt(wall.end.x, wall.end.y);
-    const quads = renderer.wallQuads(wall, {
-      halfWidth: 1.5, height: WALL_HEIGHT_UNITS, startGround, endGround,
-      battered: true, home: { x: 0, y: 0 },
-    });
-    return { top: quads[0][0].z, ground: startGround };
-  });
-  for (const { top, ground } of crests) {
-    assert.ok(
-      Math.abs(top - ground - WALL_HEIGHT_UNITS) < 1e-9,
-      `a crest should stand one wall above its own ground, got ${(top - ground).toFixed(2)}`,
-    );
-  }
-  assert.ok(new Set(crests.map((one) => one.top.toFixed(3))).size > 1, 'so the ring is not level');
-});
-
-test('the island wall leans on its outer face and stands sheer behind', () => {
-  const renderer = wallShapes();
-  // Running east, the city to the south, so the outward side is north.
-  const wall = { start: { x: -20, y: 40 }, end: { x: 20, y: 40 } };
-  const quads = renderer.wallQuads(wall, {
-    halfWidth: 1.5, height: 6, startGround: 0, endGround: 0,
-    battered: true, home: { x: 0, y: 0 },
-  });
-  const [top, inner, , outer] = quads;
-
-  assert.ok(normalOf(top[0], top[1], top[2]).z > 0.99, 'the walkway faces the sky');
-  const outerNormal = normalOf(outer[0], outer[1], outer[2]);
-  assert.ok(outerNormal.y > 0.5, 'the leaning face looks away from the city');
-  assert.ok(outerNormal.z > 0.1, 'and leans, rather than standing straight up');
-  const innerNormal = normalOf(inner[0], inner[1], inner[2]);
-  assert.ok(innerNormal.y < -0.99, 'the inner face looks back at the city');
-  assert.ok(Math.abs(innerNormal.z) < 1e-9, 'and is sheer');
-  assert.ok(outer[0].y > outer[3].y, 'the foot stands proud of the crest');
-});
-
-test('only a level that asks for it gets the battered wall', () => {
-  const renderer = wallShapes();
-  const wall = { start: { x: 60, y: -20 }, end: { x: 60, y: 20 } };
-  const options = { halfWidth: 1.5, height: 6, startGround: 0, endGround: 0, home: { x: 0, y: 0 } };
-  const plain = renderer.wallQuads(wall, { ...options, battered: false });
-  const battered = renderer.wallQuads(wall, { ...options, battered: true });
-
-  assert.equal(ISLAND.wallStyle, 'battered');
+test('the island builds walls exactly as the other levels do', () => {
   for (const level of LEVELS) {
-    if (level !== ISLAND) {
-      assert.equal(level.wallStyle, undefined, `${level.id} should keep the plain wall`);
-    }
+    assert.equal(level.wallStyle, undefined, `${level.id} should not ask for a wall of its own`);
+    assert.equal(level.wallUpkeep, undefined, `${level.id} should not charge its own upkeep`);
   }
-  // A box has the same footprint top and bottom; a battered one does not.
-  const spread = (quads) => Math.max(...quads.flat().map((point) => Math.abs(point.x - 60)));
-  assert.ok(spread(battered) > spread(plain), 'the battered wall spreads at its foot');
+  const game = island(1000000);
+  const plain = new Game({ random: () => 0.5, level: LEVELS[0] });
+  plain.tokens = 1000000;
+  ring(game, 120);
+  ring(plain, 120);
+
+  const islandBill = game.incomeBreakdown;
+  const plainBill = plain.incomeBreakdown;
+  assert.equal(islandBill.upkeepPerWall, plainBill.upkeepPerWall, 'a section costs the same to hold');
+  assert.equal(
+    islandBill.wallUpkeep / islandBill.wallCount,
+    plainBill.wallUpkeep / plainBill.wallCount,
+    'and the bill is the same per section',
+  );
 });
 
 test('a wall still bars the way, so raiders go round it as they always have', () => {
@@ -162,21 +134,6 @@ test('a wall still bars the way, so raiders go round it as they always have', ()
   const navigation = game.navigation();
   assert.ok(navigation.barriers.length > 0, 'standing wall is what raiders route around');
   assert.equal(navigation.barriers.length, game.walls.filter((wall) => !wall.isPlanned).length);
-});
-
-test('the island charges more to keep a wall standing', () => {
-  assert.ok(ISLAND.wallUpkeep > 1, 'revetted stone should cost more to hold');
-  const game = island(1000000);
-  const plain = new Game({ random: () => 0.5, level: LEVELS[0] });
-  plain.tokens = 1000000;
-  assert.equal(plain.wallUpkeep, 1);
-
-  ring(game, 120);
-  ring(plain, 120);
-  const islandBill = game.incomeBreakdown.wallUpkeep;
-  const plainBill = plain.incomeBreakdown.wallUpkeep;
-  assert.equal(islandBill / plainBill, ISLAND.wallUpkeep);
-  assert.equal(game.incomeBreakdown.upkeepPerWall, WALL.upkeepPerSection * ISLAND.wallUpkeep);
 });
 
 // --- the keep's own stonework -------------------------------------------

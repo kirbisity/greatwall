@@ -198,11 +198,6 @@ function wallTint(condition) {
 // fixed lift reads as a trick of the light; a yellow that comes and goes
 // reads as the game answering the cursor. Swings between HOVER_MIN and
 // HOVER_MAX of the way to the tint, HOVER_PULSE_RATE radians a second.
-// How far a terrace wall's foot spreads past its crest on the outer face,
-// as a multiple of its half-width. Enough to read as a batter at a glance
-// without the wall swallowing the ground in front of it.
-const WALL_BATTER = 1.6;
-
 const HOVER_TINT = [255, 214, 64];
 const HOVER_PULSE_RATE = 5;
 const HOVER_MIN = 0.25;
@@ -280,46 +275,6 @@ function boatPrisms(landing, terrain) {
     { quads: prismFrom(deck, BOAT.deckHeight, [deckBase, deckBase, deckBase, deckBase]), tint: BOAT.deck },
     { quads: squarePrism(mast, BOAT.mastHalfWidth, BOAT.mastHeight, deckBase), tint: BOAT.mast },
   ];
-}
-
-/**
- * A wall in the island's style: battered on the outer face, sheer on the
- * inner, and flat on top -- a revetment with a walkway behind it.
- *
- * It follows the ground the way every other wall does; only its section is
- * different. `outward` is the side facing away from the city, which is the
- * side that leans.
- */
-function batteredWallQuads(start, end, halfWidth, lean, outward, ground, tops) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const perpendicularX = -dy / length;
-  const perpendicularY = dx / length;
-  const sign = perpendicularX * outward.x + perpendicularY * outward.y >= 0 ? 1 : -1;
-  const outX = perpendicularX * sign;
-  const outY = perpendicularY * sign;
-
-  const spread = (at, reach) => ({ x: at.x + outX * reach, y: at.y + outY * reach });
-  // Wound as prismFrom winds its own -- inner side first -- so the quads
-  // come out facing outwards rather than inside out. Corners 0 and 3 belong
-  // to the start and 1 and 2 to the end, which is the order `ground` is in.
-  const foot = [
-    spread(start, -halfWidth), spread(end, -halfWidth),
-    spread(end, halfWidth + lean), spread(start, halfWidth + lean),
-  ];
-  const crest = [
-    spread(start, -halfWidth), spread(end, -halfWidth),
-    spread(end, halfWidth), spread(start, halfWidth),
-  ];
-  const base = foot.map((point, i) => ({ x: point.x, y: point.y, z: ground[i] }));
-  const top = crest.map((point, i) => ({ x: point.x, y: point.y, z: tops[i] }));
-  const quads = [top];
-  for (let i = 0; i < 4; i += 1) {
-    const j = (i + 1) % 4;
-    quads.push([base[i], base[j], top[j], top[i]]);
-  }
-  return quads;
 }
 
 function prismFrom(footprint, height, ground = null) {
@@ -474,10 +429,6 @@ export class Renderer {
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
     this.collectBoats(items, view, game.landings, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
-    this.wallStyle = {
-      battered: game.level.wallStyle === 'battered',
-      home: game.castles[0]?.position ?? null,
-    };
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
@@ -808,32 +759,7 @@ export class Renderer {
     }
   }
 
-  /**
-   * A section's geometry: a plain box, or the island's battered revetment.
-   *
-   * `options` carries the section's measurements and which way is away from
-   * the city, which is the side a battered wall leans on.
-   */
-  wallQuads(wall, options) {
-    const { halfWidth, height, startGround, endGround, battered, home } = options;
-    const ground = [startGround, endGround, endGround, startGround];
-    if (!battered || !home) {
-      return wallPrism(wall.start, wall.end, halfWidth, height, ground);
-    }
-    const midX = (wall.start.x + wall.end.x) / 2;
-    const midY = (wall.start.y + wall.end.y) / 2;
-    const outward = { x: midX - home.x, y: midY - home.y };
-    if (outward.x === 0 && outward.y === 0) {
-      outward.x = 1;
-    }
-    const tops = ground.map((foot) => foot + height);
-    return batteredWallQuads(
-      wall.start, wall.end, halfWidth, halfWidth * WALL_BATTER, outward, ground, tops,
-    );
-  }
-
   collectWalls(items, view, walls, terrain, hoveredWall) {
-    const { battered, home } = this.wallStyle;
     // One pulse for the whole pass, so a hovered stretch blinks together
     // rather than each section keeping its own time.
     const pulse = HOVER_MIN
@@ -860,9 +786,8 @@ export class Renderer {
       // a section laid across a slope follows it rather than floating.
       const startGround = terrain.heightAt(wall.start.x, wall.start.y);
       const endGround = terrain.heightAt(wall.end.x, wall.end.y);
-      const quads = this.wallQuads(wall, {
-        halfWidth, height, startGround, endGround, battered, home,
-      });
+      const ground = [startGround, endGround, endGround, startGround];
+      const quads = wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
       const tint = wall === hoveredWall
         ? blended(wallTint(condition), HOVER_TINT, pulse)

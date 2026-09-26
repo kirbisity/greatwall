@@ -219,11 +219,12 @@ export class Terrain {
   /**
    * The level's own central rise, on top of whatever the noise is doing.
    *
-   * A dome rather than another band of noise, because the whole of the
-   * island level is built around it: the keep stands on its summit and the
-   * walls terrace up it, and both need a shape that is the same every time
-   * and the same all the way round. Eased, so it meets the flat ground at
-   * its foot without a crease.
+   * Not another band of noise, because the island level is built around this
+   * one hill: the keep stands on its summit and the walls climb it, and both
+   * need a rise that is in the same place every time. But not a dome either
+   * -- a perfectly round one read as a bald green scoop. Its reach varies
+   * with the direction, which gives it spurs and hollows, and its surface
+   * carries a grain of its own that dies away at the foot.
    */
   hillAt(x, y) {
     const hill = this.land.hill;
@@ -231,10 +232,27 @@ export class Terrain {
       return 0;
     }
     const reach = Math.hypot(x, y);
-    if (reach >= hill.radius) {
+    // Sampled on the ring rather than across the plane, so the spur on one
+    // side has nothing to do with the hollow on the other and the walk right
+    // round the hill meets where it started.
+    const bearing = Math.atan2(y, x);
+    const spur = (valueNoise(
+      Math.cos(bearing) * hill.spurScale + 900,
+      Math.sin(bearing) * hill.spurScale + 900,
+      this.seed + 733,
+    ) - 0.5) * 2 * hill.spurs;
+    const radius = hill.radius + spur;
+    if (reach >= radius) {
       return 0;
     }
-    return hill.height * ease(1 - reach / hill.radius);
+    const climb = ease(1 - reach / radius);
+    const grain = (valueNoise(x / hill.grainScale, y / hill.grainScale, this.seed + 811) - 0.5)
+      * 2 * hill.grain;
+    // Weighted to the flanks and fading out at both ends: the foot has to
+    // meet the flat ground without a step, and the summit has to come out at
+    // the height the level asked for, since that is where the keep stands.
+    const flank = 4 * climb * (1 - climb);
+    return Math.max(0, hill.height * climb + grain * flank);
   }
 
   /**

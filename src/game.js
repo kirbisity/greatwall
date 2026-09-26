@@ -28,7 +28,6 @@ import {
   IMPERIAL,
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
-  CASTLE_PLATFORM,
   RAIDER_SPAWN_INTERVAL_SECONDS,
   REGEN_FRACTION_PER_PAYOUT,
   SEASON_LENGTH_SECONDS,
@@ -116,9 +115,6 @@ export class Game {
     this.navigationCache = null;
     this.terrain.levelled = [];
     this.terrain.zoneIndex = null;
-    // The stone terrace under each castle, keyed by its index, which rises
-    // when the city is founded and again each time it grows.
-    this.terraces = new Map();
     // Bumped whenever reshaped ground changes height, so the renderer knows
     // its cached landscape is stale -- see Renderer#drawGround.
     this.terrainRevision = 0;
@@ -141,36 +137,16 @@ export class Game {
   /**
    * Settlements stand on levelled ground, and clear the wood around them.
    *
-   * On a terraced level the city does not merely flatten the ground: it
-   * stands on a squared stone platform of its own, raised to the topmost
-   * contour, which is what puts the keep above its own walls. The platform
-   * grows with the castle, so upgrading widens the terrace as well as the
-   * building on it.
+   * The ground is only flattened -- a castle's own stonework is part of the
+   * building (see buildings/japan-small.js), not a shelf raised under it.
    */
   levelUnderCities() {
-    const contours = this.terrain.contours;
     for (const [index, castle] of this.castles.entries()) {
-      const { x, y } = castle.position;
-      if (!contours) {
-        this.terrain.level(index, x, y, castle.type.footprint);
-        continue;
-      }
-      const key = `castle${index}`;
-      const radius = castle.type.footprint + CASTLE_PLATFORM.margin;
-      const standing = this.terraces.get(key);
-      const zone = this.terrain.raise(
-        key, x, y, radius, standing?.lift ?? 0, CASTLE_PLATFORM.skirt,
-      );
-      // A step above the summit rather than level with it: the top contour
-      // is the ground the keep already stands on, so a terrace built to it
-      // would add nothing at all.
-      const target = Math.max(
-        0,
-        contours[contours.length - 1] - zone.base
-          + this.terrain.contourStep * CASTLE_PLATFORM.riseInTiers,
-      );
-      this.terraces.set(key, { key, zone, lift: standing?.lift ?? 0, target });
+      this.terrain.level(index, castle.position.x, castle.position.y, castle.type.footprint);
     }
+    // The levelled ground is part of what the mesh draws, so growing a city
+    // has to count as a change the renderer notices.
+    this.terrainRevision += 1;
   }
 
   /**
@@ -193,37 +169,6 @@ export class Game {
       }
       return false;
     });
-  }
-
-  /**
-   * The castle terraces climbing towards their full height. Height is
-   * written straight onto the terrain's own zone, so a rising terrace never
-   * rebuilds the zone index -- only its height moves, and nothing about
-   * where it sits.
-   */
-  advanceTerraces(seconds) {
-    for (const terrace of this.terraces.values()) {
-      if (terrace.lift === terrace.target) {
-        continue;
-      }
-      const pace = Math.abs(terrace.target) / CASTLE_PLATFORM.growSeconds || 1;
-      const gap = terrace.target - terrace.lift;
-      const step = Math.sign(gap) * Math.min(Math.abs(gap), pace * seconds);
-      terrace.lift += step;
-      terrace.zone.height = terrace.zone.base + terrace.lift;
-      // Quantised, so a rise costs a handful of ground repaints rather than
-      // one per frame all the way up.
-      this.terrainRevision = Math.round(this.terraceTotal() * 4);
-    }
-  }
-
-  /** Every terrace's lift added up, which is all the renderer's key needs. */
-  terraceTotal() {
-    let total = 0;
-    for (const terrace of this.terraces.values()) {
-      total += terrace.lift;
-    }
-    return total;
   }
 
   /** What a company's pace is multiplied by for the ground it is crossing. */
@@ -300,7 +245,6 @@ export class Game {
     for (const house of this.houses) {
       house.advance(1 / FPS);
     }
-    this.advanceTerraces(1 / FPS);
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     this.moveRaiders();

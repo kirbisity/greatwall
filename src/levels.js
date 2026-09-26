@@ -90,9 +90,8 @@ export const LEVELS = [
       mountainMaxHeight: 44,
       mountainSkirt: 26,
       // The rise the whole level is built around: the keep stands on its
-      // summit, and walls terrace up it in `tiers` steps rather than
-      // following the ground (see Terrain#contours).
-      hill: { radius: 230, height: 45, tiers: 4 },
+      // summit and the walls climb it, following the ground as they go.
+      hill: { radius: 230, height: 62 },
     },
     sea: {
       // Land out to roughly this radius, give or take the coves `coast`
@@ -111,6 +110,9 @@ export const LEVELS = [
     // No landward flank: raiders row in and beach at the coves, so they
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
+    // Walls here are revetments in the island's own style: battered on the
+    // face they show the sea, sheer and flat-topped behind.
+    wallStyle: 'battered',
     // Revetted stone cut into a hillside, kept by a garrison: dearer to
     // hold than a rampart thrown up on the flat.
     wallUpkeep: 3,

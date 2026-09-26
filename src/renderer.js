@@ -123,14 +123,6 @@ const BOAT = {
   hull: [102, 68, 44], deck: [132, 96, 62], mast: [86, 58, 38],
 };
 
-// The face of a platform: a revetment of the same stone the island's keeps
-// are built on, so raised ground reads as something built rather than a
-// lump in the landscape.
-const PLATFORM_FACE = [196, 186, 166];
-// A platform's face is mostly what the player sees of it, and two of its
-// four sides never catch the sun at all. Left at plain ambient they came out
-// near black; this is the same floor the ground mesh uses.
-const PLATFORM_FACE_MIN_LIGHT = MIN_GROUND_LIGHT;
 
 const STONE = [214, 203, 178];
 const RUINED = [168, 64, 47];
@@ -291,28 +283,22 @@ function boatPrisms(landing, terrain) {
 }
 
 /**
- * A wall on a terraced level: battered on the outer face, sheer on the
- * inner, and flat on top.
+ * A wall in the island's style: battered on the outer face, sheer on the
+ * inner, and flat on top -- a revetment with a walkway behind it.
  *
- * The top sits at one height for the whole run -- the contour the section
- * was snapped to, plus the wall's own height -- while the foot follows the
- * real ground at either end. That is what makes a ring of sections read as
- * one terrace cut into the hill rather than a fence draped over it, and it
- * is why this cannot be the plain box every other level uses.
- *
- * `outward` is the side facing away from the city, which is the side that
- * leans; behind it the wall rises sheer out of the terrace it retains.
+ * It follows the ground the way every other wall does; only its section is
+ * different. `outward` is the side facing away from the city, which is the
+ * side that leans.
  */
-function terraceWallQuads(start, end, halfWidth, lean, outward, ground, topZ) {
+function batteredWallQuads(start, end, halfWidth, lean, outward, ground, tops) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const length = Math.hypot(dx, dy) || 1;
-  // Perpendicular, turned to point away from the city.
-  const px = -dy / length;
-  const py = dx / length;
-  const sign = px * outward.x + py * outward.y >= 0 ? 1 : -1;
-  const outX = px * sign;
-  const outY = py * sign;
+  const perpendicularX = -dy / length;
+  const perpendicularY = dx / length;
+  const sign = perpendicularX * outward.x + perpendicularY * outward.y >= 0 ? 1 : -1;
+  const outX = perpendicularX * sign;
+  const outY = perpendicularY * sign;
 
   const spread = (at, reach) => ({ x: at.x + outX * reach, y: at.y + outY * reach });
   // Wound as prismFrom winds its own -- inner side first -- so the quads
@@ -326,8 +312,8 @@ function terraceWallQuads(start, end, halfWidth, lean, outward, ground, topZ) {
     spread(start, -halfWidth), spread(end, -halfWidth),
     spread(end, halfWidth), spread(start, halfWidth),
   ];
-  const base = foot.map((point, i) => ({ x: point.x, y: point.y, z: Math.min(ground[i], topZ) }));
-  const top = crest.map((point) => ({ x: point.x, y: point.y, z: topZ }));
+  const base = foot.map((point, i) => ({ x: point.x, y: point.y, z: ground[i] }));
+  const top = crest.map((point, i) => ({ x: point.x, y: point.y, z: tops[i] }));
   const quads = [top];
   for (let i = 0; i < 4; i += 1) {
     const j = (i + 1) % 4;
@@ -426,7 +412,7 @@ export class Renderer {
         points: face.points,
         normal,
         centre: centroid(face.points),
-        fill: shade(face.material, lightingFor(normal)),
+        fill: shade(face.material, Math.max(face.minLight ?? 0, lightingFor(normal))),
         ground: face.ground === true,
         growRadius: face.growRadius ?? 0,
         partBase: face.partBase ?? 0,
@@ -486,13 +472,12 @@ export class Renderer {
     // Once the last castle falls, the city blackens over BREACH.collapseSeconds
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
-    // Into the paving pass rather than the sorted scene: a terrace is ground,
-    // and it is wide enough that its average depth beat the keep standing in
-    // the middle of it, so the near face was painted over the castle.
-    this.collectTerraces(paving, view, game);
     this.collectBoats(items, view, game.landings, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
-    this.gameHome = game.castles[0]?.position ?? null;
+    this.wallStyle = {
+      battered: game.level.wallStyle === 'battered',
+      home: game.castles[0]?.position ?? null,
+    };
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
@@ -811,43 +796,6 @@ export class Renderer {
     }
   }
 
-  /**
-   * The revetted sides of each castle terrace.
-   *
-   * The ground mesh already draws their flat tops at the right height, but
-   * it cannot draw their sides: the drop happens well inside one mesh cell,
-   * so the edge came out as a smear across a tile rather than the wall of
-   * stone it is meant to be. Each of the four sides is drawn here as its own
-   * quad, from the wild ground at its foot to the terrace at its top.
-   */
-  collectTerraces(paving, view, game) {
-    if (game.terraces.size === 0) {
-      return;
-    }
-    for (const terrace of game.terraces.values()) {
-      const zone = terrace.zone;
-      if (terrace.lift <= 0 || !this.onScreenFor(view, zone, zone.radius * 2)) {
-        continue;
-      }
-      const top = zone.base + terrace.lift;
-      const half = zone.radius;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        // The two corners of this side, in the order that leaves the quad
-        // wound outwards so back-face culling keeps the far sides hidden.
-        const along = { x: -dy, y: dx };
-        const mid = { x: zone.x + dx * half, y: zone.y + dy * half };
-        const a = { x: mid.x - along.x * half, y: mid.y - along.y * half };
-        const b = { x: mid.x + along.x * half, y: mid.y + along.y * half };
-        this.collectPrism(paving, view, [[
-          { x: a.x, y: a.y, z: game.terrain.wildHeightAt(a.x, a.y) },
-          { x: b.x, y: b.y, z: game.terrain.wildHeightAt(b.x, b.y) },
-          { x: b.x, y: b.y, z: top },
-          { x: a.x, y: a.y, z: top },
-        ]], PLATFORM_FACE, PLATFORM_FACE_MIN_LIGHT);
-      }
-    }
-  }
-
   /** The fleet that put the raiders ashore, one hull per landing. */
   collectBoats(items, view, landings, terrain) {
     for (const landing of landings) {
@@ -861,35 +809,31 @@ export class Renderer {
   }
 
   /**
-   * A section's geometry: a plain box, or a battered terrace wall on a level
-   * that has contours to snap to.
+   * A section's geometry: a plain box, or the island's battered revetment.
+   *
+   * `options` carries the section's measurements and which way is away from
+   * the city, which is the side a battered wall leans on.
    */
-  wallQuads(wall, terrain, halfWidth, height, startGround, endGround, home) {
+  wallQuads(wall, options) {
+    const { halfWidth, height, startGround, endGround, battered, home } = options;
     const ground = [startGround, endGround, endGround, startGround];
-    if (!terrain.contours || !home) {
+    if (!battered || !home) {
       return wallPrism(wall.start, wall.end, halfWidth, height, ground);
     }
-    // One crest for the whole section, taken at its middle, so a run laid
-    // across a slope does not twist between its two ends. The crest is the
-    // first terrace that clears the wall's own height above the ground, so a
-    // ring of sections comes out level with itself and stands at least as
-    // tall as a wall anywhere else -- taller where it is holding back more
-    // of the hill.
     const midX = (wall.start.x + wall.end.x) / 2;
     const midY = (wall.start.y + wall.end.y) / 2;
-    const crest = terrain.contourAbove(terrain.heightAt(midX, midY) + height);
     const outward = { x: midX - home.x, y: midY - home.y };
     if (outward.x === 0 && outward.y === 0) {
       outward.x = 1;
     }
-    // `ground` is in the order the footprint is wound, start then end, which
-    // is the order the box uses too.
-    const lean = halfWidth * WALL_BATTER;
-    return terraceWallQuads(wall.start, wall.end, halfWidth, lean, outward, ground, crest);
+    const tops = ground.map((foot) => foot + height);
+    return batteredWallQuads(
+      wall.start, wall.end, halfWidth, halfWidth * WALL_BATTER, outward, ground, tops,
+    );
   }
 
   collectWalls(items, view, walls, terrain, hoveredWall) {
-    const home = this.gameHome;
+    const { battered, home } = this.wallStyle;
     // One pulse for the whole pass, so a hovered stretch blinks together
     // rather than each section keeping its own time.
     const pulse = HOVER_MIN
@@ -916,7 +860,9 @@ export class Renderer {
       // a section laid across a slope follows it rather than floating.
       const startGround = terrain.heightAt(wall.start.x, wall.start.y);
       const endGround = terrain.heightAt(wall.end.x, wall.end.y);
-      const quads = this.wallQuads(wall, terrain, halfWidth, height, startGround, endGround, home);
+      const quads = this.wallQuads(wall, {
+        halfWidth, height, startGround, endGround, battered, home,
+      });
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
       const tint = wall === hoveredWall
         ? blended(wallTint(condition), HOVER_TINT, pulse)

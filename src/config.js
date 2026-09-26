@@ -319,29 +319,6 @@ export const RAIDER_TYPES = {
   },
 };
 
-/**
- * The stone platform a castle stands on.
- *
- * The island's keep is not set on the turf: it sits on a squared-off terrace
- * of its own, revetted in stone, which grows with the castle. This is the
- * same reshaped-ground machinery a settlement levels itself with (see
- * Terrain#raise), pulled up rather than flat.
- */
-export const CASTLE_PLATFORM = {
-  // How far the terrace reaches past the castle's own footprint, and how far
-  // its face runs out past that. A short skirt is what makes it read as a
-  // revetment rather than a bank of earth.
-  margin: 6,
-  skirt: 3,
-  // How long the terrace takes to rise when the castle is founded or grown.
-  growSeconds: 6,
-  // How far it stands above the ground it is cut into, as a multiple of the
-  // gap between two terraces. The keep ends up a step above the highest wall
-  // the player can build, which is what puts it at the top of the tiers
-  // rather than level with the last of them.
-  riseInTiers: 1,
-};
-
 export const STARTING_CASTLE_TYPE = 'CC0';
 
 /**

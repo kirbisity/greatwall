@@ -55,7 +55,13 @@ const MIN_TOWER_PIXELS = 1.5;
 // A wrecked section still stands this much of its raised height.
 const DAMAGE_SLUMP = 0.55;
 
-const CASTLE_BAR = { minWidth: 44, maxWidth: 120, height: 7, gap: 7 };
+const CASTLE_BAR = {
+  minWidth: 44, maxWidth: 120, height: 7, gap: 7,
+  // The bar rides the castle's roof, and a five-storey keep on a hilltop
+  // reaches past the top of the screen at most camera angles. Held below the
+  // readouts so it stays readable instead of sliding out of sight.
+  minTop: 78,
+};
 const RAIDER_BAR = { minWidth: 14, maxWidth: 44, height: 4, gap: 4 };
 
 /**
@@ -198,6 +204,10 @@ function wallTint(condition) {
 // fixed lift reads as a trick of the light; a yellow that comes and goes
 // reads as the game answering the cursor. Swings between HOVER_MIN and
 // HOVER_MAX of the way to the tint, HOVER_PULSE_RATE radians a second.
+// How far a tapered wall's foot spreads past its crest on each side, as a
+// multiple of its half-width.
+const WALL_TAPER = 0.9;
+
 const HOVER_TINT = [255, 214, 64];
 const HOVER_PULSE_RATE = 5;
 const HOVER_MIN = 0.25;
@@ -225,6 +235,39 @@ function wallPrism(start, end, halfWidth, height, ground = null) {
     { x: start.x + offsetX, y: start.y + offsetY },
   ];
   return prismFrom(footprint, height, ground);
+}
+
+/**
+ * A wall with a trapezoid section: wider at its foot than at its crest on
+ * both long sides, the way rammed stonework is built. The ends stay square,
+ * so two sections still meet cleanly at a junction.
+ */
+function taperedWallQuads(start, end, halfWidth, spread, height, ground) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const offsetX = -dy / length;
+  const offsetY = dx / length;
+  const sideways = (at, reach) => ({ x: at.x + offsetX * reach, y: at.y + offsetY * reach });
+  // Wound as prismFrom winds its own, so the quads face outwards. Corners 0
+  // and 3 belong to the start and 1 and 2 to the end, matching `ground`.
+  const spreadAt = halfWidth + spread;
+  const foot = [
+    sideways(start, -spreadAt), sideways(end, -spreadAt),
+    sideways(end, spreadAt), sideways(start, spreadAt),
+  ];
+  const crest = [
+    sideways(start, -halfWidth), sideways(end, -halfWidth),
+    sideways(end, halfWidth), sideways(start, halfWidth),
+  ];
+  const base = foot.map((point, i) => ({ x: point.x, y: point.y, z: ground[i] }));
+  const top = crest.map((point, i) => ({ x: point.x, y: point.y, z: ground[i] + height }));
+  const quads = [top];
+  for (let i = 0; i < 4; i += 1) {
+    const j = (i + 1) % 4;
+    quads.push([base[i], base[j], top[j], top[i]]);
+  }
+  return quads;
 }
 
 function squarePrism(centre, halfWidth, height, base = 0) {
@@ -373,8 +416,18 @@ export class Renderer {
         partBase: face.partBase ?? 0,
       };
     }) : [];
-    const maxGrowRadius = Math.max(1, ...faces.filter((face) => !face.ground).map((face) => face.growRadius));
-    const result = { faces, maxGrowRadius };
+    let maxGrowRadius = 1;
+    let height = 0;
+    for (const face of faces) {
+      if (face.ground) {
+        continue;
+      }
+      maxGrowRadius = Math.max(maxGrowRadius, face.growRadius);
+      for (const point of face.points) {
+        height = Math.max(height, point.z);
+      }
+    }
+    const result = { faces, maxGrowRadius, height };
     this.structures.set(definition, result);
     return result;
   }
@@ -429,7 +482,10 @@ export class Renderer {
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
     this.collectBoats(items, view, game.landings, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
-    this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall);
+    this.collectWalls(
+      items, view, game.walls, game.terrain, this.hoveredWall,
+      game.level.wallShape === 'tapered',
+    );
     this.collectTowers(items, view, game.walls, game.terrain);
     this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
     this.collectRaiders(items, view, game.raiders, game.terrain);
@@ -759,7 +815,7 @@ export class Renderer {
     }
   }
 
-  collectWalls(items, view, walls, terrain, hoveredWall) {
+  collectWalls(items, view, walls, terrain, hoveredWall, tapered = false) {
     // One pulse for the whole pass, so a hovered stretch blinks together
     // rather than each section keeping its own time.
     const pulse = HOVER_MIN
@@ -787,7 +843,9 @@ export class Renderer {
       const startGround = terrain.heightAt(wall.start.x, wall.start.y);
       const endGround = terrain.heightAt(wall.end.x, wall.end.y);
       const ground = [startGround, endGround, endGround, startGround];
-      const quads = wallPrism(wall.start, wall.end, halfWidth, height, ground);
+      const quads = tapered
+        ? taperedWallQuads(wall.start, wall.end, halfWidth, halfWidth * WALL_TAPER, height, ground)
+        : wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
       const tint = wall === hoveredWall
         ? blended(wallTint(condition), HOVER_TINT, pulse)
@@ -1315,8 +1373,8 @@ export class Renderer {
         continue;
       }
       const ground = game.terrain.heightAt(castle.position.x, castle.position.y);
-      const staffHeight = definition.radius * FLAG.heightPerFootprint;
-      const anchor = projectPoint(view, castle.position.x, castle.position.y, ground + staffHeight);
+      const roofHeight = this.structureFor(definition).height;
+      const anchor = projectPoint(view, castle.position.x, castle.position.y, ground + roofHeight);
       if (!anchor) {
         continue;
       }
@@ -1349,7 +1407,7 @@ export class Renderer {
     for (const castle of game.castles) {
       const definition = game.buildings[castle.typeId];
       if (definition) {
-        this.drawCastleBar(view, castle, definition);
+        this.drawCastleBar(view, game, castle, definition);
       }
     }
     for (const company of [...game.raiders, ...game.guards]) {
@@ -1365,17 +1423,24 @@ export class Renderer {
     }
   }
 
-  /** Above the building's far edge, widening with the compound itself. */
-  drawCastleBar(view, castle, definition) {
-    const anchor = projectPoint(view, castle.position.x, castle.position.y + definition.radius, 0);
+  /**
+   * Above the building's far edge, widening with the compound itself.
+   *
+   * Anchored on the roof rather than at z=0: a keep standing on a hilltop,
+   * on stonework of its own, had its bar left down at sea level.
+   */
+  drawCastleBar(view, game, castle, definition) {
+    const { x, y } = castle.position;
+    const top = game.terrain.heightAt(x, y) + this.structureFor(definition).height;
+    const anchor = projectPoint(view, x, y + definition.radius, top);
     const jacobian = this.camera.jacobianAt(castle.position);
     if (!anchor || !jacobian) {
       return;
     }
     const footprint = Math.hypot(jacobian.east.x, jacobian.east.y) * definition.radius * 2;
     const width = Math.min(Math.max(footprint * 0.4, CASTLE_BAR.minWidth), CASTLE_BAR.maxWidth);
-    this.drawBar(anchor.x, anchor.y - CASTLE_BAR.height - CASTLE_BAR.gap, width, CASTLE_BAR.height,
-      castle.healthFraction);
+    const barTop = Math.max(CASTLE_BAR.minTop, anchor.y - CASTLE_BAR.height - CASTLE_BAR.gap);
+    this.drawBar(anchor.x, barTop, width, CASTLE_BAR.height, castle.healthFraction);
   }
 
   /**

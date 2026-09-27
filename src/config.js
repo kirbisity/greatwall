@@ -289,10 +289,6 @@ export const WALL_TIERS = [
 
 export const FLAG = {
   sprite: 'images/flags/flag_song.png',
-  // Planted this far above the ground per world unit of the castle's own
-  // footprint radius — a rough stand-in for how tall its central hall is,
-  // without needing the roof height off every building definition.
-  heightPerFootprint: 0.7,
   width: 20,
   minWidth: 12,
   maxWidth: 34,

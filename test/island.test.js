@@ -243,3 +243,83 @@ test('the zone index answers exactly what a full scan would', () => {
   }
   assert.equal(worst, 0, 'the bucketed lookup must be exact, not merely close');
 });
+
+// --- what stands over the keep ------------------------------------------
+
+test('the flag and the health bar are pinned to the roof, not the ground', async () => {
+  const { Renderer } = await import('../src/renderer.js');
+  const renderer = Object.create(Renderer.prototype);
+  renderer.structures = new Map();
+
+  for (const definition of Object.values(JAPAN_BUILDINGS)) {
+    const { height } = renderer.structureFor(definition);
+    let tallest = 0;
+    for (const face of compileStructure(definition)) {
+      if (face.ground) {
+        continue;
+      }
+      for (const point of face.points) {
+        tallest = Math.max(tallest, point.z);
+      }
+    }
+    assert.equal(height, tallest, `${definition.name} should report its real height`);
+    assert.ok(height > definition.radius, 'a keep is taller than it is wide, so a radius is no stand-in');
+  }
+});
+
+test('a keep on the hill hangs its bar far above sea level', () => {
+  const game = island();
+  const keep = game.castles[0];
+  const ground = game.terrain.heightAt(keep.position.x, keep.position.y);
+  assert.ok(ground > 20, `the keep should stand well up the hill, it is at ${ground.toFixed(0)}`);
+  // The anchor is ground plus roof, so it can never come out at zero the way
+  // the old fixed z=0 anchor did wherever the city happened to stand.
+  assert.ok(ground + JAPAN_BUILDINGS[keep.typeId].radius > 0);
+});
+
+// --- the wall's section --------------------------------------------------
+
+test('the island wall is a trapezoid, and no other level changes shape', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/renderer.js', import.meta.url), 'utf8');
+  const body = source.slice(
+    source.indexOf('function taperedWallQuads'),
+    source.indexOf('function squarePrism'),
+  );
+  // eslint-disable-next-line no-new-func
+  const taperedWallQuads = new Function(`${body}; return taperedWallQuads;`)();
+
+  assert.equal(ISLAND.wallShape, 'tapered');
+  for (const level of LEVELS) {
+    if (level !== ISLAND) {
+      assert.equal(level.wallShape, undefined, `${level.id} should keep the squared wall`);
+    }
+  }
+
+  const halfWidth = 1.5;
+  const spread = 1.35;
+  const quads = taperedWallQuads({ x: -20, y: 0 }, { x: 20, y: 0 }, halfWidth, spread, 6, [0, 0, 0, 0]);
+  const [top, southSide, eastEnd, northSide] = quads;
+
+  const normalOf = (a, b, c) => {
+    const u = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+    const v = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
+    const n = { x: u.y * v.z - u.z * v.y, y: u.z * v.x - u.x * v.z, z: u.x * v.y - u.y * v.x };
+    const length = Math.hypot(n.x, n.y, n.z) || 1;
+    return { x: n.x / length, y: n.y / length, z: n.z / length };
+  };
+
+  assert.ok(normalOf(top[0], top[1], top[2]).z > 0.99, 'the crest faces the sky');
+  for (const point of top) {
+    assert.equal(Math.abs(point.y), halfWidth, 'and is the narrow face');
+  }
+  // Both long sides lean outward and down; the ends stay square so two
+  // sections still meet cleanly at a junction.
+  for (const side of [southSide, northSide]) {
+    const normal = normalOf(side[0], side[1], side[2]);
+    assert.ok(normal.z > 0.1, 'a long side should lean');
+    assert.ok(Math.abs(normal.x) < 1e-9, 'and face across the run, not along it');
+    assert.equal(Math.abs(side[0].y), halfWidth + spread, 'with its foot spread');
+  }
+  assert.ok(Math.abs(normalOf(eastEnd[0], eastEnd[1], eastEnd[2]).x) > 0.99, 'the ends stay square');
+});

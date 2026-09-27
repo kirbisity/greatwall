@@ -119,6 +119,9 @@ export const LEVELS = [
     // No landward flank: raiders row in and beach at the coves, so they
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
+    // Rammed stonework rather than a squared rampart: wider at the foot than
+    // at the crest, on both sides.
+    wallShape: 'tapered',
     buildings: JAPAN_BUILDINGS,
     // The island's keeps are a fraction of the size of the imperial city's,
     // so they claim a fraction of the ground. Left at the imperial figures a

@@ -1,6 +1,6 @@
 import { clamp } from './geometry.js';
 import { CAMERA } from './config.js';
-import { createView, groundAt, groundJacobian, project } from './projection.js';
+import { createView, groundAt, groundJacobian, project, terrainPointAt } from './projection.js';
 
 /**
  * A perspective camera orbiting a focus point on the ground.
@@ -44,8 +44,19 @@ export class Camera {
     return project(this.view, point);
   }
 
-  toWorld(pixel) {
-    return groundAt(this.view, pixel.x, pixel.y);
+  /**
+   * Where a pixel points on the ground.
+   *
+   * `heightAt` makes it follow the landscape, which is what anything the
+   * player aims at needs. Panning and the mesh bounds leave it out on
+   * purpose: they want a plane that moves smoothly with the drag rather
+   * than one that jumps as the cursor crosses a hillside.
+   */
+  toWorld(pixel, heightAt = null) {
+    if (!heightAt) {
+      return groundAt(this.view, pixel.x, pixel.y);
+    }
+    return terrainPointAt(this.view, pixel.x, pixel.y, heightAt);
   }
 
   jacobianAt(point) {

@@ -11,6 +11,7 @@ import {
   normalOf,
   projectCorners,
   projectPoint,
+  terrainPointAt,
 } from '../src/projection.js';
 import { Camera } from '../src/camera.js';
 import { AMBIENT_LIGHT, CAMERA } from '../src/config.js';
@@ -42,6 +43,97 @@ test('screen to ground and back round-trips exactly', () => {
     }
   }
   assert.ok(worst < 1e-6, `worst round-trip error ${worst}`);
+});
+
+// --- reading the cursor against the landscape ---------------------------
+
+/** A hill at the origin, steep enough to throw a flat reading well off. */
+function testHill(height = 60, radius = 180) {
+  return (x, y) => {
+    const reach = Math.hypot(x, y);
+    if (reach >= radius) {
+      return 0;
+    }
+    const climb = 1 - reach / radius;
+    return height * climb * climb * (3 - 2 * climb);
+  };
+}
+
+test('a cursor read against a plane lands on the wrong ground once there is a hill', () => {
+  const v = view({ elevation: 45 });
+  const heightAt = testHill();
+  let worst = 0;
+  for (let pixelX = 200; pixelX <= 1000; pixelX += 100) {
+    for (let pixelY = 150; pixelY <= 750; pixelY += 100) {
+      const flat = groundAt(v, pixelX, pixelY);
+      const onHill = terrainPointAt(v, pixelX, pixelY, heightAt);
+      worst = Math.max(worst, Math.hypot(flat.x - onHill.x, flat.y - onHill.y));
+    }
+  }
+  assert.ok(worst > 20, `expected the flat reading to be well out, it was only ${worst.toFixed(1)}`);
+});
+
+test('a cursor read against the landscape lands back on the pixel it came from', () => {
+  const heightAt = testHill();
+  for (const elevation of [CAMERA.minElevation, 45, CAMERA.maxElevation]) {
+    for (const distance of [CAMERA.minDistance, CAMERA.maxDistance]) {
+      const v = view({ distance, elevation });
+      let worst = 0;
+      for (let pixelX = 200; pixelX <= 1000; pixelX += 80) {
+        for (let pixelY = 150; pixelY <= 750; pixelY += 60) {
+          const point = terrainPointAt(v, pixelX, pixelY, heightAt);
+          const back = projectPoint(v, point.x, point.y, heightAt(point.x, point.y));
+          if (!back) {
+            continue;
+          }
+          worst = Math.max(worst, Math.hypot(back.x - pixelX, back.y - pixelY));
+        }
+      }
+      assert.ok(worst < 0.5,
+        `at ${distance}/${elevation} the cursor drifted ${worst.toFixed(2)} pixels`);
+    }
+  }
+});
+
+test('flat ground reads the same whether or not the landscape is consulted', () => {
+  const v = view({ elevation: 50 });
+  const seaLevel = () => 0;
+  for (let pixelX = 300; pixelX <= 900; pixelX += 150) {
+    for (let pixelY = 250; pixelY <= 700; pixelY += 150) {
+      const flat = groundAt(v, pixelX, pixelY);
+      const walked = terrainPointAt(v, pixelX, pixelY, seaLevel);
+      assert.ok(Math.hypot(flat.x - walked.x, flat.y - walked.y) < 0.05);
+    }
+  }
+});
+
+test('ground that is level but not at zero is still read correctly', () => {
+  const v = view({ elevation: 45 });
+  const shelf = () => 40;
+  for (let pixelX = 400; pixelX <= 800; pixelX += 200) {
+    for (let pixelY = 300; pixelY <= 600; pixelY += 150) {
+      const point = terrainPointAt(v, pixelX, pixelY, shelf);
+      const back = projectPoint(v, point.x, point.y, 40);
+      assert.ok(back && Math.hypot(back.x - pixelX, back.y - pixelY) < 0.5);
+    }
+  }
+});
+
+test('a ray that meets no ground falls back to the flat reading', () => {
+  const v = view({ elevation: 40 });
+  const below = () => -100000;
+  const skyward = terrainPointAt(v, 600, 5, below);
+  assert.ok(Number.isFinite(skyward.x) && Number.isFinite(skyward.y));
+});
+
+test('panning still reads a plane, so a drag does not jump over a hillside', () => {
+  const camera = new Camera(1200, 800);
+  const pixel = { x: 700, y: 300 };
+  const onPlane = camera.toWorld(pixel);
+  const onHill = camera.toWorld(pixel, testHill());
+  assert.deepEqual(camera.toWorld(pixel), onPlane, 'no sampler means the plane, unchanged');
+  assert.ok(Math.hypot(onHill.x - onPlane.x, onHill.y - onPlane.y) > 1,
+    'and handing one over actually changes the answer');
 });
 
 test('points behind the near plane do not project', () => {

@@ -34,6 +34,10 @@ export class Input {
     this.onChange = onChange;
     this.onMenu = onMenu;
 
+    // Read through the game rather than captured, so a level change swaps
+    // the landscape under the cursor along with everything else.
+    this.groundHeight = (x, y) => this.game.terrain.heightAt(x, y);
+
     this.tool = 'move';
     this.pointerDown = false;
     this.pointer = { x: 0, y: 0 };
@@ -105,6 +109,17 @@ export class Input {
     return event.clientY >= TOP_BAR_HEIGHT && event.clientX <= this.camera.width - SIDE_BAR_WIDTH;
   }
 
+  /**
+   * Where the cursor is pointing on the ground, following whatever hill is
+   * under it. Everything the player aims at -- a wall, a company's orders,
+   * the castle -- stands on the landscape, so reading the cursor against a
+   * flat plane put it somewhere else entirely wherever the ground was not
+   * at sea level.
+   */
+  pointerOnGround() {
+    return this.camera.toWorld(this.pointer, this.groundHeight);
+  }
+
   trackPointer(event) {
     const previous = { ...this.pointer };
     this.pointer.x = event.clientX;
@@ -118,7 +133,7 @@ export class Input {
     }
     if (this.tool === 'upgrade') {
       this.trackPointer(event);
-      if (this.game.upgradeCastleAt(this.camera.toWorld(this.pointer))) {
+      if (this.game.upgradeCastleAt(this.pointerOnGround())) {
         this.resetTool();
       }
       this.onChange();
@@ -126,7 +141,7 @@ export class Input {
     }
     if (this.tool === 'attack') {
       this.trackPointer(event);
-      this.orderAttack(this.camera.toWorld(this.pointer));
+      this.orderAttack(this.pointerOnGround());
       this.onChange();
     }
   }
@@ -169,7 +184,7 @@ export class Input {
    */
   updateHover() {
     const hovered = HOVER_TOOLS.has(this.tool)
-      ? this.game.wallAt(this.camera.toWorld(this.pointer))
+      ? this.game.wallAt(this.pointerOnGround())
       : null;
     if (hovered !== this.renderer.hoveredWall) {
       this.renderer.hoveredWall = hovered;
@@ -190,7 +205,7 @@ export class Input {
   }
 
   dragBuild() {
-    const target = this.camera.toWorld(this.pointer);
+    const target = this.pointerOnGround();
     if (!this.chainPoint) {
       this.chainPoint = target;
       return;
@@ -229,11 +244,11 @@ export class Input {
   }
 
   dragDestroy() {
-    this.game.removeWallAt(this.camera.toWorld(this.pointer));
+    this.game.removeWallAt(this.pointerOnGround());
   }
 
   dragRepair() {
-    const result = this.game.repairWallAt(this.camera.toWorld(this.pointer));
+    const result = this.game.repairWallAt(this.pointerOnGround());
     if (result.status === 'poor') {
       this.hud.showMessage('Not enough money to repair it');
     }
@@ -245,7 +260,7 @@ export class Input {
    * that is already reinforced, or already growing, says nothing.
    */
   dragFortify() {
-    const result = this.game.upgradeWallAt(this.camera.toWorld(this.pointer));
+    const result = this.game.upgradeWallAt(this.pointerOnGround());
     if (result.status === 'poor') {
       this.hud.showMessage(`${result.name} costs $${result.cost}`);
     }

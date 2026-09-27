@@ -323,3 +323,81 @@ test('the island wall is a trapezoid, and no other level changes shape', async (
   }
   assert.ok(Math.abs(normalOf(eastEnd[0], eastEnd[1], eastEnd[2]).x) > 0.99, 'the ends stay square');
 });
+
+// --- pointing at ground that is not at sea level ------------------------
+
+test('the cursor lands where it looks, even high on the hill', async () => {
+  const { Camera } = await import('../src/camera.js');
+  const { projectPoint } = await import('../src/projection.js');
+  const { CAMERA } = await import('../src/config.js');
+
+  const terrain = islandTerrain();
+  const heightAt = (x, y) => terrain.heightAt(x, y);
+  const camera = new Camera(1512, 807);
+
+  for (const elevation of [CAMERA.minElevation, CAMERA.initialElevation, CAMERA.maxElevation]) {
+    camera.distance = CAMERA.initialDistance;
+    camera.elevation = elevation;
+    camera.focus = { x: 0, y: 0 };
+    camera.refreshView();
+
+    let flatWorst = 0;
+    let followedWorst = 0;
+    for (let pixelX = 200; pixelX <= 1300; pixelX += 100) {
+      for (let pixelY = 150; pixelY <= 760; pixelY += 80) {
+        const pixel = { x: pixelX, y: pixelY };
+        const flat = camera.toWorld(pixel);
+        const followed = camera.toWorld(pixel, heightAt);
+        const flatBack = projectPoint(camera.view, flat.x, flat.y, heightAt(flat.x, flat.y));
+        const followedBack = projectPoint(
+          camera.view, followed.x, followed.y, heightAt(followed.x, followed.y),
+        );
+        if (!flatBack || !followedBack) {
+          continue;
+        }
+        flatWorst = Math.max(flatWorst, Math.hypot(flatBack.x - pixelX, flatBack.y - pixelY));
+        followedWorst = Math.max(
+          followedWorst, Math.hypot(followedBack.x - pixelX, followedBack.y - pixelY),
+        );
+      }
+    }
+    assert.ok(flatWorst > 30, `a flat reading should be well out at ${elevation} degrees`);
+    assert.ok(followedWorst < 1,
+      `the cursor drifted ${followedWorst.toFixed(1)} pixels at ${elevation} degrees`);
+  }
+});
+
+test('a wall is laid where it was drawn, not downhill of it', async () => {
+  const { Camera } = await import('../src/camera.js');
+  const { projectPoint } = await import('../src/projection.js');
+  const { Input } = await import('../src/input.js');
+
+  const game = island(1000000);
+  const camera = new Camera(1512, 807);
+  camera.focus = { x: 0, y: 0 };
+  camera.refreshView();
+
+  const input = new Input({
+    game,
+    camera,
+    renderer: { hoveredWall: null },
+    hud: { showMessage() {}, setCursor() {}, hideDispatchMenu() {}, openDispatchMenu() {} },
+    onChange() {},
+    onMenu() {},
+  });
+
+  // Aim at a spot well up the hill, and check the cursor reads it back.
+  const target = { x: 40, y: 55 };
+  const onScreen = projectPoint(camera.view, target.x, target.y, game.terrain.heightAt(target.x, target.y));
+  assert.ok(onScreen, 'the target should be in shot');
+  input.pointer = { x: onScreen.x, y: onScreen.y };
+
+  const read = input.pointerOnGround();
+  assert.ok(Math.hypot(read.x - target.x, read.y - target.y) < 2,
+    `pointed at ${target.x},${target.y} but read ${read.x.toFixed(0)},${read.y.toFixed(0)}`);
+
+  // And the flat reading, which is what it used to do, is far off.
+  const flat = camera.toWorld(input.pointer);
+  assert.ok(Math.hypot(flat.x - target.x, flat.y - target.y) > 10,
+    'the old flat reading should be visibly wrong here, or this proves nothing');
+});

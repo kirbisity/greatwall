@@ -2,6 +2,15 @@ import { AMBIENT_LIGHT, CAMERA, SUN } from './config.js';
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
 // Step used to measure how the ground stretches on screen around a point.
+// How a cursor's ray is walked out across the landscape: the stride between
+// samples, how far it is followed as a multiple of the camera's distance,
+// and how many times the crossing is halved afterwards. A stride well under
+// the smallest hill cannot step over one, and twelve halvings take a six
+// unit stride down to under a hundredth of a unit.
+const TERRAIN_PICK_STEP = 6;
+const TERRAIN_PICK_REACH = 3;
+const TERRAIN_PICK_HALVINGS = 12;
+
 const JACOBIAN_STEP = 0.5;
 
 /**
@@ -77,17 +86,104 @@ export function projectCorners(view, xs, ys, into) {
   }
 }
 
-/** Where the ray through a pixel meets the ground plane. */
-export function groundAt(view, screenX, screenY) {
+/** Where the ray through a pixel meets a level plane at this height. */
+export function groundAt(view, screenX, screenY, height = 0) {
   const u = (screenX - view.centreX) / view.focal;
   const v = -(screenY - view.centreY) / view.focal;
   const dirY = v * view.up.y + view.forward.y;
   const dirZ = v * view.up.z + view.forward.z;
-  const travel = -view.position.z / dirZ;
+  const travel = (height - view.position.z) / dirZ;
   return {
     x: view.position.x + travel * u,
     y: view.position.y + travel * dirY,
   };
+}
+
+/**
+ * The ray through a pixel, stepped by ground covered rather than by depth.
+ *
+ * One unit of travel is one world unit across the map, whatever the camera
+ * is doing, which is what lets the march below use a step size in the same
+ * units the landscape is measured in.
+ */
+function rayThrough(view, screenX, screenY) {
+  const u = (screenX - view.centreX) / view.focal;
+  const v = -(screenY - view.centreY) / view.focal;
+  const dirY = v * view.up.y + view.forward.y;
+  const dirZ = v * view.up.z + view.forward.z;
+  const overGround = Math.hypot(u, dirY);
+  if (overGround < 1e-6) {
+    return null;
+  }
+  return {
+    stepX: u / overGround,
+    stepY: dirY / overGround,
+    climb: dirZ / overGround,
+  };
+}
+
+/**
+ * Where the ray through a pixel meets the landscape rather than a plane.
+ *
+ * Everything the player points at stands on the ground, so a cursor read
+ * against sea level lands somewhere else entirely once the ground is not at
+ * sea level: on the island's hill that error runs to tens of units, and a
+ * wall goes in nowhere near where it was drawn.
+ *
+ * Marched rather than solved. Re-cutting the ray at the height it last
+ * found -- the obvious fix -- converges near the bottom of the screen and
+ * diverges towards the top, where a ray comes in almost parallel to the
+ * slope it is crossing: measured, it left errors of sixty units up there
+ * while fixing the foreground. Walking out along the ray until it first
+ * goes under the ground, then halving in on the crossing, holds everywhere
+ * and finds the nearest hit rather than whichever one it stumbles into.
+ *
+ * `heightAt(x, y)` supplies the landscape, so this stays independent of it.
+ * Falls back to the flat reading when the ray meets nothing.
+ */
+export function terrainPointAt(view, screenX, screenY, heightAt) {
+  const flat = groundAt(view, screenX, screenY);
+  const ray = rayThrough(view, screenX, screenY);
+  if (!ray) {
+    return flat;
+  }
+  const pointAt = (travel) => ({
+    x: view.position.x + ray.stepX * travel,
+    y: view.position.y + ray.stepY * travel,
+  });
+  const clearanceAt = (travel) => {
+    const point = pointAt(travel);
+    return view.position.z + ray.climb * travel - heightAt(point.x, point.y);
+  };
+  if (clearanceAt(0) <= 0) {
+    return flat;
+  }
+
+  // Far enough to cross anything the ground mesh draws, which is itself
+  // capped against the camera's own distance -- see Renderer#groundBounds.
+  const reach = (view.position.z / Math.max(view.up.y, 1e-6)) * TERRAIN_PICK_REACH;
+  let above = 0;
+  let below = null;
+  for (let travel = TERRAIN_PICK_STEP; travel < reach; travel += TERRAIN_PICK_STEP) {
+    if (clearanceAt(travel) <= 0) {
+      below = travel;
+      break;
+    }
+    above = travel;
+  }
+  if (below === null) {
+    return flat;
+  }
+
+  for (let pass = 0; pass < TERRAIN_PICK_HALVINGS; pass += 1) {
+    const middle = (above + below) / 2;
+    if (clearanceAt(middle) > 0) {
+      above = middle;
+    } else {
+      below = middle;
+    }
+  }
+  return pointAt((above + below) / 2);
 }
 
 /**

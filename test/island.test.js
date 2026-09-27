@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
+import { WALL_HEIGHT_UNITS } from '../src/config.js';
 import { compileStructure } from '../src/structures.js';
 import { JAPAN_BUILDINGS, JAPAN_HOUSE } from '../src/buildings/index.js';
 
@@ -117,9 +118,8 @@ test('nothing snaps walls to fixed levels any more', () => {
 
 // --- walls ---------------------------------------------------------------
 
-test('the island builds walls exactly as the other levels do', () => {
+test('the island builds walls on the same terms as the other levels', () => {
   for (const level of LEVELS) {
-    assert.equal(level.wallStyle, undefined, `${level.id} should not ask for a wall of its own`);
     assert.equal(level.wallUpkeep, undefined, `${level.id} should not charge its own upkeep`);
   }
   const game = island(1000000);
@@ -166,7 +166,8 @@ test('every island keep is a battered base with storeys on its crest', () => {
     assert.equal(base.type, 'batter', `${keep.name} should start with a stone base`);
     assert.ok(base.spread > 0, 'which is wider at its foot than its crest');
     assert.equal(base.material, 'ishigaki');
-    assert.equal(keep.radius, base.width / 2 + base.spread, 'and the radius covers that foot');
+    assert.ok(Math.abs(keep.radius - (base.width / 2 + base.spread)) < 1e-9,
+      'and the radius covers that foot');
 
     assert.ok(storeys.length >= 2, `${keep.name} should carry storeys`);
     assert.equal(storeys[0].base, base.height, 'the first storey sits on the crest');
@@ -289,10 +290,10 @@ test('the island wall is a trapezoid, and no other level changes shape', async (
   // eslint-disable-next-line no-new-func
   const taperedWallQuads = new Function(`${body}; return taperedWallQuads;`)();
 
-  assert.equal(ISLAND.wallShape, 'tapered');
+  assert.equal(ISLAND.wall.shape, 'tapered');
   for (const level of LEVELS) {
     if (level !== ISLAND) {
-      assert.equal(level.wallShape, undefined, `${level.id} should keep the squared wall`);
+      assert.equal(level.wall, undefined, `${level.id} should keep the wall it has always had`);
     }
   }
 
@@ -400,4 +401,120 @@ test('a wall is laid where it was drawn, not downhill of it', async () => {
   const flat = camera.toWorld(input.pointer);
   assert.ok(Math.hypot(flat.x - target.x, flat.y - target.y) > 10,
     'the old flat reading should be visibly wrong here, or this proves nothing');
+});
+
+// --- the island's own proportions ---------------------------------------
+
+/** A renderer with just enough stubbed to run one wall-collecting pass. */
+async function wallCollector() {
+  const { Renderer } = await import('../src/renderer.js');
+  // `clock` is a getter over performance.now(), so it is replaced rather
+  // than assigned; the hover pulse it drives is not what this measures.
+  const renderer = Object.create(Renderer.prototype, {
+    clock: { value: 0, writable: true },
+  });
+  renderer.isOnScreen = () => true;
+  renderer.flankPixels = () => 1000;
+  renderer.collectPrism = function capture(items, view, quads) {
+    items.push(...quads);
+  };
+  return renderer;
+}
+
+/** The style a level builds its walls in, read the way the renderer reads it. */
+async function wallStyleFor(level) {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/renderer.js', import.meta.url), 'utf8');
+  const body = source.slice(
+    source.indexOf('function wallStyleOf'),
+    source.indexOf('/**\n * A wall with a trapezoid'),
+  );
+  // eslint-disable-next-line no-new-func
+  return new Function(`${body}; return wallStyleOf;`)()(level);
+}
+
+test('the island wall stands half as tall, and no other level is touched', async () => {
+  assert.equal((await wallStyleFor(ISLAND)).heightScale, 0.5);
+  for (const level of LEVELS) {
+    if (level !== ISLAND) {
+      assert.equal((await wallStyleFor(level)).heightScale, 1, `${level.id} should keep its full height`);
+    }
+  }
+
+  // And the geometry that comes out is actually half as tall.
+  const renderer = await wallCollector();
+  const terrain = { heightAt: () => 0 };
+  const wall = {
+    start: { x: -20, y: 40 }, end: { x: 20, y: 40 },
+    isPlanned: false, built: 1, heightScale: 1, widthScale: 1,
+    health: 300, maxHealth: 300,
+  };
+  const crestOf = (style) => {
+    const quads = [];
+    renderer.collectWalls(quads, null, [wall], terrain, null, style);
+    return Math.max(...quads.flat().map((point) => point.z));
+  };
+
+  const full = crestOf(await wallStyleFor(LEVELS[0]));
+  const island = crestOf(await wallStyleFor(ISLAND));
+  assert.ok(full > 0, 'a wall should stand at all');
+  assert.ok(Math.abs(island / full - 0.5) < 1e-9,
+    `the island wall came out ${(island / full).toFixed(2)} of the usual height`);
+  assert.equal(island, WALL_HEIGHT_UNITS * 0.5);
+});
+
+test('the island raises no turret where two runs of wall meet', async () => {
+  assert.equal((await wallStyleFor(ISLAND)).towers, false);
+  for (const level of LEVELS) {
+    if (level !== ISLAND) {
+      assert.equal((await wallStyleFor(level)).towers, true, `${level.id} should keep its towers`);
+    }
+  }
+});
+
+test('a plan can be stood down to another size without losing its proportions', async () => {
+  const { scalePlan } = await import('../src/buildings/helpers.js');
+  const plan = {
+    name: 'Test', radius: 12,
+    parts: [
+      { type: 'batter', x: 2, y: -4, width: 20, depth: 20, height: 8, spread: 6, material: 'ishigaki' },
+      {
+        type: 'building', x: 0, y: 0, width: 14, depth: 14, height: 6, base: 8,
+        material: 'shikkui', roof: { height: 3, overhang: 2, tiers: 2, material: 'roofSlate' },
+      },
+    ],
+  };
+  const half = scalePlan(plan, 0.5);
+
+  assert.equal(half.radius, 6);
+  assert.deepEqual(
+    half.parts.map((part) => [part.x, part.y, part.width, part.height, part.base ?? 0, part.spread ?? 0]),
+    [[1, -2, 10, 4, 0, 3], [0, 0, 7, 3, 4, 0]],
+  );
+  assert.deepEqual(half.parts[1].roof, { height: 1.5, overhang: 1, tiers: 2, material: 'roofSlate' });
+  // Everything that is not a length is carried over untouched.
+  assert.equal(half.parts[0].material, 'ishigaki');
+  assert.equal(half.parts[0].type, 'batter');
+  assert.equal(plan.radius, 12, 'and the plan it was made from is left alone');
+});
+
+test('the island keeps are a third smaller than the plans they are drawn from', async () => {
+  const small = (await import('../src/buildings/japan-small.js')).default;
+  const large = (await import('../src/buildings/japan-large.js')).default;
+  const ratio = JAPAN_BUILDINGS.CC0.radius / small.radius;
+  assert.ok(ratio > 0.6 && ratio < 0.7, `expected about two thirds, got ${ratio.toFixed(2)}`);
+  assert.ok(Math.abs(JAPAN_BUILDINGS.CC2.radius / large.radius - ratio) < 1e-9,
+    'every tier should be stood down by the same factor');
+
+  // The settlement is not a castle and keeps its own size.
+  assert.equal(JAPAN_HOUSE.radius, 5.5);
+});
+
+test('the castle claims no more ground than the keep standing on it needs', () => {
+  const game = island();
+  for (const [id, keep] of Object.entries(JAPAN_BUILDINGS)) {
+    const footprint = game.castleTypes[id].footprint;
+    assert.ok(footprint >= keep.radius, `${id} claims ${footprint} for a keep of ${keep.radius.toFixed(1)}`);
+    assert.ok(footprint < keep.radius * 1.6, `${id} claims ${footprint}, far more than the keep needs`);
+  }
 });

@@ -39,3 +39,38 @@ export function enclosure({ radius, thickness, height, material, gaps = [] }) {
     .filter((side) => !gaps.includes(side.name))
     .map(({ name, ...side }) => ({ type: 'block', ...side, height, material }));
 }
+
+/**
+ * The same plan drawn at another size.
+ *
+ * Every length in a part is a world measurement, so one factor over all of
+ * them keeps the proportions a keep was designed with -- the batter of its
+ * base, the step between storeys, the reach of its eaves. Lets a definition
+ * stay written at the size it reads best and be stood down where it is used.
+ */
+export function scalePlan(definition, factor) {
+  return {
+    ...definition,
+    radius: definition.radius * factor,
+    parts: definition.parts.map((part) => scalePart(part, factor)),
+  };
+}
+
+const SCALED_LENGTHS = ['x', 'y', 'width', 'depth', 'height', 'base', 'spread'];
+
+function scalePart(part, factor) {
+  const scaled = { ...part };
+  for (const name of SCALED_LENGTHS) {
+    if (typeof part[name] === 'number') {
+      scaled[name] = part[name] * factor;
+    }
+  }
+  if (part.roof) {
+    scaled.roof = {
+      ...part.roof,
+      height: part.roof.height * factor,
+      overhang: part.roof.overhang * factor,
+    };
+  }
+  return scaled;
+}

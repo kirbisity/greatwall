@@ -119,18 +119,25 @@ export const LEVELS = [
     // No landward flank: raiders row in and beach at the coves, so they
     // arrive from every quarter at once and start already ashore.
     landings: { count: 8, inset: 12 },
-    // Rammed stonework rather than a squared rampart: wider at the foot than
-    // at the crest, on both sides.
-    wallShape: 'tapered',
+    wall: {
+      // Rammed stonework rather than a squared rampart: wider at the foot
+      // than at the crest, on both sides, and low enough to be a revetment
+      // cut into the hill rather than a curtain standing on it.
+      shape: 'tapered',
+      heightScale: 0.5,
+      // The stonework simply turns a corner; no turret is raised where two
+      // runs meet.
+      towers: false,
+    },
     buildings: JAPAN_BUILDINGS,
     // The island's keeps are a fraction of the size of the imperial city's,
     // so they claim a fraction of the ground. Left at the imperial figures a
     // grown castle fenced walls out of the whole hilltop and stood on a
     // terrace nearly two hundred units across.
     castleTypes: {
-      CC0: { footprint: 13, hitbox: 8 },
-      CC1: { footprint: 18, hitbox: 11 },
-      CC2: { footprint: 24, hitbox: 14 },
+      CC0: { footprint: 9, hitbox: 5 },
+      CC1: { footprint: 12, hitbox: 7 },
+      CC2: { footprint: 16, hitbox: 9 },
     },
     // The settlement is little keeps rather than houses, raised on whatever
     // platform ground the player has made for them.

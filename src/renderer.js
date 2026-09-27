@@ -238,6 +238,20 @@ function wallPrism(start, end, halfWidth, height, ground = null) {
 }
 
 /**
+ * How a level builds its walls: the shape of a section, how tall it stands
+ * against the usual height, and whether a turret marks where two runs meet.
+ * A level that says nothing gets what the game has always done.
+ */
+function wallStyleOf(level) {
+  const style = level.wall ?? {};
+  return {
+    tapered: style.shape === 'tapered',
+    heightScale: style.heightScale ?? 1,
+    towers: style.towers !== false,
+  };
+}
+
+/**
  * A wall with a trapezoid section: wider at its foot than at its crest on
  * both long sides, the way rammed stonework is built. The ends stay square,
  * so two sections still meet cleanly at a junction.
@@ -482,11 +496,11 @@ export class Renderer {
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
     this.collectBoats(items, view, game.landings, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
-    this.collectWalls(
-      items, view, game.walls, game.terrain, this.hoveredWall,
-      game.level.wallShape === 'tapered',
-    );
-    this.collectTowers(items, view, game.walls, game.terrain);
+    const wallStyle = wallStyleOf(game.level);
+    this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall, wallStyle);
+    if (wallStyle.towers) {
+      this.collectTowers(items, view, game.walls, game.terrain);
+    }
     this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
     this.collectRaiders(items, view, game.raiders, game.terrain);
     this.collectRaiders(items, view, game.guards, game.terrain);
@@ -815,7 +829,7 @@ export class Renderer {
     }
   }
 
-  collectWalls(items, view, walls, terrain, hoveredWall, tapered = false) {
+  collectWalls(items, view, walls, terrain, hoveredWall, style) {
     // One pulse for the whole pass, so a hovered stretch blinks together
     // rather than each section keeping its own time.
     const pulse = HOVER_MIN
@@ -829,7 +843,7 @@ export class Renderer {
       const halfWidth = WALL_THICKNESS_UNITS * wall.widthScale / 2;
       // Height is how much has been raised; damage slumps what is standing.
       const condition = wallCondition(wall);
-      const height = WALL_HEIGHT_UNITS * wall.heightScale * wall.built
+      const height = WALL_HEIGHT_UNITS * style.heightScale * wall.heightScale * wall.built
         * (DAMAGE_SLUMP + (1 - DAMAGE_SLUMP) * condition);
       if (!this.isOnScreen(view, [
         wall.start, wall.end,
@@ -843,7 +857,7 @@ export class Renderer {
       const startGround = terrain.heightAt(wall.start.x, wall.start.y);
       const endGround = terrain.heightAt(wall.end.x, wall.end.y);
       const ground = [startGround, endGround, endGround, startGround];
-      const quads = tapered
+      const quads = style.tapered
         ? taperedWallQuads(wall.start, wall.end, halfWidth, halfWidth * WALL_TAPER, height, ground)
         : wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
@@ -1176,13 +1190,14 @@ export class Renderer {
     const context = this.overlay;
     const pulse = 0.55 + 0.45 * Math.sin(this.clock * 4);
     const size = PLAN_TOOL_SIZE;
+    const { heightScale } = wallStyleOf(game.level);
     for (const wall of game.walls) {
       if (!wall.isRepairing && !wall.isUpgrading) {
         continue;
       }
       const midpoint = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
       const ground = game.terrain.heightAt(midpoint.x, midpoint.y);
-      const top = ground + WALL_HEIGHT_UNITS * wall.heightScale + 1.5;
+      const top = ground + WALL_HEIGHT_UNITS * heightScale * wall.heightScale + 1.5;
       const anchor = projectPoint(view, midpoint.x, midpoint.y, top);
       if (!anchor) {
         continue;

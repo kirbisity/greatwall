@@ -141,9 +141,14 @@ export const LEVELS = [
         healthCost: 0.3,
         // Scrambling over stone is not battering it. At full strength a
         // company in contact for ten seconds brings down a section, and a
-        // crossing lasts four times that, so climbing alone would demolish
-        // every wall it touched.
-        wear: 0.06,
+        // crossing lasts many times that, so climbing alone would demolish
+        // every wall it touched. Set against what a whole crossing should
+        // cost the stone rather than against the second, so slowing the
+        // climb does not quietly make walls easier to wear through.
+        wear: 0.02,
+        // And on the stone itself, rather than on the approach to it, a
+        // company is this many times slower again.
+        overlapSlow: 3,
       },
     },
     buildings: JAPAN_BUILDINGS,

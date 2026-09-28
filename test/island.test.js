@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
-import { WALL, WALL_HEIGHT_UNITS } from '../src/config.js';
+import { WALL, WALL_HEIGHT_UNITS, WALL_TIERS } from '../src/config.js';
 import { compileStructure } from '../src/structures.js';
 import { JAPAN_BUILDINGS, JAPAN_HOUSE } from '../src/buildings/index.js';
 
@@ -676,4 +676,59 @@ test('the climb is charged once, whatever kind of company makes it', async () =>
       `${typeId} paid ${(1 - raider.health / raider.type.maxHealth).toFixed(2)} of its strength`,
     );
   }
+});
+
+// --- bogging down on the stone itself -----------------------------------
+
+test('a company on the stone is slower again than one climbing towards it', () => {
+  const game = island(1000000);
+  const wall = game.buildWall({ x: 120, y: -60 }, { x: 120, y: 60 }).wall;
+  wall.finish();
+  const navigation = game.navigation();
+  // Level and bare, so the only thing telling on the pace is the wall.
+  game.terrain.heightAt = () => 0;
+  game.terrain.forestAt = () => 0;
+
+  const onStone = { x: wall.start.x, y: 0 };
+  const nearby = { x: wall.start.x + 12, y: 0 };
+  assert.equal(game.overlapsWall(navigation, onStone), true, 'the middle of a section is on it');
+  assert.equal(game.overlapsWall(navigation, nearby), false, 'a dozen units off is not');
+
+  // The same company, at the two places, taking the same step.
+  const paceAt = (position) => {
+    const raider = { position, velocity: { x: -1, y: 0 }, crossing: 1 };
+    let moved = 0;
+    raider.advance = (seconds) => { moved = seconds; };
+    game.advanceAgainstWalls(navigation, raider);
+    return moved;
+  };
+  const climbing = paceAt(nearby);
+  const struggling = paceAt(onStone);
+  assert.ok(struggling < climbing, 'the stone itself should be the worst of it');
+  assert.ok(
+    Math.abs(climbing / struggling - ISLAND.wall.climb.overlapSlow) < 1e-9,
+    `expected ${ISLAND.wall.climb.overlapSlow} times slower, got ${(climbing / struggling).toFixed(2)}`,
+  );
+});
+
+test('a fortified section is that much more ground to struggle across', () => {
+  const game = island(1000000);
+  const wall = game.buildWall({ x: 120, y: -60 }, { x: 120, y: 60 }).wall;
+  wall.finish();
+  const navigation = game.navigation();
+  const justOutside = { x: wall.start.x + 3.6, y: 0 };
+  assert.equal(game.overlapsWall(navigation, justOutside), false);
+
+  wall.tier = WALL_TIERS.length - 1;
+  assert.ok(wall.widthScale > 1, 'the top tier is a wider wall');
+  assert.equal(game.overlapsWall(navigation, justOutside), true,
+    'widening the wall should widen the ground a company has to cross');
+});
+
+test('nothing overlaps a wall where walls stop a company dead', () => {
+  const game = new Game({ random: () => 0.5, level: LEVELS[0] });
+  game.tokens = 1000000;
+  assert.equal(game.wallClimb, null, 'this level has no climbing at all');
+  const storming = stormTheCity(ringedGame(LEVELS[0]));
+  assert.equal(storming.arrived, false, 'and a wall is still a barrier there');
 });

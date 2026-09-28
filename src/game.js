@@ -38,6 +38,7 @@ import {
   STARTING_CASTLE_TYPE,
   STARTING_TOKENS,
   WALL,
+  WALL_THICKNESS_UNITS,
   WALL_TIERS,
   WINTER_BUILD_MULTIPLIER,
 } from './config.js';
@@ -49,6 +50,10 @@ const WALL_HINT_SECONDS = 20;
 const UPGRADE_HINT_SECONDS = 40;
 
 /** Random offset that lands outside the safe radius around the castle. */
+// The widest a section's own footprint can be, which is as far as anything
+// need look to know whether it is standing on one.
+const WALL_OVERLAP_REACH = WALL_THICKNESS_UNITS * 2 + WALL.reachMargin;
+
 /** How quickly a company settles into or out of climbing a wall. */
 const CROSSING_EASE = 0.08;
 
@@ -656,6 +661,21 @@ export class Game {
     }
   }
 
+  /**
+   * Whether a point sits on a wall's own footprint rather than merely near
+   * one. Measured against the section's thickness, so a fortified wall --
+   * which is wider -- is that much more ground to struggle across.
+   */
+  overlapsWall(navigation, position) {
+    for (const wall of wallsNear(navigation.grid, position, WALL_OVERLAP_REACH)) {
+      const halfWidth = WALL_THICKNESS_UNITS * wall.widthScale / 2 + WALL.reachMargin;
+      if (pointToLineDistance(position, wall.start, wall.end) <= halfWidth) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** The first standing section a step would cross, or null if the way is clear. */
   wallAcross(navigation, from, to) {
     const reach = Math.hypot(to.x - from.x, to.y - from.y) + WALL.reachMargin;
@@ -678,8 +698,12 @@ export class Game {
     // A wall that can be climbed never stops a step; it only makes the step
     // slow, the same way imperial companies pick their way over stone.
     if (climb) {
+      // Two slowings, not one: the approach up onto the stone eases in over
+      // the whole crossing band, and the stone itself -- the few units the
+      // section actually occupies -- is where a company bogs down.
       const squeeze = 1 - raider.crossing * (1 - climb.speed);
-      raider.advance(squeeze * pace / FPS);
+      const onStone = this.overlapsWall(navigation, raider.position) ? climb.overlapSlow : 1;
+      raider.advance((squeeze / onStone) * pace / FPS);
       return;
     }
     if (!raider.avoidsWalls) {

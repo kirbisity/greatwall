@@ -9,12 +9,13 @@ export class Wall {
    * finished rampart. Health is capped by it, so a wall under construction is
    * both shorter and weaker, and can be attacked the whole way up.
    */
-  constructor(start, end, built = 1, planSeconds = 0) {
+  constructor(start, end, built = 1, planSeconds = 0, healthScale = 1) {
     this.start = start;
     this.end = end;
     this.length = distance(start, end);
     this.built = built;
-    this.health = WALL.maxHealth * built;
+    // A level may build sturdier stone than the game's usual -- see levels.js.
+    this.healthScale = healthScale;
     // Pegged out but not yet begun. Until this runs down the section is not a
     // wall: it blocks nothing, diverts nothing, and cannot be attacked.
     this.planSeconds = planSeconds;
@@ -28,6 +29,8 @@ export class Wall {
     // entity to the scene -- only scale to the one already there.
     this.tier = 0;
     this.upgrade = null;
+    // Last, because maxHealth reads the tier this section is standing at.
+    this.health = this.maxHealth * built;
   }
 
   get isPlanned() {
@@ -56,7 +59,7 @@ export class Wall {
   }
 
   get maxHealth() {
-    return WALL.maxHealth * this.effectiveTier.health;
+    return WALL.maxHealth * this.healthScale * this.effectiveTier.health;
   }
 
   get upkeep() {
@@ -279,6 +282,9 @@ class Company {
     this.wander = 0;
     // 0 in the clear, 1 astride a wall and slowed to a crawl by it.
     this.crossing = 0;
+    // Whether this company has already been charged for the wall it is on,
+    // so one crossing costs once -- see Game#chargeWallClimb.
+    this.climbing = false;
     // Whether this company is up on the platforms, so climbing onto them
     // can be told from walking about up there -- see Game#chargeClimbs.
     this.standingOn = false;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
-import { WALL_HEIGHT_UNITS } from '../src/config.js';
+import { WALL, WALL_HEIGHT_UNITS } from '../src/config.js';
 import { compileStructure } from '../src/structures.js';
 import { JAPAN_BUILDINGS, JAPAN_HOUSE } from '../src/buildings/index.js';
 
@@ -516,5 +516,128 @@ test('the castle claims no more ground than the keep standing on it needs', () =
     const footprint = game.castleTypes[id].footprint;
     assert.ok(footprint >= keep.radius, `${id} claims ${footprint} for a keep of ${keep.radius.toFixed(1)}`);
     assert.ok(footprint < keep.radius * 1.6, `${id} claims ${footprint}, far more than the keep needs`);
+  }
+});
+
+// --- walls that are climbed rather than broken --------------------------
+
+/** A closed ring the raider cannot simply walk around. */
+function ringedGame(level) {
+  let state = 7;
+  const random = () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+  const game = new Game({ random, level });
+  game.tokens = 1000000;
+  ring(game, 90, 10);
+  return game;
+}
+
+/** Send one raider at the city from outside, and report how it fared. */
+function stormTheCity(game, seconds = 240) {
+  game.raiders.length = 0;
+  game.spawnRaider();
+  const raider = game.raiders[0];
+  raider.position.x = 200;
+  raider.position.y = 0;
+  raider.aimAt(game.castles[0].position);
+  const full = raider.type.maxHealth;
+  const wallHealthBefore = game.walls.reduce((total, wall) => total + wall.health, 0);
+
+  let frames = 0;
+  let mostAstride = 0;
+  while (frames < 60 * seconds && game.raiders[0]
+    && Math.hypot(raider.position.x, raider.position.y) > 40) {
+    game.step();
+    frames += 1;
+    mostAstride = Math.max(mostAstride, raider.crossing);
+  }
+  return {
+    arrived: Boolean(game.raiders[0]) && frames < 60 * seconds,
+    seconds: frames / 60,
+    healthLeft: raider.isAlive ? raider.health / full : 0,
+    mostAstride,
+    wallWear: wallHealthBefore - game.walls.reduce((total, wall) => total + wall.health, 0),
+    wallsStanding: game.walls.length,
+  };
+}
+
+test('the island builds three times the stone, and nowhere else does', () => {
+  assert.equal(ISLAND.wall.healthScale, 3);
+  const onTheIsland = island(1000000);
+  const plain = new Game({ random: () => 0.5, level: LEVELS[0] });
+  plain.tokens = 1000000;
+  const islandWall = onTheIsland.buildWall({ x: 70, y: -45 }, { x: 70, y: 45 }).wall;
+  const plainWall = plain.buildWall({ x: 70, y: -45 }, { x: 70, y: 45 }).wall;
+
+  assert.equal(islandWall.maxHealth, plainWall.maxHealth * 3);
+  assert.equal(islandWall.health, islandWall.maxHealth * WALL.initialFraction);
+
+  // Fortifying still multiplies on top of it rather than replacing it.
+  islandWall.finish();
+  plainWall.finish();
+  assert.equal(islandWall.health, islandWall.maxHealth);
+  assert.equal(islandWall.maxHealth / plainWall.maxHealth, 3);
+});
+
+test('a raider gets over an island wall, slower and bloodied', () => {
+  const open = island(1000000);
+  const clear = stormTheCity(open);
+  assert.equal(clear.arrived, true, 'with no wall it should walk straight in');
+  assert.equal(clear.healthLeft, 1, 'and arrive untouched');
+
+  const ringed = stormTheCity(ringedGame(ISLAND));
+  assert.equal(ringed.arrived, true, 'a wall should not deny the ground outright');
+  assert.ok(ringed.seconds > clear.seconds + 5,
+    `crossing should cost real time, it cost ${(ringed.seconds - clear.seconds).toFixed(1)}s`);
+  assert.ok(ringed.mostAstride > 0.9, 'the raider should actually get up on the stone');
+  assert.ok(
+    Math.abs(ringed.healthLeft - (1 - ISLAND.wall.climb.healthCost)) < 0.01,
+    `expected ${ISLAND.wall.climb.healthCost} of its strength gone, ${(1 - ringed.healthLeft).toFixed(2)} was`,
+  );
+});
+
+test('the wall wears from being climbed, but is not broken doing it', () => {
+  const ringed = stormTheCity(ringedGame(ISLAND));
+  assert.ok(ringed.wallWear > 0, 'going over should wear the stone');
+  assert.equal(ringed.wallsStanding, 10, 'but one raider should not bring a section down');
+});
+
+test('everywhere else a wall still stops a raider dead', () => {
+  const ringed = stormTheCity(ringedGame(LEVELS[0]));
+  assert.equal(ringed.arrived, false, 'a plain wall should still be a barrier');
+  assert.equal(ringed.mostAstride, 0, 'and nothing should climb it');
+});
+
+test('the climb is charged once, whatever kind of company makes it', async () => {
+  const { Raider } = await import('../src/entities.js');
+  const { RAIDER_TYPES } = await import('../src/config.js');
+
+  for (const typeId of Object.keys(RAIDER_TYPES)) {
+    const game = island(1000000);
+    game.buildWall({ x: 120, y: -120 }, { x: 120, y: 120 }).wall.finish();
+    game.raiders.length = 0;
+    const raider = new Raider(typeId, { x: 200, y: 0 });
+    raider.aimAt(game.castles[0].position);
+    game.raiders.push(raider);
+
+    let charges = 0;
+    let wasClimbing = false;
+    let frames = 0;
+    while (frames < 60 * 150 && raider.isAlive && raider.position.x > 70) {
+      game.step();
+      frames += 1;
+      if (raider.climbing && !wasClimbing) {
+        charges += 1;
+      }
+      wasClimbing = raider.climbing;
+    }
+    assert.ok(raider.isAlive, `${typeId} died on the wall`);
+    assert.equal(charges, 1, `${typeId} was charged ${charges} times for one crossing`);
+    assert.ok(
+      Math.abs(raider.health / raider.type.maxHealth - (1 - ISLAND.wall.climb.healthCost)) < 0.01,
+      `${typeId} paid ${(1 - raider.health / raider.type.maxHealth).toFixed(2)} of its strength`,
+    );
   }
 });

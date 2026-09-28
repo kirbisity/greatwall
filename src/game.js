@@ -49,6 +49,15 @@ const WALL_HINT_SECONDS = 20;
 const UPGRADE_HINT_SECONDS = 40;
 
 /** Random offset that lands outside the safe radius around the castle. */
+/** How quickly a company settles into or out of climbing a wall. */
+const CROSSING_EASE = 0.08;
+
+// How far astride a wall counts as being up on it, and how far clear of one
+// counts as being down again, so a company is charged once for a crossing
+// rather than flickering on the boundary.
+const CLIMB_CHARGED_AT = 0.5;
+const CLIMB_CLEAR_AT = 0.15;
+
 /** How far along a beach raiders spread either side of the boat. */
 const LANDING_SPREAD = 26;
 
@@ -90,6 +99,11 @@ export class Game {
     // A level may raise its own buildings and field its own companies; what
     // it leaves out it inherits (see levels.js).
     this.buildings = { ...BUILDINGS, ...level.buildings };
+    // How sturdy this level's stone is, and what it costs a raider to go
+    // over a section rather than round it (null where walls simply stop
+    // them, which is everywhere else).
+    this.wallHealthScale = level.wall?.healthScale ?? 1;
+    this.wallClimb = level.wall?.climb ?? null;
     // Merged tier by tier, so a level says only what is different about its
     // castles and keeps the costs, health and upgrade chain as they are.
     this.castleTypes = Object.fromEntries(
@@ -444,7 +458,11 @@ export class Game {
       // Runs down whatever siege it has sworn to; at zero it may think again.
       raider.siegeSeconds = Math.max(0, raider.siegeSeconds - 1 / FPS);
       steerCompany(raider, navigation, this.random);
+      if (this.wallClimb) {
+        this.updateCrossing(navigation, raider, this.wallClimb.reach);
+      }
       this.advanceAgainstWalls(navigation, raider);
+      this.chargeWallClimb(raider);
       this.resolveWallContact(navigation, raider);
       if (raider.isAlive && target) {
         this.resolveCastleContact(raider, target);
@@ -579,20 +597,18 @@ export class Game {
   }
 
   /**
-   * Imperial companies go through walls rather than round them. They hold
-   * their formation doing it, but squeezing over the stone slows them; clear
-   * of the wall they pick their pace back up.
+   * How far astride a wall a company is, from 0 in the clear to 1 on top of
+   * the stone. Imperial companies always cross rather than going round, and
+   * on a level with climbable walls so do raiders.
    */
-  updateCrossing(navigation, guard) {
+  updateCrossing(navigation, company, reach = WALL.crossDistance) {
     let nearest = Infinity;
-    for (const wall of wallsNear(navigation.grid, guard.position, IMPERIAL.crossDistance)) {
-      nearest = Math.min(nearest, pointToLineDistance(guard.position, wall.start, wall.end));
+    for (const wall of wallsNear(navigation.grid, company.position, reach)) {
+      nearest = Math.min(nearest, pointToLineDistance(company.position, wall.start, wall.end));
     }
-    const target = nearest >= IMPERIAL.crossDistance
-      ? 0
-      : 1 - nearest / IMPERIAL.crossDistance;
+    const target = nearest >= reach ? 0 : 1 - nearest / reach;
     // Ease, so the ranks flow into line instead of snapping into it.
-    guard.crossing += (target - guard.crossing) * 0.08;
+    company.crossing += (target - company.crossing) * CROSSING_EASE;
   }
 
   moveGuards() {
@@ -629,6 +645,14 @@ export class Game {
    */
   advanceAgainstWalls(navigation, raider) {
     const pace = this.paceOn(raider.position);
+    const climb = this.wallClimb;
+    // A wall that can be climbed never stops a step; it only makes the step
+    // slow, the same way imperial companies pick their way over stone.
+    if (climb) {
+      const squeeze = 1 - raider.crossing * (1 - climb.speed);
+      raider.advance(squeeze * pace / FPS);
+      return;
+    }
     if (!raider.avoidsWalls) {
       raider.advance(pace / FPS);
       return;
@@ -658,15 +682,56 @@ export class Game {
     }
   }
 
+  /**
+   * What getting up on a wall costs a raider in blood; the slowing is
+   * applied as it moves (see advanceAgainstWalls). Between them the wall is
+   * not denying the ground, it is charging for it, so a company always gets
+   * across in the end.
+   *
+   * Charged once per crossing, as a share of the company's own strength.
+   * Bleeding it per second instead -- which is what this did first -- made
+   * the price depend on how long a company happened to be up there, and
+   * measured, that ran from four seconds for cavalry to forty-seven for
+   * infantry. The same wall would have been a scratch to one and certain
+   * death to the other.
+   */
+  chargeWallClimb(raider) {
+    const climb = this.wallClimb;
+    if (!climb) {
+      return;
+    }
+    if (raider.crossing < CLIMB_CHARGED_AT) {
+      if (raider.crossing < CLIMB_CLEAR_AT) {
+        raider.climbing = false;
+      }
+      return;
+    }
+    if (raider.climbing) {
+      return;
+    }
+    raider.climbing = true;
+    // Straight off its health: the stone is not an attacker, and armour is
+    // no help scrambling over it.
+    raider.health -= raider.type.maxHealth * climb.healthCost;
+  }
+
   resolveWallContact(navigation, raider) {
+    // Where walls are climbed rather than broken, a company pays once for
+    // the crossing (see chargeWallClimb) instead of trading blows with the
+    // stone the whole way over -- which, measured, killed every company that
+    // tried it. The wall still takes the wear, which is why it is built
+    // three times as strong there.
+    const tradesBlows = this.wallClimb === null;
     const reachMargin = WALL.reachMargin;
     for (const wall of wallsNear(navigation.grid, raider.position, raider.type.range + reachMargin)) {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
         wall.takeHit(raider.type.attack);
-        raider.takeHit(WALL.attack);
-        if (!raider.isAlive) {
-          return;
+        if (tradesBlows) {
+          raider.takeHit(WALL.attack);
+          if (!raider.isAlive) {
+            return;
+          }
         }
       }
     }
@@ -952,7 +1017,7 @@ export class Game {
     if (this.nodeDegree(start) >= WALL.maxEdgesPerNode || this.nodeDegree(end) >= WALL.maxEdgesPerNode) {
       return { status: 'crowded', start, end };
     }
-    const wall = new Wall(start, end, WALL.initialFraction, WALL.planSeconds);
+    const wall = new Wall(start, end, WALL.initialFraction, WALL.planSeconds, this.wallHealthScale);
     if (wall.length <= 1) {
       return { status: 'short', start, end };
     }

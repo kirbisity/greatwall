@@ -88,6 +88,9 @@ export const WALL = {
   // A junction may not gather more than this many sections. Past it, a
   // build attempt is simply refused — see Game#buildWall.
   maxEdgesPerNode: 3,
+  // How near a section counts as being astride it, for anything that climbs
+  // over rather than going round.
+  crossDistance: 34,
 };
 
 /* ==========================================================================
@@ -182,9 +185,8 @@ export const IMPERIAL = {
   returnRadius: 170,
 
   // Imperial companies walk through walls rather than round them, holding
-  // their formation, but they pick their way over the stone: within
-  // `crossDistance` of a section they slow to `crossSpeed` of their pace.
-  crossDistance: 34,
+  // their formation, but they pick their way over the stone: astride a
+  // section (see WALL.crossDistance) they slow to this much of their pace.
   crossSpeed: 0.45,
 };
 

@@ -505,3 +505,31 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 @media (pointer: coarse) { .mouseOnly { display: none !important; } }
 @media (pointer: fine) { .touchOnly { display: none !important; } }
 
+/* Phones on their side, where height is what is short. Measured at 844x390
+   the bars left only 56% of the screen as clear map, so the dock stands down
+   the left edge instead of across the bottom and the top bar slims. Every
+   control keeps a target at least 44px tall. */
+@media (max-height: 500px) and (orientation: landscape) {
+	#topMenu {
+		gap: 12px;
+		height: calc(48px + env(safe-area-inset-top));
+		padding: env(safe-area-inset-top) calc(10px + env(safe-area-inset-right)) 0 calc(10px + env(safe-area-inset-left));
+	}
+	.iconButton { width: 40px; height: 40px; }
+	.readout-value { font-size: 16px; }
+	.readout-season .readout-value { font-size: 15px; }
+	.readout-formula { display: none; }
+
+	.toolDock {
+		flex-direction: column;
+		top: calc(54px + env(safe-area-inset-top));
+		bottom: auto;
+		left: calc(6px + env(safe-area-inset-left));
+		gap: 3px;
+		padding: 4px;
+	}
+	.toolButton { width: 60px; min-height: 44px; padding: 6px 0 5px; gap: 2px; }
+	.toolButton img { width: 20px; height: 20px; }
+	.toolName { font-size: 9px; letter-spacing: .06em; }
+}
+

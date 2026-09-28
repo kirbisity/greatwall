@@ -193,7 +193,14 @@ export class Input {
     if (!castle || options.length === 0) {
       return;
     }
-    const screen = this.camera.toScreen({ ...castle.position, z: 0 })
+    // Over the roof, where the castle actually stands. At sea level the
+    // picker landed on top of a keep standing up a hill.
+    const { x, y } = castle.position;
+    const definition = this.game.buildings?.[castle.typeId];
+    const roof = definition && this.renderer.structureFor
+      ? this.renderer.structureFor(definition).height
+      : 0;
+    const screen = this.camera.toScreen({ x, y, z: this.groundHeight(x, y) + roof })
       ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
     this.hud.showDispatchMenu(options, screen, (typeId) => {
       this.selectedGuardType = typeId;

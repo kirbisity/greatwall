@@ -16,6 +16,30 @@ const TOOL_BUTTONS = {
   attack: 'attackTool',
 };
 
+/**
+ * How far to shift a box so it sits inside the view: clear of the screen's
+ * edges by `margin`, and below the top bar rather than under it.
+ *
+ * The start edge wins where the box is too wide to fit, since that is where
+ * the first option sits. Measured on a phone before this existed, the tier
+ * picker ran 110px off the left edge whenever the castle was near it, and
+ * the cheapest company could not be picked at all.
+ */
+export function clampIntoView(box, view, margin) {
+  let dx = 0;
+  if (box.right > view.width - margin) {
+    dx = view.width - margin - box.right;
+  }
+  if (box.left + dx < margin) {
+    dx = margin - box.left;
+  }
+  const dy = box.top < view.top + margin ? view.top + margin - box.top : 0;
+  return { dx, dy };
+}
+
+// How far the tier picker keeps from the edges of the screen.
+const MENU_MARGIN = 8;
+
 function element(id) {
   const node = document.getElementById(id);
   if (!node) {
@@ -188,8 +212,6 @@ export class Hud {
    */
   showDispatchMenu(options, screen, onPick) {
     this.dispatchMenu.style.display = 'flex';
-    this.dispatchMenu.style.left = `${Math.round(screen.x)}px`;
-    this.dispatchMenu.style.top = `${Math.round(screen.y)}px`;
     this.dispatchButtons.forEach((button, index) => {
       const option = options[index];
       if (!option) {
@@ -204,6 +226,27 @@ export class Hud {
         onPick(option.id);
       };
     });
+    // Placed once its buttons are filled in, so its size is known and it can
+    // be kept on the screen.
+    this.placeOnScreen(this.dispatchMenu, screen);
+  }
+
+  /** Put an element at a screen point, then slide it back inside the view. */
+  placeOnScreen(node, screen) {
+    node.style.left = `${Math.round(screen.x)}px`;
+    node.style.top = `${Math.round(screen.y)}px`;
+    if (typeof node.getBoundingClientRect !== 'function') {
+      return;
+    }
+    const topBar = document.getElementById('topMenu');
+    const view = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      top: topBar?.getBoundingClientRect ? topBar.getBoundingClientRect().bottom : 0,
+    };
+    const { dx, dy } = clampIntoView(node.getBoundingClientRect(), view, MENU_MARGIN);
+    node.style.left = `${Math.round(screen.x + dx)}px`;
+    node.style.top = `${Math.round(screen.y + dy)}px`;
   }
 
   hideDispatchMenu() {

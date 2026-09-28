@@ -327,3 +327,20 @@ test('two fingers panning hold the ground as well', () => {
   input.handlePointerMove(finger(1, 240, 300));
   assert.ok(calls.pan.length > 0 && calls.pan.every((call) => call.direct));
 });
+
+test('the tier picker hangs over the roof, not the ground at sea level', () => {
+  const asked = [];
+  const { input } = makeInput({
+    game: {
+      castles: [{ position: { x: 5, y: 7 }, typeId: 'CC0' }],
+      buildings: { CC0: { name: 'keep' } },
+      dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }],
+      terrain: { heightAt: () => 40 },
+    },
+  });
+  input.renderer.structureFor = () => ({ height: 16 });
+  input.camera.toScreen = (point) => { asked.push(point); return { x: 100, y: 100 }; };
+  input.hud.showDispatchMenu = () => {};
+  input.selectTool('attack');
+  assert.deepEqual(asked[0], { x: 5, y: 7, z: 56 }, 'ground 40 up the hill plus a roof 16 high');
+});

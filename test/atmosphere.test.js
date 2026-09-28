@@ -336,7 +336,9 @@ test('no snow falls outside winter\'s own reach', () => {
 test('snow gathers at winter, thickening gradually rather than all at once', () => {
   const atmosphere = new Atmosphere(camera(), { random: spread() });
   const deepWinter = atmosphere.placeSnow(3.5);
-  const approaching = atmosphere.placeSnow(3);
+  // Close enough to winter's own midpoint (3.5) for the temperature to have
+  // already dipped below freezing, but short of it -- see Season#snowCoverAt.
+  const approaching = atmosphere.placeSnow(3.3);
   assert.ok(deepWinter.length > 0, 'expected snow at winter\'s own midpoint');
   assert.ok(approaching.length > 0, 'expected snow already falling on the approach to winter');
   const totalAlpha = (flakes) => flakes.reduce((sum, flake) => sum + flake.alpha, 0);

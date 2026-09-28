@@ -231,6 +231,27 @@ test('switching levels repaints the ground even when the camera has not moved', 
     'expected switching to a different level, and its Terrain, to repaint even though the camera did not move');
 });
 
+test('winter settling in repaints the ground, the same as autumn turning does', () => {
+  const { renderer, calls } = groundRenderer();
+  const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river);
+  const at = (seasonPhase) => ({
+    level: LEVELS[0], terrain: mainland, seasonPhase, terrainRevision: 0,
+    treesWithin: (minX, minY, maxX, maxY) => mainland.treesWithin(minX, minY, maxX, maxY),
+  });
+
+  // Summer's own midpoint (1.5) and winter's (3.5) share the same
+  // groundGold (0, see config.js's SEASONS) -- picked deliberately so the
+  // only thing that can force a repaint between them is snow cover's own
+  // step in the key, not the gold one already there.
+  renderer.drawGround(at(1.5)); // deep summer: no snow cover at all
+  const summerPaint = calls.fillRect;
+  assert.ok(summerPaint > 0, 'expected the first call to actually paint something');
+
+  renderer.drawGround(at(3.5)); // winter's own midpoint: full snow cover
+  assert.ok(calls.fillRect > summerPaint,
+    'expected winter\'s own snow cover to repaint the ground even though the camera did not move');
+});
+
 // --- shadows on standing buildings ----------------------------------------
 
 function houseDefinition() {

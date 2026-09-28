@@ -531,6 +531,14 @@ export const TERRAIN = {
   autumnPatchScale: 55,
   autumnPatchThreshold: 0.45,
   autumnGold: '#c98f2c',
+  // Winter settles the ground white the same uneven way -- see
+  // Terrain#snowPatchAt/groundTintAt and Season#snowCoverAt for how far
+  // through a hard winter the year has got. A finer scale than autumn's
+  // own patches, since a snow drift reads smaller than a whole stand of
+  // wood turning.
+  snowPatchScale: 34,
+  snowPatchThreshold: 0.4,
+  snowColor: '#eef2f5',
 };
 
 // Each season's own haze colour, how much it thickens the fog (1 is the
@@ -548,27 +556,32 @@ export const TERRAIN = {
 // its real order rather than needing a second mapping to say so. See
 // game.js's AUTUMN/WINTER constants, and SEASON_MESSAGES, which are
 // positional against this same order.
+// `temperature` is a plain, level-agnostic reading for the year -- how a
+// season blends is what everything downstream (snowfall, a winter's own
+// settling on the ground) actually reads, not the number here on its own.
+// See Season#snowCoverAt, and a level's own `climate` in levels.js for how
+// one place can simply run warmer than the season alone says.
 export const SEASONS = [
   {
     name: 'Spring',
     haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1,
-    tint: '168, 222, 168', tintStrength: 0, groundGold: 0,
+    tint: '168, 222, 168', tintStrength: 0, groundGold: 0, temperature: 12,
   },
   {
     name: 'Summer',
     haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1,
-    tint: '255, 132, 40', tintStrength: 0.16, groundGold: 0,
+    tint: '255, 132, 40', tintStrength: 0.16, groundGold: 0, temperature: 26,
   },
   {
     name: 'Autumn',
     haze: '214, 194, 146', hazeDensity: 1, cloudBoost: 1,
-    tint: '226, 150, 62', tintStrength: 0, groundGold: 1,
+    tint: '226, 150, 62', tintStrength: 0, groundGold: 1, temperature: 9,
   },
   {
     name: 'Winter',
     // Snow coming: the thickest haze of the year, and the most cloud.
     haze: '236, 239, 241', hazeDensity: 3.2, cloudBoost: 1.9,
-    tint: '198, 216, 236', tintStrength: 0, groundGold: 0,
+    tint: '198, 216, 236', tintStrength: 0, groundGold: 0, temperature: -8,
   },
 ];
 

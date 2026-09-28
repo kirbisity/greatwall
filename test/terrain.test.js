@@ -372,6 +372,64 @@ test('groundTintAt fills an array it is handed rather than making one', () => {
   assert.deepEqual(scratch, terrain.groundTintAt(120, -80));
 });
 
+// --- a winter's own settling -----------------------------------------------
+
+test('with no snow cover at all, the ground reads exactly as it always did', () => {
+  const terrain = new Terrain(1);
+  for (let x = -300; x < 300; x += 41) {
+    assert.deepEqual(terrain.groundTintAt(x, x * 0.7, [0, 0, 0], 0, 0), terrain.groundTintAt(x, x * 0.7));
+  }
+});
+
+test('full snow cover reads brighter than the same ground bare', () => {
+  const terrain = new Terrain(1);
+  let bareSum = 0;
+  let snowedSum = 0;
+  for (let x = -300; x < 300; x += 23) {
+    for (let y = -300; y < 300; y += 23) {
+      const bare = terrain.groundTintAt(x, y, [0, 0, 0], 0, 0);
+      const snowed = terrain.groundTintAt(x, y, [0, 0, 0], 0, 1);
+      bareSum += bare[0] + bare[1] + bare[2];
+      snowedSum += snowed[0] + snowed[1] + snowed[2];
+    }
+  }
+  assert.ok(snowedSum > bareSum, `expected full winter cover to brighten the ground, got ${snowedSum} vs ${bareSum}`);
+});
+
+test('snow settles in patches, not an even wash across every point', () => {
+  const terrain = new Terrain(1);
+  const seen = new Set();
+  for (let x = -300; x < 300; x += 17) {
+    for (let y = -300; y < 300; y += 17) {
+      seen.add(terrain.groundTintAt(x, y, [0, 0, 0], 0, 1).join(','));
+    }
+  }
+  assert.ok(seen.size > 1, 'expected more than one resulting colour under full cover');
+});
+
+test('snow reaches a mountain\'s own rock, unlike a pond\'s field or a beach', () => {
+  const terrain = new Terrain(1);
+  const [mountain] = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
+  // Not every point on the peak is snowed -- snowPatchAt still gates it --
+  // but somewhere on a peak this size should catch some.
+  let anySnowed = false;
+  for (let dx = -mountain.radius; dx <= mountain.radius && !anySnowed; dx += 10) {
+    for (let dy = -mountain.radius; dy <= mountain.radius && !anySnowed; dy += 10) {
+      const x = mountain.x + dx;
+      const y = mountain.y + dy;
+      if (!terrain.isMountainSlope(x, y)) {
+        continue;
+      }
+      const bare = terrain.groundTintAt(x, y, [0, 0, 0], 0, 0);
+      const snowed = terrain.groundTintAt(x, y, [0, 0, 0], 0, 1);
+      if (snowed[0] + snowed[1] + snowed[2] > bare[0] + bare[1] + bare[2]) {
+        anySnowed = true;
+      }
+    }
+  }
+  assert.ok(anySnowed, 'expected at least one point on the peak\'s own rock to catch snow');
+});
+
 test('the mountain cache answers the same as working it out afresh', () => {
   const cached = new Terrain(1);
   for (let x = -900; x < 900; x += 97) {

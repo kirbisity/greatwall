@@ -29,7 +29,27 @@ export function seasonBlend(phase) {
     tint: mixChannels(from.tint, to.tint, t),
     tintStrength: mix(from.tintStrength, to.tintStrength, t),
     groundGold: mix(from.groundGold, to.groundGold, t),
+    temperature: mix(from.temperature, to.temperature, t),
   };
+}
+
+// Where snow starts, and how many degrees further it takes to reach a full
+// snowfall -- one curve driving both the flakes that fall and the ground
+// they settle on, so the two always agree about how wintry it reads.
+const FREEZING_POINT = 0;
+const SNOW_TEMPERATURE_RANGE = 6;
+
+/**
+ * How wintry this moment reads, 0 well above freezing to 1 deep in a hard
+ * frost. `climate` is a level's own offset off the season's shared
+ * temperature (see levels.js) -- a desert runs warmer than the calendar
+ * alone says, without the snow itself needing to know why. Continuous
+ * across the year the same way seasonBlend's own fields are, so a winter
+ * settles in and lifts again gradually rather than switching on.
+ */
+export function snowCoverAt(phase, climate = null) {
+  const temperature = seasonBlend(phase).temperature + (climate?.offset ?? 0);
+  return Math.max(0, Math.min(1, (FREEZING_POINT - temperature) / SNOW_TEMPERATURE_RANGE));
 }
 
 function mix(from, to, t) {

@@ -17,7 +17,7 @@ import {
   SNOW_MIN_SIZE,
 } from './config.js';
 import { groundAt, projectPoint } from './projection.js';
-import { mixChannels, seasonBlend } from './season.js';
+import { mixChannels, seasonBlend, snowCoverAt } from './season.js';
 
 /** Positive remainder, so wrapping works for negative offsets too. */
 function wrap(value, span) {
@@ -240,10 +240,14 @@ export class Atmosphere {
    * scene. Falling is a fourth, vertical wrap on top of the horizontal two,
    * between SNOW_ALTITUDE_TOP and _BOTTOM rather than across the whole
    * height of the world.
+   *
+   * How much falls at all is read off the same temperature the ground's
+   * own settling is (see Season#snowCoverAt): a level's own `climate` can
+   * hold this at zero the whole year round, which is how the Dust Sea
+   * never sees a flake regardless of how the calendar reads.
    */
-  placeSnow(seasonPhase = 0) {
-    const { cloudBoost } = seasonBlend(seasonPhase);
-    const snowfall = Math.max(0, (cloudBoost - 1) / (MAX_CLOUD_BOOST - 1));
+  placeSnow(seasonPhase = 0, climate = null) {
+    const snowfall = snowCoverAt(seasonPhase, climate);
     if (snowfall <= 0) {
       return [];
     }
@@ -273,8 +277,8 @@ export class Atmosphere {
     return placed;
   }
 
-  drawSnow(context, seasonPhase = 0) {
-    for (const flake of this.placeSnow(seasonPhase)) {
+  drawSnow(context, seasonPhase = 0, climate = null) {
+    for (const flake of this.placeSnow(seasonPhase, climate)) {
       context.globalAlpha = flake.alpha;
       context.fillStyle = '#ffffff';
       context.beginPath();

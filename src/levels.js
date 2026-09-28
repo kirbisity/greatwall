@@ -113,6 +113,12 @@ export const LEVELS = [
     mist: {
       color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, windSpeed: 4, floor: 0.55,
     },
+    // A desert runs warmer than the calendar alone says -- see
+    // Season#snowCoverAt -- so even winter's own coldest night never
+    // actually reaches freezing here. No snow falls, and no patch of
+    // ground ever turns white, without either needing to know this is a
+    // desert specifically; they only ever read the temperature.
+    climate: { offset: 20 },
   },
   {
     id: 'shiro-island',

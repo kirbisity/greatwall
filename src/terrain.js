@@ -54,6 +54,7 @@ function bandsFor(land) {
     pond: hexChannels(land.pondColor),
     pondBank: hexChannels(land.pondBankColor),
     oasis: hexChannels(land.oasisColor),
+    snow: hexChannels(land.snowColor),
   };
 }
 
@@ -689,9 +690,12 @@ export class Terrain {
    * `gold` is how far through autumn the year has got (see season.js). It
    * only takes the green bands, and only where its own patch noise runs
    * high, so the turn comes on in drifts across the map rather than
-   * everywhere at once.
+   * everywhere at once. `snowCover` is the same idea for a hard winter --
+   * see Season#snowCoverAt -- but reaches every band, mountain rock
+   * included, since a real peak catches the first snow of the year rather
+   * than standing bare while the ground around it turns white.
    */
-  groundTintAt(x, y, into = [0, 0, 0], gold = 0) {
+  groundTintAt(x, y, into = [0, 0, 0], gold = 0, snowCover = 0) {
     // A pond is its own small body of water, checked ahead of a level's
     // river or sea since the two never mean to overlap but nothing stops a
     // level carrying both at once.
@@ -745,6 +749,15 @@ export class Terrain {
       green += (sand[1] - green) * beach;
       blue += (sand[2] - blue) * beach;
     }
+    // Snow settles last, over whatever the ground already shows -- see the
+    // docstring above for why a mountain's rock does not sit this out.
+    const snow = snowCover > 0 ? snowCover * this.snowPatchAt(x, y) : 0;
+    if (snow > 0) {
+      const white = this.bands.snow;
+      red += (white[0] - red) * snow;
+      green += (white[1] - green) * snow;
+      blue += (white[2] - blue) * snow;
+    }
     into[0] = toChannel(red);
     into[1] = toChannel(green);
     into[2] = toChannel(blue);
@@ -776,6 +789,20 @@ export class Terrain {
       return 0;
     }
     return (patch - this.land.autumnPatchThreshold) / (1 - this.land.autumnPatchThreshold);
+  }
+
+  /**
+   * How readily this patch settles white in winter, 0 to 1 -- picked by its
+   * own noise the same way autumn's gold is, so snow gathers in drifts
+   * rather than an even wash, and on its own patch of ground independent
+   * of wherever autumn's own gold happened to catch.
+   */
+  snowPatchAt(x, y) {
+    const patch = valueNoise(x / this.land.snowPatchScale, y / this.land.snowPatchScale, this.seed + 941);
+    if (patch <= this.land.snowPatchThreshold) {
+      return 0;
+    }
+    return (patch - this.land.snowPatchThreshold) / (1 - this.land.snowPatchThreshold);
   }
 
   /** How thick the woodland is here, 0 to 1. */

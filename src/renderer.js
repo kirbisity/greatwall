@@ -25,7 +25,7 @@ import {
   projectPoint,
 } from './projection.js';
 import { Atmosphere } from './atmosphere.js';
-import { seasonBlend, seasonalColorMix } from './season.js';
+import { seasonBlend, seasonalColorMix, snowCoverAt } from './season.js';
 import { settings } from './settings.js';
 import { compileStructure } from './structures.js';
 import { compileUnit } from './units.js';
@@ -587,7 +587,7 @@ export class Renderer {
       this.drawShimmer(view, game);
       this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.level.mist);
       this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawSnow(this.overlay, game.seasonPhase);
+      this.atmosphere.drawSnow(this.overlay, game.seasonPhase, game.level.climate);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
@@ -627,13 +627,18 @@ export class Renderer {
     // the eye catches over the minute it takes.
     const gold = seasonBlend(game.seasonPhase).groundGold;
     const turned = Math.round(gold * GOLD_STEPS) / GOLD_STEPS;
+    // A winter's own settling, quantised the same coarse way autumn's turn
+    // already is -- see Season#snowCoverAt for how a level's own climate
+    // can hold this at zero the whole year round.
+    const snowCover = snowCoverAt(game.seasonPhase, game.level.climate);
+    const settled = Math.round(snowCover * GOLD_STEPS) / GOLD_STEPS;
     // Reshaped ground is part of what the mesh draws, so a platform climbing
     // has to count as a change the same way the camera moving does. The
     // level's own id is part of the key too: switching levels swaps in a
     // whole new Terrain, and without the id here that swap can go
     // unnoticed if the camera happens to end up back where it started,
     // leaving the previous level's ground painted under the new one.
-    const key = `${game.level.id}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${game.terrainRevision}`;
+    const key = `${game.level.id}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${settled}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -652,9 +657,11 @@ export class Renderer {
 
     // The coarse backdrop first, so the fine mesh paints over it wherever
     // it actually matters.
-    this.drawLandscape(game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE, turned);
+    this.drawLandscape(
+      game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE, turned, snowCover,
+    );
     const bounds = this.groundBounds(GROUND_SPAN);
-    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize, turned);
+    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize, turned, snowCover);
     // Where the water's own glint can stand, sampled once here rather than
     // searched for every frame -- see sampleShimmerPoints/drawShimmer.
     this.shimmerPoints = this.sampleShimmerPoints(game.terrain, bounds);
@@ -753,7 +760,7 @@ export class Renderer {
    * times. The corners are walked once here instead and the tiles read back
    * from that, which is where nearly all of this pass's cost went.
    */
-  drawLandscape(terrain, bounds, cell, gold = 0) {
+  drawLandscape(terrain, bounds, cell, gold = 0, snowCover = 0) {
     const context = this.ground;
     const view = this.camera.view;
     const { width, height } = this.camera;
@@ -829,7 +836,7 @@ export class Renderer {
           MIN_GROUND_LIGHT,
           lightingForVector(normalX / length, normalY / length, 1 / length),
         );
-        terrain.groundTintAt(xs[i], ys[j], tint, gold);
+        terrain.groundTintAt(xs[i], ys[j], tint, gold, snowCover);
         const red = Math.round(tint[0] * light);
         const green = Math.round(tint[1] * light);
         const blue = Math.round(tint[2] * light);

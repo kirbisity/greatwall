@@ -9,6 +9,10 @@ export const PIXELS_PER_WORLD_UNIT = 50;
  */
 export const CAMERA = {
   focalLength: 900,
+  // The screen's short side at and above which the focal length applies in
+  // full. Below it the lens widens in proportion -- see focalFor -- so a
+  // phone is not left looking at the world through a keyhole.
+  focalReferenceSide: 720,
   initialDistance: 180,
   minDistance: 110,
   // Ground tiles are a fixed world size (TERRAIN.cellSize) drawn across the

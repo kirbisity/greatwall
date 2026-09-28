@@ -343,3 +343,38 @@ test('lightingForVector matches lightingFor for the same normal', () => {
   const normal = normalOf({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0.3 }, { x: 0, y: 1, z: -0.2 });
   assert.equal(lightingForVector(normal.x, normal.y, normal.z), lightingFor(normal));
 });
+
+// --- screens of every size ----------------------------------------------
+
+/** How much ground a screen of this size shows across its middle. */
+function groundAcross(width, height) {
+  const v = createView({
+    focus: { x: 0, y: 0 },
+    distance: CAMERA.initialDistance,
+    elevation: CAMERA.initialElevation,
+    width,
+    height,
+  });
+  return groundAt(v, width, height / 2).x - groundAt(v, 0, height / 2).x;
+}
+
+test('a phone held upright sees a fair share of the ground, not a keyhole', () => {
+  const desktop = groundAcross(1512, 807);
+  const phone = groundAcross(375, 667);
+  // With a focal length fixed in pixels it saw a quarter as much.
+  assert.ok(phone > desktop * 0.45, `a phone saw ${phone.toFixed(0)} across against ${desktop.toFixed(0)}`);
+});
+
+test('a phone on its side sees about what a desktop does', () => {
+  const desktop = groundAcross(1512, 807);
+  const sideways = groundAcross(844, 390);
+  assert.ok(Math.abs(sideways - desktop) / desktop < 0.2,
+    `sideways saw ${sideways.toFixed(0)} across against ${desktop.toFixed(0)}`);
+});
+
+test('screens a laptop size and up are left exactly as they were', () => {
+  for (const [width, height] of [[1280, 720], [1512, 807], [1920, 1080], [2560, 1440]]) {
+    const v = createView({ focus: { x: 0, y: 0 }, distance: 200, elevation: 45, width, height });
+    assert.equal(v.focal, CAMERA.focalLength, `${width}x${height} should not have changed`);
+  }
+});

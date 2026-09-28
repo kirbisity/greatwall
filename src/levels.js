@@ -141,13 +141,13 @@ export const LEVELS = [
       // The rise the whole level is built around: the keep stands on its
       // summit and the walls climb it. `spurs` is how far its reach wanders
       // with the direction and `grain` how rough its surface is, which is
-      // what keeps it from reading as a dome -- widened a little further so
-      // the flanks read as terraced ground, not a bald mound with texture
-      // painted on.
+      // what keeps it from reading as a dome. Cut back to a real hill
+      // rather than the small mountain it had grown into -- the castle's
+      // own footprint is a fraction of this reach even now.
       hill: {
-        radius: 150,
-        height: 50,
-        spurs: 34,
+        radius: 115,
+        height: 36,
+        spurs: 26,
         spurScale: 2.4,
         grain: 10,
         grainScale: 55,
@@ -184,10 +184,15 @@ export const LEVELS = [
       // A real strip of sand inland of the shore, the same bank colour as
       // the wet side fading in from the waterline, so the two meet without
       // a seam rather than the coast cutting straight from surf to turf --
-      // see Terrain#beachAt.
+      // see Terrain#beachAt. Dipped a little below the grass above it too,
+      // so the beach reads as its own shelf rather than sharing the
+      // grassland's own level.
       beachWidth: 55,
-      // Over what distance the water deepens past the beach, and by how much.
-      shelf: 170,
+      beachDip: 8,
+      // Over what distance the water deepens past the beach, and by how
+      // much -- narrow, so the open sea reads as a clear colour past the
+      // shallows rather than the two blurring into one long fade.
+      shelf: 50,
       depth: 26,
       color: '#2f5f86',
       bankColor: '#cbb98d',

@@ -493,6 +493,25 @@ export class Terrain {
     if (offshore > 0) {
       height -= this.sea.depth * ease(offshore);
     }
+    // A step down onto the beach, so the grass above it reads as a low
+    // bluff rather than the sand sharing its own level -- see beachAt.
+    // Grass itself is untouched (beachAt is 0 past the beach's own inland
+    // edge); only the beach dips, deepest right at the waterline, where it
+    // then meets the sea's own depth falling away past the shore.
+    //
+    // Kept modest deliberately: the cursor's own terrain march (see
+    // projection.js's terrainPointAt) steps in fixed strides, and a deep
+    // enough dip lets a ray at the camera's shallowest legal angle climb
+    // straight past it rather than crossing it -- measured, a dip past
+    // about 10 units starts drifting the cursor there by tens of pixels,
+    // where the same ground with none at all reads back to sub-pixel
+    // accuracy. A level asking for a dramatic bluff would need the march
+    // itself taught to step finer near the coast, not just a bigger number
+    // here.
+    const beach = this.beachAt(x, y);
+    if (beach > 0) {
+      height -= (this.sea?.beachDip ?? 0) * ease(beach);
+    }
     const pond = this.pondAt(x, y);
     if (pond > 0) {
       height -= this.land.pondDepth * ease(pond);

@@ -4,7 +4,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [master]
+    # feat/mobile-play publishes too while master still predates the game it
+    # would publish (PR #19). Remove it once that chain has landed on master.
+    branches: [master, feat/mobile-play]
   workflow_dispatch:
 
 permissions:

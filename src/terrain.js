@@ -667,10 +667,24 @@ export class Terrain {
   /** How thick the woodland is here, 0 to 1. */
   forestAt(x, y) {
     const cover = valueNoise(x / this.land.forestScale, y / this.land.forestScale, this.seed + 91);
-    if (cover <= this.land.forestThreshold) {
+    const density = cover <= this.land.forestThreshold
+      ? 0
+      : Math.min(1, (cover - this.land.forestThreshold) / (1 - this.land.forestThreshold));
+    const radius = this.land.cityClearRadius;
+    if (radius <= 0) {
+      return density;
+    }
+    // The castle always stands at the origin, so the clearing is centred
+    // there rather than needing a level to say where its own city is.
+    const distance = Math.hypot(x, y);
+    if (distance <= radius) {
       return 0;
     }
-    return Math.min(1, (cover - this.land.forestThreshold) / (1 - this.land.forestThreshold));
+    const feather = this.land.cityClearFeather;
+    if (feather <= 0 || distance >= radius + feather) {
+      return density;
+    }
+    return density * (distance - radius) / feather;
   }
 
   /**

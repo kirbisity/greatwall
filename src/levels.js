@@ -45,18 +45,21 @@ export const LEVELS = [
     name: 'The Northern March',
     blurb: 'Raiders from the north. A river guards your back.',
     // Lower hills than the default: this is river country, not high ground.
-    // Woodland is thicker here too -- measured before touching it, the
-    // default settings plant only about four trees over the whole playable
-    // radius, since how wooded a patch is and whether the ground under it
-    // counts as grass at all are two independent gates that compound to a
-    // sliver of the map (the same finding that shaped the island's cherry
-    // blossoms). Loosened rather than removed, so it still reads as
-    // scattered woodland and not a wall-to-wall forest.
+    // A true wood surrounds the city -- tree spacing tight and the noise's
+    // own threshold loosened well past the default, so cover reads as
+    // forest rather than scattered stands, with the noise's low patches
+    // left as clearings in it rather than filled in. Ringed clear around
+    // the castle itself (see Terrain#forestAt): the city stands on open
+    // ground the player can actually see, with the treeline beginning
+    // just past it rather than crowding the walls from the first frame.
     land: {
       mountainMinHeight: 34,
       mountainMaxHeight: 56,
-      treeSpacing: 11,
-      forestThreshold: 0.32,
+      treeSpacing: 7,
+      forestScale: 280,
+      forestThreshold: 0.05,
+      cityClearRadius: 70,
+      cityClearFeather: 50,
     },
     // Raiders muster along the northern skyline only, so the south is a
     // flank you never have to hold -- see Game#spawnRaider.

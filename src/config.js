@@ -409,6 +409,14 @@ export const TERRAIN = {
   forestThreshold: 0.50,
   treeSpacing: 18,
   treeSize: 5.4,
+  // A deliberate clearing around the city, since the castle always stands
+  // at the origin (see Game#castles): forest is held off entirely within
+  // the radius, then fades back in to the noise's own density over the
+  // feather beyond it, so the tree line reads as a made clearing rather
+  // than an edge the noise happened to draw. Zero leaves forest to grow
+  // wherever the noise says, right up to the walls -- see Terrain#forestAt.
+  cityClearRadius: 0,
+  cityClearFeather: 0,
   // What a tree is drawn in. The trunk is fixed; the canopy turns with the
   // year, held exactly at each season's own midpoint and blended gradually
   // across the boundary between two -- see Season#seasonalColorMix, which

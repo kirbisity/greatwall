@@ -126,6 +126,42 @@ test('no tree grows on a mountain\'s slope, even where the band beneath is grass
   }
 });
 
+test('no tree grows within the city\'s clear radius, whatever the forest noise says', () => {
+  // A threshold of 0 means every point where grass grows would otherwise
+  // take some cover -- the clearest possible test that the radius, not the
+  // noise, is what is keeping this patch open.
+  const terrain = new Terrain(1, { forestThreshold: 0, cityClearRadius: 80, cityClearFeather: 0 });
+  const trees = terrain.treesWithin(-80, -80, 80, 80);
+  for (const tree of trees) {
+    const distance = Math.hypot(tree.x, tree.y);
+    assert.ok(distance >= 80, `a tree grew at distance ${distance.toFixed(1)}, inside the clear radius`);
+  }
+});
+
+test('a city\'s clearing is a default of no clearing at all', () => {
+  const cleared = new Terrain(1, { forestThreshold: 0, cityClearRadius: 80, cityClearFeather: 0 });
+  const plain = new Terrain(1, { forestThreshold: 0 });
+  assert.equal(cleared.forestAt(10, 10), 0, 'expected the clearing to hold at (10, 10)');
+  assert.ok(plain.forestAt(10, 10) > 0, 'expected the same point to carry cover with no clearing set');
+});
+
+test('the tree line grows in gradually across the feather, not as a hard edge', () => {
+  const terrain = new Terrain(1, { forestThreshold: 0, cityClearRadius: 80, cityClearFeather: 40 });
+  const atEdge = terrain.forestAt(80, 0);
+  const partway = terrain.forestAt(100, 0);
+  const beyond = terrain.forestAt(120, 0);
+  assert.equal(atEdge, 0, 'expected the clearing itself to still be bare right at its own radius');
+  assert.ok(partway > 0 && partway < beyond,
+    `expected the cover partway across the feather (${partway}) to sit strictly between the edge and beyond it (${beyond})`);
+});
+
+test('past the feather, the clearing leaves the noise\'s own cover untouched', () => {
+  const cleared = new Terrain(1, { forestThreshold: 0, cityClearRadius: 80, cityClearFeather: 40 });
+  const plain = new Terrain(1, { forestThreshold: 0 });
+  assert.equal(cleared.forestAt(300, 300), plain.forestAt(300, 300),
+    'well clear of the city, the two should read exactly the same cover');
+});
+
 test('groundTintAt and groundColorAt describe the same colour', () => {
   const terrain = new Terrain(1);
   for (let x = -600; x < 600; x += 37) {

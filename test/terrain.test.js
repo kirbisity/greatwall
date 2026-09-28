@@ -103,14 +103,65 @@ test('the ground reads as bare rock on a mountain\'s slope', () => {
   assert.equal(bandOf(terrain.groundColorAt(mountain.x, mountain.y)), ROCK_BAND);
 });
 
-test('trees only stand where the ground band is grass', () => {
+test('trees only stand on one of the ground\'s two greens, never dirt or rock', () => {
   const terrain = new Terrain(1);
   const trees = terrain.treesWithin(-1500, -1500, 1500, 1500);
   assert.ok(trees.length > 0, 'expected some trees over a span this size');
   for (const tree of trees) {
-    assert.equal(terrain.groundBandAt(tree.x, tree.y), TERRAIN.grassColor,
-      `a tree grew on a non-grass band at (${tree.x}, ${tree.y})`);
+    const band = terrain.groundBandAt(tree.x, tree.y);
+    assert.ok(band === TERRAIN.grassColor || band === TERRAIN.mossColor,
+      `a tree grew on neither green at (${tree.x}, ${tree.y}), band ${band}`);
   }
+});
+
+test('the two greens scale the wood oppositely: grass sparse, moss dense', () => {
+  const terrain = new Terrain(1);
+  let grassPoint = null;
+  let mossPoint = null;
+  for (let x = 0; x < 1000 && (!grassPoint || !mossPoint); x += 5) {
+    for (let y = 0; y < 1000 && (!grassPoint || !mossPoint); y += 5) {
+      const band = terrain.groundBandAt(x, y);
+      if (!grassPoint && band === TERRAIN.grassColor) {
+        grassPoint = { x, y };
+      }
+      if (!mossPoint && band === TERRAIN.mossColor) {
+        mossPoint = { x, y };
+      }
+    }
+  }
+  assert.ok(grassPoint && mossPoint, 'expected to find both greens nearby');
+  assert.equal(terrain.treeDensityScaleAt(grassPoint.x, grassPoint.y), TERRAIN.grassTreeDensity);
+  assert.equal(terrain.treeDensityScaleAt(mossPoint.x, mossPoint.y), TERRAIN.mossTreeDensity);
+  assert.ok(TERRAIN.mossTreeDensity > TERRAIN.grassTreeDensity,
+    'the lighter green should scale the wood down, the darker one up');
+});
+
+test('a real wood plants far denser on moss than on the same reach of grass', () => {
+  const reach = 800;
+  const terrain = new Terrain(1, { forestThreshold: 0, grassTreeDensity: 0.05, mossTreeDensity: 1 });
+  const trees = terrain.treesWithin(-reach, -reach, reach, reach);
+  const onGrass = trees.filter((tree) => terrain.groundBandAt(tree.x, tree.y) === TERRAIN.grassColor).length;
+  const onMoss = trees.filter((tree) => terrain.groundBandAt(tree.x, tree.y) === TERRAIN.mossColor).length;
+
+  // A rate against how much of each green there is to plant on at all, not
+  // a raw count either band could win just by covering more ground.
+  const cell = terrain.land.treeSpacing;
+  let grassCells = 0;
+  let mossCells = 0;
+  for (let x = -reach; x < reach; x += cell) {
+    for (let y = -reach; y < reach; y += cell) {
+      const band = terrain.groundBandAt(x, y);
+      if (band === TERRAIN.grassColor) {
+        grassCells += 1;
+      } else if (band === TERRAIN.mossColor) {
+        mossCells += 1;
+      }
+    }
+  }
+  const grassRate = onGrass / grassCells;
+  const mossRate = onMoss / mossCells;
+  assert.ok(mossRate > grassRate * 5,
+    `expected moss (${mossRate.toFixed(2)}) to read far denser than grass (${grassRate.toFixed(2)})`);
 });
 
 test('no tree grows on a mountain\'s slope, even where the band beneath is grass', () => {

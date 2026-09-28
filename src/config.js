@@ -417,12 +417,20 @@ export const TERRAIN = {
   pondDepth: 5,
   oasisColor: '#4a7c3a',
 
-  // Woodland. Cover above the threshold grows trees, thicker towards 1.
-  // Only grass grows any -- see Terrain.treesWithin.
+  // Woodland. Cover above the threshold grows trees, thicker towards 1,
+  // over whichever of the ground's two greens a point falls on -- see
+  // Terrain.treesWithin. Dirt and rock carry none regardless.
   forestScale: 240,
   forestThreshold: 0.50,
   treeSpacing: 18,
   treeSize: 5.4,
+  // The lighter of the two greens (grass) reads as open, scarcely wooded
+  // ground; the darker (moss) as a proper thicket, its own reach capped
+  // at the noise's own density rather than made to exceed it -- see
+  // Terrain#treeDensityScaleAt. Applies everywhere the same, so every
+  // level's own wood reads the same way without a level having to say so.
+  grassTreeDensity: 0.3,
+  mossTreeDensity: 1.5,
   // A deliberate clearing around the city, since the castle always stands
   // at the origin (see Game#castles): forest is held off entirely within
   // the radius, then fades back in to the noise's own density over the

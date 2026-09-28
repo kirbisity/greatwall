@@ -729,9 +729,10 @@ export class Terrain {
     const density = cover <= this.land.forestThreshold
       ? 0
       : Math.min(1, (cover - this.land.forestThreshold) / (1 - this.land.forestThreshold));
+    const scaled = Math.min(1, density * this.treeDensityScaleAt(x, y));
     const radius = this.land.cityClearRadius;
     if (radius <= 0) {
-      return density;
+      return scaled;
     }
     // The castle always stands at the origin, so the clearing is centred
     // there rather than needing a level to say where its own city is.
@@ -741,9 +742,22 @@ export class Terrain {
     }
     const feather = this.land.cityClearFeather;
     if (feather <= 0 || distance >= radius + feather) {
-      return density;
+      return scaled;
     }
-    return density * (distance - radius) / feather;
+    return scaled * (distance - radius) / feather;
+  }
+
+  /**
+   * How much a point's own ground band thins or thickens whatever wood
+   * would otherwise stand on it -- the lighter of the two greens (grass)
+   * reads as open ground even where the noise says a wood belongs, the
+   * darker (moss) as a proper thicket. Ground that carries no wood at all
+   * regardless (dirt, rock) never asks, so its own scale here is moot.
+   */
+  treeDensityScaleAt(x, y) {
+    return this.groundBandAt(x, y) === this.land.mossColor
+      ? this.land.mossTreeDensity
+      : this.land.grassTreeDensity;
   }
 
   /**
@@ -762,10 +776,13 @@ export class Terrain {
         if (roll > this.forestAt(x, y)) {
           continue;
         }
-        // Woodland only takes root on open grass -- not moss, dirt, bare
-        // rock, or a mountain's slope, which reads as rock regardless of
-        // what the band underneath says.
-        if (this.groundBandAt(x, y) !== this.land.grassColor
+        // Woodland only takes root on the ground's two greens -- not dirt,
+        // bare rock, or a mountain's slope, which reads as rock regardless
+        // of what the band underneath says. Which of the two it is only
+        // says how much wood grows there, already folded into forestAt's
+        // own density above -- see Terrain#treeDensityScaleAt.
+        const band = this.groundBandAt(x, y);
+        if ((band !== this.land.grassColor && band !== this.land.mossColor)
           || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0
           || this.pondAt(x, y) > 0) {
           continue;

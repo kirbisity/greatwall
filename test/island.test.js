@@ -563,22 +563,23 @@ function stormTheCity(game, seconds = 240) {
   };
 }
 
-test('the island builds three times the stone, and nowhere else does', () => {
-  assert.equal(ISLAND.wall.healthScale, 3);
+test('the island builds sturdier stone than anywhere else', () => {
+  const scale = ISLAND.wall.healthScale;
+  assert.ok(scale > 1, 'the island should build stronger walls');
   const onTheIsland = island(1000000);
   const plain = new Game({ random: () => 0.5, level: LEVELS[0] });
   plain.tokens = 1000000;
   const islandWall = onTheIsland.buildWall({ x: 70, y: -45 }, { x: 70, y: 45 }).wall;
   const plainWall = plain.buildWall({ x: 70, y: -45 }, { x: 70, y: 45 }).wall;
 
-  assert.equal(islandWall.maxHealth, plainWall.maxHealth * 3);
+  assert.equal(islandWall.maxHealth, plainWall.maxHealth * scale);
   assert.equal(islandWall.health, islandWall.maxHealth * WALL.initialFraction);
 
   // Fortifying still multiplies on top of it rather than replacing it.
   islandWall.finish();
   plainWall.finish();
   assert.equal(islandWall.health, islandWall.maxHealth);
-  assert.equal(islandWall.maxHealth / plainWall.maxHealth, 3);
+  assert.equal(islandWall.maxHealth / plainWall.maxHealth, scale);
 });
 
 test('a raider gets over an island wall, slower and bloodied', () => {

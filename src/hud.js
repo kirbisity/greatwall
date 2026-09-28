@@ -1,4 +1,5 @@
 import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL, SEASONS } from './config.js';
+import { paintLevelThumbnail } from './levelThumbnail.js';
 
 const SOUND_LEVEL_STEP = 20;
 const MAX_SOUND_LEVEL = 100;
@@ -164,13 +165,24 @@ export class Hud {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = index === chosen ? 'levelItem is-chosen' : 'levelItem';
+
+      // A pixelated preview of the level's own ground, not a generic icon --
+      // see levelThumbnail.js.
+      const thumb = document.createElement('canvas');
+      thumb.className = 'levelThumb';
+      paintLevelThumbnail(thumb, level);
+
+      const text = document.createElement('span');
+      text.className = 'levelText';
       const name = document.createElement('span');
       name.className = 'levelName';
       name.innerText = `${index + 1}. ${level.name}`;
       const blurb = document.createElement('span');
       blurb.className = 'levelBlurb';
       blurb.innerText = level.blurb;
-      button.append(name, blurb);
+      text.append(name, blurb);
+
+      button.append(thumb, text);
       button.addEventListener('click', () => onPick(index));
       this.levelList.append(button);
     });

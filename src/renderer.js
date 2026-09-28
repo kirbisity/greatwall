@@ -113,8 +113,6 @@ const TRUNK_DISTANCE = 420;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
-const TRUNK_FILL = 'rgb(84,62,42)';
-const CANOPY_FILL = 'rgb(74,96,58)';
 
 // A beached raiding hull: how long, how wide at the stern and at the bow,
 // and how tall the freeboard, deckhouse and mast stand above the keel.
@@ -718,12 +716,20 @@ export class Renderer {
     }
   }
 
-  /** Woodland, drawn with the ground because it never moves either. */
+  /**
+   * Woodland, drawn with the ground because it never moves either.
+   *
+   * Colour comes from the land rather than a fixed constant, so a level can
+   * plant a wood of its own kind -- the island's cherry blossoms are the
+   * same cone, only pink and smaller -- without a second drawing path.
+   */
   drawWoods(game, bounds) {
     const context = this.ground;
     const view = this.camera.view;
     const trees = game.treesWithin(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
     const trunks = this.camera.distance < TRUNK_DISTANCE;
+    const trunkFill = game.terrain.land.trunkColor;
+    const canopyFill = game.terrain.land.canopyColor;
 
     for (const tree of trees) {
       const top = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 2.2);
@@ -737,7 +743,7 @@ export class Renderer {
         continue;
       }
       if (trunks) {
-        context.fillStyle = TRUNK_FILL;
+        context.fillStyle = trunkFill;
         context.fillRect(foot.x - spread * 0.12, top.y, spread * 0.24, foot.y - top.y);
       }
       // A four-sided cone: cheap, and it still reads as a canopy from above.
@@ -749,7 +755,7 @@ export class Renderer {
       context.lineTo(foot.x, base + spread * 0.35);
       context.lineTo(foot.x - spread * 0.8, base);
       context.closePath();
-      context.fillStyle = CANOPY_FILL;
+      context.fillStyle = canopyFill;
       context.fill();
     }
   }

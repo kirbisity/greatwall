@@ -132,6 +132,32 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .iconButton.is-active { border-color: var(--bronze); background: linear-gradient(180deg, #4a3c18, #2a2110); }
 .iconButton.is-active img { filter: invert(78%) sepia(64%) saturate(520%) hue-rotate(2deg); }
 
+/*
+ * Move sits in an icon-only row where every other button explains itself by
+ * its glyph -- a magnifying glass, a question mark -- but a hand or a
+ * cross reads as nothing in particular. It is also the tool a player is in
+ * by default, so nothing else on screen ever points them at its name. The
+ * bright label is what tells them what the button they already see does.
+ */
+.iconButton-labeled {
+	width: auto;
+	padding: 0 14px 0 10px;
+	gap: 8px;
+}
+
+.iconButtonLabel {
+	font-family: var(--display);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: .1em;
+	text-transform: uppercase;
+	color: var(--bronze);
+	text-shadow: 0 1px 0 #000;
+	white-space: nowrap;
+}
+
+.iconButton-labeled:hover .iconButtonLabel { color: var(--parchment); }
+
 /* --- tool dock --------------------------------------------------------- */
 
 .toolDock {
@@ -317,8 +343,11 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .levelList { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 26px; }
 
 .levelItem {
+	display: flex;
+	align-items: center;
+	gap: 12px;
 	width: 300px;
-	padding: 9px 14px;
+	padding: 8px 14px 8px 8px;
 	text-align: left;
 	background: none;
 	border: 1px solid transparent;
@@ -327,15 +356,33 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	font: inherit;
 	cursor: pointer;
 	opacity: .55;
+	transition: var(--ease);
 }
 
 .levelItem:hover { opacity: .85; }
 
 .levelItem.is-chosen { opacity: 1; border-color: var(--bronze-deep); }
 
+/*
+ * Drawn at THUMBNAIL_COLUMNS x THUMBNAIL_ROWS (see levelThumbnail.js) and
+ * stretched blocky rather than smoothed -- a handful of true pixels read as
+ * a map at a glance; a blurred-up photo would not.
+ */
+.levelThumb {
+	flex: none;
+	width: 84px;
+	height: 63px;
+	border: 1px solid var(--bronze-dark);
+	border-radius: 2px;
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+}
+
+.levelText { flex: 1; min-width: 0; }
+
 .levelName { display: block; font-size: 14px; letter-spacing: .09em; text-transform: uppercase; }
 
-.levelBlurb { display: block; margin-top: 3px; font-size: 12px; line-height: 1.6; opacity: .75; }
+.levelBlurb { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; opacity: .7; }
 
 /* --- modals ------------------------------------------------------------ */
 

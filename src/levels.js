@@ -43,7 +43,7 @@ export const LEVELS = [
   {
     id: 'northern-march',
     name: 'The Northern March',
-    blurb: 'They ride down out of the north. The river guards your back.',
+    blurb: 'Raiders from the north. A river guards your back.',
     // Lower hills than the default: this is river country, not high ground.
     land: {
       mountainMinHeight: 34,
@@ -67,7 +67,7 @@ export const LEVELS = [
   {
     id: 'dust-sea',
     name: 'The Dust Sea',
-    blurb: 'The same war, fought over sand. They come from every horizon.',
+    blurb: 'A desert siege. Raiders from every side.',
     land: DESERT,
     // Dust hanging in the air the year round: the season still says how
     // thick the haze is, this says what colour it is and how much more of
@@ -77,7 +77,7 @@ export const LEVELS = [
   {
     id: 'shiro-island',
     name: 'The Island of the Keep',
-    blurb: 'An island with no landward side. They come ashore wherever they please.',
+    blurb: 'An island siege. No safe side at all.',
     // The same green country as the northern march, but only as much of it
     // as fits between the beaches -- so the hills are smaller in kind, not
     // just fewer.
@@ -101,6 +101,19 @@ export const LEVELS = [
         grain: 7.5,
         grainScale: 70,
       },
+      // Cherry blossom rather than the mainland's wood: pink, and smaller,
+      // so a stand of them reads as an orchard rather than a green forest
+      // that happens to have changed colour. Grown far thicker too --
+      // measured over the island's playable radius, the mainland's own
+      // settings plant only about a tree, since the two gates that decide
+      // where woodland grows (a noise for how wooded a patch is, another
+      // for which ground counts as grass at all) compound to a sliver of
+      // the map. Loosening the first is what turns a sliver into a wood
+      // worth walking through.
+      canopyColor: '#eaacc7',
+      treeSize: 3,
+      treeSpacing: 7,
+      forestThreshold: 0.24,
     },
     sea: {
       // Land out to roughly this radius, give or take the coves `coast`

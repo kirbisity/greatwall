@@ -409,6 +409,11 @@ export const TERRAIN = {
   forestThreshold: 0.50,
   treeSpacing: 18,
   treeSize: 5.4,
+  // What a tree is drawn in -- a level may plant a wood of its own colour
+  // (see the island's cherry blossoms in levels.js) without touching
+  // anything else about how thick it grows.
+  trunkColor: '#543e2a',
+  canopyColor: '#4a603a',
 
   // Trees are felled this near a wall, and anywhere a city stands.
   clearOfWall: 16,

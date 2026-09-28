@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
-import { WALL, WALL_HEIGHT_UNITS, WALL_TIERS } from '../src/config.js';
+import { TERRAIN, WALL, WALL_HEIGHT_UNITS, WALL_TIERS } from '../src/config.js';
 import { compileStructure } from '../src/structures.js';
 import { JAPAN_BUILDINGS, JAPAN_HOUSE } from '../src/buildings/index.js';
 
@@ -731,4 +731,43 @@ test('nothing overlaps a wall where walls stop a company dead', () => {
   assert.equal(game.wallClimb, null, 'this level has no climbing at all');
   const storming = stormTheCity(ringedGame(LEVELS[0]));
   assert.equal(storming.arrived, false, 'and a wall is still a barrier there');
+});
+
+// --- cherry blossom -------------------------------------------------------
+
+test("a wood's colour comes from the land, and the default is the mainland's green", () => {
+  const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river);
+  assert.equal(mainland.land.canopyColor, TERRAIN.canopyColor);
+  assert.equal(mainland.land.trunkColor, TERRAIN.trunkColor);
+});
+
+test('the island plants cherry blossom: pink, and smaller than the mainland wood', () => {
+  const terrain = islandTerrain();
+  assert.notEqual(terrain.land.canopyColor, TERRAIN.canopyColor, 'the island should not be the plain green');
+  // Pink reads as more red and more blue than green, against a fill that is
+  // the other way round -- a cheap check that this is not just A different
+  // green.
+  const [r, g, b] = terrain.land.canopyColor.match(/[0-9a-f]{2}/gi).map((h) => parseInt(h, 16));
+  assert.ok(r > g && b > g, `expected a pink, got rgb(${r}, ${g}, ${b})`);
+  assert.ok(terrain.land.treeSize < TERRAIN.treeSize, 'a blossom tree should be smaller than the mainland wood');
+});
+
+test('the island is planted far thicker than the mainland, not just recoloured', () => {
+  const reach = 220;
+  const island = islandTerrain().treesWithin(-reach, -reach, reach, reach).length;
+  const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river)
+    .treesWithin(-reach, -reach, reach, reach).length;
+  assert.ok(island > mainland * 10,
+    `expected the island to read as a wood, got ${island} trees against the mainland's ${mainland}`);
+});
+
+test('the mainland and the desert are untouched by the island planting its own wood', () => {
+  for (const level of LEVELS) {
+    if (level === ISLAND) {
+      continue;
+    }
+    const terrain = new Terrain(1, level.land, level.river ?? null, level.sea ?? null);
+    assert.equal(terrain.land.canopyColor, TERRAIN.canopyColor, `${level.id} should keep the plain wood`);
+    assert.equal(terrain.land.treeSize, TERRAIN.treeSize, `${level.id} should keep the plain tree size`);
+  }
 });

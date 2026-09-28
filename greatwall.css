@@ -132,31 +132,6 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .iconButton.is-active { border-color: var(--bronze); background: linear-gradient(180deg, #4a3c18, #2a2110); }
 .iconButton.is-active img { filter: invert(78%) sepia(64%) saturate(520%) hue-rotate(2deg); }
 
-/*
- * Move sits in an icon-only row where every other button explains itself by
- * its glyph -- a magnifying glass, a question mark -- but a hand or a
- * cross reads as nothing in particular. It is also the tool a player is in
- * by default, so nothing else on screen ever points them at its name. The
- * bright label is what tells them what the button they already see does.
- */
-.iconButton-labeled {
-	width: auto;
-	padding: 0 14px 0 10px;
-	gap: 8px;
-}
-
-.iconButtonLabel {
-	font-family: var(--display);
-	font-size: 12px;
-	font-weight: 600;
-	letter-spacing: .1em;
-	text-transform: uppercase;
-	color: var(--bronze);
-	text-shadow: 0 1px 0 #000;
-	white-space: nowrap;
-}
-
-.iconButton-labeled:hover .iconButtonLabel { color: var(--parchment); }
 
 /* --- tool dock --------------------------------------------------------- */
 

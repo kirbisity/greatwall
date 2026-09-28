@@ -752,13 +752,26 @@ test('the island plants cherry blossom: pink, and smaller than the mainland wood
   assert.ok(terrain.land.treeSize < TERRAIN.treeSize, 'a blossom tree should be smaller than the mainland wood');
 });
 
-test('the island is planted far thicker than the mainland, not just recoloured', () => {
+test('the island is planted far thicker than a plain, unmodified wood', () => {
   const reach = 220;
   const island = islandTerrain().treesWithin(-reach, -reach, reach, reach).length;
+  // Against TERRAIN's own defaults rather than a specific level: every
+  // level is free to tune its own density (the mainland has since grown
+  // thicker too), so the stable claim is that the island is deliberately
+  // far past what a level asking for nothing at all would grow, not that
+  // it beats whichever number the mainland happens to carry today.
+  const plain = new Terrain(1, {}, null).treesWithin(-reach, -reach, reach, reach).length;
+  assert.ok(island > plain * 10,
+    `expected the island to read as a wood, got ${island} trees against a plain wood's ${plain}`);
+});
+
+test("the mainland's own wood is thicker than a plain, unmodified one too", () => {
+  const reach = 220;
   const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river)
     .treesWithin(-reach, -reach, reach, reach).length;
-  assert.ok(island > mainland * 10,
-    `expected the island to read as a wood, got ${island} trees against the mainland's ${mainland}`);
+  const plain = new Terrain(1, {}, LEVELS[0].river).treesWithin(-reach, -reach, reach, reach).length;
+  assert.ok(mainland > plain * 5,
+    `expected the mainland to be planted thicker than the default, got ${mainland} against ${plain}`);
 });
 
 test('the mainland and the desert are untouched by the island planting its own wood', () => {

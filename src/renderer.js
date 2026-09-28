@@ -110,6 +110,14 @@ const GOLD_STEPS = 24;
 // cover an 18-unit drop in a single 9-unit cell.
 const MIN_GROUND_LIGHT = 0.55;
 const TRUNK_DISTANCE = 420;
+// The canopy's two tiers, as a fraction of tree.size for the tier boundary
+// and of the full spread for the narrower cap -- and how much brighter or
+// darker than the plain colour each tier reads, a cheap stand-in for the
+// cap catching open sky and the skirt sitting in its shadow.
+const CANOPY_WAIST_HEIGHT = 1.6;
+const CANOPY_CAP_SPREAD = 0.6;
+const CANOPY_CAP_LIGHT = 1.22;
+const CANOPY_SKIRT_LIGHT = 0.8;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
@@ -143,6 +151,15 @@ function healthColor(fraction) {
 
 function shade(tint, light) {
   return `rgb(${Math.round(tint[0] * light)},${Math.round(tint[1] * light)},${Math.round(tint[2] * light)})`;
+}
+
+/** A level's colour fields are hex strings; shade() wants channels. */
+function hexChannels(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
 }
 
 /** A stable pseudo-random value in [0, 1) for a given number, no state kept. */
@@ -717,11 +734,36 @@ export class Renderer {
   }
 
   /**
+   * One kite-shaped tier of a canopy: an apex, two shoulders, and a bottom
+   * point pulled down past the shoulders for a slight belly rather than a
+   * straight-sided cone. The same shape drawWoods uses for both tiers,
+   * parameterised by height and width, which is what keeps two calls
+   * cheaper than a second code path.
+   */
+  drawCanopyTier(context, apex, footX, baseY, spread, fill) {
+    context.beginPath();
+    context.moveTo(apex.x, apex.y);
+    context.lineTo(footX + spread * 0.8, baseY);
+    context.lineTo(footX, baseY + spread * 0.35);
+    context.lineTo(footX - spread * 0.8, baseY);
+    context.closePath();
+    context.fillStyle = fill;
+    context.fill();
+  }
+
+  /**
    * Woodland, drawn with the ground because it never moves either.
    *
    * Colour comes from the land rather than a fixed constant, so a level can
    * plant a wood of its own kind -- the island's cherry blossoms are the
-   * same cone, only pink and smaller -- without a second drawing path.
+   * same shape, only pink and smaller -- without a second drawing path.
+   *
+   * Each canopy is two tiers rather than one solid cone, echoing the tiered
+   * roofs every building in the game already wears: a narrower, lighter cap
+   * catching the open sky, sitting on a wider, shaded skirt. One shape drawn
+   * twice, not two different trees, so the added cost is one more fill and
+   * one more projected point per tree -- the colours themselves are worked
+   * out once for the whole wood, not per tree.
    */
   drawWoods(game, bounds) {
     const context = this.ground;
@@ -729,7 +771,9 @@ export class Renderer {
     const trees = game.treesWithin(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
     const trunks = this.camera.distance < TRUNK_DISTANCE;
     const trunkFill = game.terrain.land.trunkColor;
-    const canopyFill = game.terrain.land.canopyColor;
+    const canopyChannels = hexChannels(game.terrain.land.canopyColor);
+    const capFill = shade(canopyChannels, CANOPY_CAP_LIGHT);
+    const skirtFill = shade(canopyChannels, CANOPY_SKIRT_LIGHT);
 
     for (const tree of trees) {
       const top = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 2.2);
@@ -746,17 +790,15 @@ export class Renderer {
         context.fillStyle = trunkFill;
         context.fillRect(foot.x - spread * 0.12, top.y, spread * 0.24, foot.y - top.y);
       }
-      // A four-sided cone: cheap, and it still reads as a canopy from above.
       const skirt = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 0.9);
-      const base = skirt ? skirt.y : foot.y;
-      context.beginPath();
-      context.moveTo(top.x, top.y);
-      context.lineTo(foot.x + spread * 0.8, base);
-      context.lineTo(foot.x, base + spread * 0.35);
-      context.lineTo(foot.x - spread * 0.8, base);
-      context.closePath();
-      context.fillStyle = canopyFill;
-      context.fill();
+      const waist = projectPoint(view, tree.x, tree.y, tree.z + tree.size * CANOPY_WAIST_HEIGHT);
+      const skirtY = skirt ? skirt.y : foot.y;
+      const waistY = waist ? waist.y : (top.y + skirtY) / 2;
+      // The skirt first, so the cap's own bulge -- the same rounded belly
+      // every tier gets, drawn dipping a little past its own edge -- shows
+      // on top of it rather than being painted over by the tier below.
+      this.drawCanopyTier(context, { x: foot.x, y: waistY }, foot.x, skirtY, spread, skirtFill);
+      this.drawCanopyTier(context, top, foot.x, waistY, spread * CANOPY_CAP_SPREAD, capFill);
     }
   }
 

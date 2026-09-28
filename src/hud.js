@@ -10,7 +10,10 @@ const TOOL_BUTTONS = {
   zoom: 'zoom',
   build: 'buildTool',
   destroy: 'destroyTool',
+  repair: 'repairTool',
+  fortify: 'fortifyTool',
   upgrade: 'upgradeTool',
+  attack: 'attackTool',
 };
 
 function element(id) {
@@ -25,11 +28,14 @@ function element(id) {
 export class Hud {
   constructor() {
     this.tokenLabel = element('token0');
+    this.incomeLabel = element('income0');
+    this.incomeFormula = element('incomeFormula0');
     this.timeLabel = element('time0');
     this.seasonLabel = element('season0');
     this.menu = element('myNav');
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
+    this.levelList = element('levelList');
     this.settings = element('settingMenu');
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
@@ -38,9 +44,17 @@ export class Hud {
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
     this.music = element('backgroundmusic');
+    this.dispatchMenu = element('dispatchMenu');
+    this.dispatchButtons = [
+      element('dispatchOption0'),
+      element('dispatchOption1'),
+      element('dispatchOption2'),
+    ];
 
     this.soundLevel = INITIAL_SOUND_LEVEL;
     this.shownTokens = null;
+    this.shownIncome = null;
+    this.shownIncomeFormula = null;
     this.shownSeconds = null;
     this.shownSeason = null;
     this.toastTimer = null;
@@ -69,6 +83,19 @@ export class Hud {
     if (tokens !== this.shownTokens) {
       this.shownTokens = tokens;
       this.tokenLabel.innerText = `$${tokens}`;
+    }
+    const breakdown = game.incomeBreakdown;
+    const income = Math.trunc(breakdown.total * game.harvestMultiplier);
+    if (income !== this.shownIncome) {
+      this.shownIncome = income;
+      this.incomeLabel.innerText = `$${income}`;
+    }
+    // Upkeep counts units, not sections: a fortified wall is worth several.
+    const formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`
+      + ` - ${breakdown.upkeepPerWall}×${breakdown.upkeepUnits}`;
+    if (formula !== this.shownIncomeFormula) {
+      this.shownIncomeFormula = formula;
+      this.incomeFormula.innerText = formula;
     }
     if (game.seconds !== this.shownSeconds) {
       this.shownSeconds = game.seconds;
@@ -100,6 +127,31 @@ export class Hud {
     this.menu.style.height = '0%';
   }
 
+  /**
+   * The level picker in the main menu, built from the level configs rather
+   * than the markup, so adding a level stays a matter of levels.js alone.
+   */
+  showLevels(levels, chosen, onPick) {
+    if (!this.levelList) {
+      return;
+    }
+    this.levelList.replaceChildren();
+    levels.forEach((level, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = index === chosen ? 'levelItem is-chosen' : 'levelItem';
+      const name = document.createElement('span');
+      name.className = 'levelName';
+      name.innerText = `${index + 1}. ${level.name}`;
+      const blurb = document.createElement('span');
+      blurb.className = 'levelBlurb';
+      blurb.innerText = level.blurb;
+      button.append(name, blurb);
+      button.addEventListener('click', () => onPick(index));
+      this.levelList.append(button);
+    });
+  }
+
   openSettings() {
     this.settings.style.height = '100%';
   }
@@ -126,6 +178,36 @@ export class Hud {
   closeMessage() {
     clearTimeout(this.toastTimer);
     this.messageModal.style.display = 'none';
+  }
+
+  /**
+   * The tier picker, pinned above the castle. Each button carries its own
+   * click handler and stops the event there, or it would also bubble up to
+   * the map's click listener and dispatch a company to wherever the button
+   * happened to be drawn.
+   */
+  showDispatchMenu(options, screen, onPick) {
+    this.dispatchMenu.style.display = 'flex';
+    this.dispatchMenu.style.left = `${Math.round(screen.x)}px`;
+    this.dispatchMenu.style.top = `${Math.round(screen.y)}px`;
+    this.dispatchButtons.forEach((button, index) => {
+      const option = options[index];
+      if (!option) {
+        button.style.display = 'none';
+        button.onclick = null;
+        return;
+      }
+      button.style.display = 'flex';
+      button.innerText = `${option.name}\n$${option.cost} · ${option.maxHealth}hp`;
+      button.onclick = (event) => {
+        event.stopPropagation();
+        onPick(option.id);
+      };
+    });
+  }
+
+  hideDispatchMenu() {
+    this.dispatchMenu.style.display = 'none';
   }
 
   showGameOver(score, best) {

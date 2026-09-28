@@ -14,7 +14,7 @@ const pageIds = new Set(
 const CONTEXT_METHODS = [
   'clearRect', 'fillRect', 'strokeRect', 'beginPath', 'moveTo', 'lineTo', 'closePath',
   'stroke', 'arc', 'fill', 'drawImage', 'save', 'translate', 'rotate', 'restore',
-  'fillText', 'setTransform',
+  'fillText', 'setTransform', 'setLineDash',
 ];
 
 function stubContext() {
@@ -32,7 +32,11 @@ function stubElement(id) {
   return {
     id,
     style: {},
+    className: '',
     classList: { toggle: () => {} },
+    children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    replaceChildren() { this.children = []; },
     innerText: '',
     loop: false,
     volume: 0,
@@ -63,6 +67,7 @@ function installDom() {
       return elements.get(id);
     },
     addEventListener: (type, handler) => documentListeners.set(type, handler),
+    createElement: (tag) => stubElement(tag),
   };
   globalThis.window = {
     innerWidth: 1280,
@@ -115,11 +120,13 @@ test('the app boots, plays frames and reacts to input without touching a missing
     dom.elements.get(id).listeners.get('click')();
   }
   dom.elements.get('buildTool').listeners.get('click')();
-  dom.documentListeners.get('mousedown')({ clientX: 400, clientY: 400 });
-  for (let x = 400; x < 900; x += 50) {
+  // Clear of the city footprint the whole way, so the drag lays a section
+  // instead of being rejected as crossing the castle.
+  dom.documentListeners.get('mousedown')({ clientX: 850, clientY: 400 });
+  for (let x = 850; x < 1250; x += 50) {
     dom.documentListeners.get('mousemove')({ clientX: x, clientY: 400 });
   }
-  dom.documentListeners.get('mouseup')({ clientX: 900, clientY: 400 });
+  dom.documentListeners.get('mouseup')({ clientX: 1250, clientY: 400 });
   assert.ok(app.game.walls.length > 0, 'the build drag laid wall sections');
 
   const builtWalls = app.game.walls.length;

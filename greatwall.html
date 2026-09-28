@@ -28,6 +28,11 @@
 				<span class="readout-label">Treasury</span>
 				<span id="token0" class="readout-value">$0</span>
 			</div>
+			<div class="readout readout-income" title="Base city income, plus a cut for every house it shelters">
+				<span class="readout-label">Income</span>
+				<span id="income0" class="readout-value">$0</span>
+				<span id="incomeFormula0" class="readout-formula">0 + 0&times;0</span>
+			</div>
 			<div class="readout" title="Years endured">
 				<span class="readout-label">Endured</span>
 				<span id="time0" class="readout-value">0</span>
@@ -54,9 +59,17 @@
 			<img src="images/destroyBtn.png" alt="">
 			<span class="toolName">Raze</span>
 		</button>
-		<button id="repairTool" class="toolButton is-disabled" title="Not yet available" disabled>
-			<img src="images/attackBtn.png" alt="">
+		<button id="repairTool" class="toolButton" title="Drag over a damaged wall to mend it">
+			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='2'%20y='13'%20width='20'%20height='8'%20rx='1'/%3E%3Cpath%20d='M2%2017h20M9%2013v4M16%2017v4'/%3E%3Cpath%20d='M12%202.5v8M8%206.5h8'/%3E%3C/svg%3E" alt="">
 			<span class="toolName">Repair</span>
+		</button>
+		<button id="fortifyTool" class="toolButton" title="Drag over a wall to raise it, then to widen it">
+			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='3'%20y='14'%20width='18'%20height='7'%20rx='1'/%3E%3Cpath%20d='M3%2017.5h18M9%2014v3.5M15%2017.5V21'/%3E%3Cpath%20d='M12%202.5v9M8%206.5l4-4%204%204'/%3E%3C/svg%3E" alt="">
+			<span class="toolName">Fortify</span>
+		</button>
+		<button id="attackTool" class="toolButton" title="Muster a company, then click where to send it">
+			<img src="images/attackBtn.png" alt="">
+			<span class="toolName">Attack</span>
 		</button>
 		<button id="upgradeTool" class="toolButton" title="Click the castle to upgrade it">
 			<img src="images/castleBtn.png" alt="">
@@ -64,10 +77,17 @@
 		</button>
 	</nav>
 
+	<div id="dispatchMenu" class="dispatchMenu">
+		<button id="dispatchOption0" class="dispatchButton" type="button"></button>
+		<button id="dispatchOption1" class="dispatchButton" type="button"></button>
+		<button id="dispatchOption2" class="dispatchButton" type="button"></button>
+	</div>
+
 	<div id="myNav" class="overlay">
 		<div class="overlay-content">
 			<h1 class="gameTitle">Greatwall</h1>
 			<p id="navinfo" class="gameTagline">Build walls to defend the city</p>
+			<div id="levelList" class="levelList"></div>
 			<div class="menuList">
 				<button id="startBtn2" class="menuItem menuItem-primary">Start</button>
 				<button id="restartBtn" class="menuItem">Restart</button>
@@ -100,14 +120,17 @@
 			<p>Raiders ride for your city. Walls are the only thing between them and your people.</p>
 			<ul class="helpList">
 				<li><b>Build</b> &mdash; drag to raise a wall. Sections cost coin by length, and ends snap to other walls and to the city edge.</li>
-				<li><b>Repair</b> &mdash; redraw over a damaged or unfinished section to bring it to full strength, paying only for the stonework replaced.</li>
-				<li>A new section rises over about ten seconds, and can be attacked while it goes up.</li>
+				<li><b>Attack</b> &mdash; pick a company's tier above the castle, then click where to send it. It will run down the nearest raiders, then come home.</li>
+				<li><b>Repair</b> &mdash; drag over a damaged or unfinished section to pay for its mending. The stone climbs back to full over the following seconds under the mason's hammer. Drawing over a section that already stands does nothing.</li>
+				<li><b>Fortify</b> &mdash; drag over a section to raise it. The first order doubles its height over ten seconds; a second doubles its width over twenty. Each doubles its strength and its upkeep, so a reinforced wall costs four times the plain one to raise and four times as much to keep. Reinforced is as far as stone goes.</li>
+				<li>A new section is pegged out for six seconds &mdash; a yellow line under the mason's hammer &mdash; and stops nothing until the stone starts rising. It takes about ten seconds more to reach full height, and can be attacked the whole way up.</li>
 				<li><b>Raze</b> &mdash; drag over a wall to demolish it. Half the price returns, less its damage.</li>
-				<li><b>Upgrade</b> &mdash; click your castle to grow it. A courtyard complex becomes a walled compound, then a moated city.</li>
+				<li><b>Upgrade</b> &mdash; click your castle to grow it. A courtyard complex becomes a walled compound, then a moated city, unlocking heavier companies as it grows. The old buildings clear and the new ones rise over the following seconds, but the city fights and earns at its old strength until they do.</li>
 				<li><b>Ctrl+Z</b> &mdash; undo the last section you laid.</li>
 				<li><b>[</b> and <b>]</b> &mdash; tilt the view. Lower to see your walls stand.</li>
 			</ul>
-			<p class="helpNote">Cavalry die against walls. Infantry walk through them. Winter multiplies the cost of stone; autumn doubles the harvest.</p>
+			<p class="helpNote">Nothing crosses a standing wall. Raiders hunt for a way round, and batter their way through only when there is none. Cavalry are quick but die fast against stone; infantry are slow and grind it down. Winter multiplies the cost of stone; autumn doubles the harvest.</p>
+			<p class="helpNote">Houses fill in behind the walls on their own — the farther out the ring, the more it can hold. Each one adds to the income shown at the top. A raider that reaches one burns it down in a moment, so a breach costs more than the stone.</p>
 			<p class="helpNote">No civilisation lasts forever. The question is how long.</p>
 		</div>
 	</div>

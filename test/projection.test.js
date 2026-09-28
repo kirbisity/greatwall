@@ -6,10 +6,12 @@ import {
   facesCamera,
   groundAt,
   groundJacobian,
-  groundTransform,
   lightingFor,
+  lightingForVector,
   normalOf,
+  projectCorners,
   projectPoint,
+  terrainPointAt,
 } from '../src/projection.js';
 import { Camera } from '../src/camera.js';
 import { AMBIENT_LIGHT, CAMERA } from '../src/config.js';
@@ -41,6 +43,97 @@ test('screen to ground and back round-trips exactly', () => {
     }
   }
   assert.ok(worst < 1e-6, `worst round-trip error ${worst}`);
+});
+
+// --- reading the cursor against the landscape ---------------------------
+
+/** A hill at the origin, steep enough to throw a flat reading well off. */
+function testHill(height = 60, radius = 180) {
+  return (x, y) => {
+    const reach = Math.hypot(x, y);
+    if (reach >= radius) {
+      return 0;
+    }
+    const climb = 1 - reach / radius;
+    return height * climb * climb * (3 - 2 * climb);
+  };
+}
+
+test('a cursor read against a plane lands on the wrong ground once there is a hill', () => {
+  const v = view({ elevation: 45 });
+  const heightAt = testHill();
+  let worst = 0;
+  for (let pixelX = 200; pixelX <= 1000; pixelX += 100) {
+    for (let pixelY = 150; pixelY <= 750; pixelY += 100) {
+      const flat = groundAt(v, pixelX, pixelY);
+      const onHill = terrainPointAt(v, pixelX, pixelY, heightAt);
+      worst = Math.max(worst, Math.hypot(flat.x - onHill.x, flat.y - onHill.y));
+    }
+  }
+  assert.ok(worst > 20, `expected the flat reading to be well out, it was only ${worst.toFixed(1)}`);
+});
+
+test('a cursor read against the landscape lands back on the pixel it came from', () => {
+  const heightAt = testHill();
+  for (const elevation of [CAMERA.minElevation, 45, CAMERA.maxElevation]) {
+    for (const distance of [CAMERA.minDistance, CAMERA.maxDistance]) {
+      const v = view({ distance, elevation });
+      let worst = 0;
+      for (let pixelX = 200; pixelX <= 1000; pixelX += 80) {
+        for (let pixelY = 150; pixelY <= 750; pixelY += 60) {
+          const point = terrainPointAt(v, pixelX, pixelY, heightAt);
+          const back = projectPoint(v, point.x, point.y, heightAt(point.x, point.y));
+          if (!back) {
+            continue;
+          }
+          worst = Math.max(worst, Math.hypot(back.x - pixelX, back.y - pixelY));
+        }
+      }
+      assert.ok(worst < 0.5,
+        `at ${distance}/${elevation} the cursor drifted ${worst.toFixed(2)} pixels`);
+    }
+  }
+});
+
+test('flat ground reads the same whether or not the landscape is consulted', () => {
+  const v = view({ elevation: 50 });
+  const seaLevel = () => 0;
+  for (let pixelX = 300; pixelX <= 900; pixelX += 150) {
+    for (let pixelY = 250; pixelY <= 700; pixelY += 150) {
+      const flat = groundAt(v, pixelX, pixelY);
+      const walked = terrainPointAt(v, pixelX, pixelY, seaLevel);
+      assert.ok(Math.hypot(flat.x - walked.x, flat.y - walked.y) < 0.05);
+    }
+  }
+});
+
+test('ground that is level but not at zero is still read correctly', () => {
+  const v = view({ elevation: 45 });
+  const shelf = () => 40;
+  for (let pixelX = 400; pixelX <= 800; pixelX += 200) {
+    for (let pixelY = 300; pixelY <= 600; pixelY += 150) {
+      const point = terrainPointAt(v, pixelX, pixelY, shelf);
+      const back = projectPoint(v, point.x, point.y, 40);
+      assert.ok(back && Math.hypot(back.x - pixelX, back.y - pixelY) < 0.5);
+    }
+  }
+});
+
+test('a ray that meets no ground falls back to the flat reading', () => {
+  const v = view({ elevation: 40 });
+  const below = () => -100000;
+  const skyward = terrainPointAt(v, 600, 5, below);
+  assert.ok(Number.isFinite(skyward.x) && Number.isFinite(skyward.y));
+});
+
+test('panning still reads a plane, so a drag does not jump over a hillside', () => {
+  const camera = new Camera(1200, 800);
+  const pixel = { x: 700, y: 300 };
+  const onPlane = camera.toWorld(pixel);
+  const onHill = camera.toWorld(pixel, testHill());
+  assert.deepEqual(camera.toWorld(pixel), onPlane, 'no sampler means the plane, unchanged');
+  assert.ok(Math.hypot(onHill.x - onPlane.x, onHill.y - onPlane.y) > 1,
+    'and handing one over actually changes the answer');
 });
 
 test('points behind the near plane do not project', () => {
@@ -94,19 +187,6 @@ test('lighting stays between the ambient floor and full sun', () => {
   }
 });
 
-test('a ground sprite facing north keeps its top towards north', () => {
-  const v = view();
-  const jacobian = groundJacobian(v, 0, 0);
-  const [a, b, c, d, e, f] = groundTransform(jacobian, Math.PI / 2);
-  // The image's top edge is local -y, which should land north of the origin,
-  // and north is up the screen.
-  const topEdgeScreenY = f + d * -1;
-  assert.ok(topEdgeScreenY < f, 'sprite top draws above its centre');
-  const rightEdgeScreenX = e + a * 1;
-  assert.ok(rightEdgeScreenX > e, 'sprite right draws right of its centre');
-  assert.ok(Math.abs(b) < 1e-9 && Math.abs(c) < 1e-9, 'no skew when facing north');
-});
-
 /** Run the camera forward until it stops moving. */
 function settle(camera, seconds = 1 / 60, limit = 600) {
   for (let step = 0; step < limit && camera.update(seconds); step += 1) {
@@ -128,15 +208,23 @@ test('the camera keeps the anchor under the cursor throughout a zoom', () => {
   }
 });
 
-test('panning drags the ground point under the cursor', () => {
+test('panning brings the grabbed ground point under the cursor, trailing it there', () => {
   const camera = new Camera(1200, 800);
   const from = { x: 400, y: 500 };
   const to = { x: 700, y: 420 };
   const grabbed = camera.toWorld(from);
   camera.panFrom(from, to);
+
   camera.update(1 / 60);
-  const released = camera.toWorld(to);
-  assert.ok(Math.hypot(released.x - grabbed.x, released.y - grabbed.y) < 1e-6);
+  const afterOneFrame = camera.toWorld(to);
+  const lag = Math.hypot(afterOneFrame.x - grabbed.x, afterOneFrame.y - grabbed.y);
+  assert.ok(lag > 0, 'the view trails the cursor rather than snapping to it');
+
+  // Still holding, so no throw is added: the view simply catches up.
+  settle(camera);
+  const settled = camera.toWorld(to);
+  assert.ok(Math.hypot(settled.x - grabbed.x, settled.y - grabbed.y) < 1e-6,
+    'and closes the gap once it catches up');
 });
 
 test('a released drag carries on and then stops', () => {
@@ -195,4 +283,63 @@ test('the horizon stays off screen at the lowest allowed tilt', () => {
   const v = view({ elevation: CAMERA.minElevation, height });
   const horizonY = v.centreY - v.focal * Math.tan(CAMERA.minElevation * Math.PI / 180);
   assert.ok(horizonY < 0, `horizon at ${horizonY.toFixed(0)}px should be above the viewport`);
+});
+
+test('projectCorners agrees with projectPoint on every corner of a lattice', () => {
+  const v = view();
+  const xs = [-90, -45, 0, 45, 90, 135];
+  const ys = [-60, -20, 20, 60, 100];
+  const count = xs.length * ys.length;
+  const into = {
+    heights: new Float64Array(count),
+    screenX: new Float64Array(count),
+    screenY: new Float64Array(count),
+    usable: new Uint8Array(count),
+  };
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = 0; j < ys.length; j += 1) {
+      into.heights[i * ys.length + j] = Math.sin(xs[i] * 0.01) * 30 + Math.cos(ys[j] * 0.02) * 12;
+    }
+  }
+  projectCorners(v, xs, ys, into);
+
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = 0; j < ys.length; j += 1) {
+      const slot = i * ys.length + j;
+      const one = projectPoint(v, xs[i], ys[j], into.heights[slot]);
+      if (!one) {
+        assert.equal(into.usable[slot], 0, `corner ${slot} is behind the camera and should be unusable`);
+        continue;
+      }
+      assert.equal(into.usable[slot], 1);
+      assert.equal(into.screenX[slot], one.x, `corner ${slot} x`);
+      assert.equal(into.screenY[slot], one.y, `corner ${slot} y`);
+    }
+  }
+});
+
+test('projectCorners marks corners behind the camera unusable, leaving no stale flag', () => {
+  const v = view();
+  const xs = [0, 40];
+  // Far enough behind the camera to fall through the near plane.
+  const ys = [-4000, 40];
+  const count = xs.length * ys.length;
+  const into = {
+    heights: new Float64Array(count),
+    screenX: new Float64Array(count),
+    screenY: new Float64Array(count),
+    usable: new Uint8Array(count).fill(1),
+  };
+  projectCorners(v, xs, ys, into);
+  for (let i = 0; i < xs.length; i += 1) {
+    for (let j = 0; j < ys.length; j += 1) {
+      const slot = i * ys.length + j;
+      assert.equal(Boolean(into.usable[slot]), projectPoint(v, xs[i], ys[j], 0) !== null);
+    }
+  }
+});
+
+test('lightingForVector matches lightingFor for the same normal', () => {
+  const normal = normalOf({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0.3 }, { x: 0, y: 1, z: -0.2 });
+  assert.equal(lightingForVector(normal.x, normal.y, normal.z), lightingFor(normal));
 });

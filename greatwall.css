@@ -93,6 +93,14 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .readout-season .readout-value { color: var(--parchment); font-size: 19px; }
 
+/* The breakdown behind the income figure: small enough to stay out of the way. */
+.readout-formula {
+	font-family: var(--body);
+	font-size: 10px;
+	color: var(--parchment-dim);
+	font-variant-numeric: tabular-nums;
+}
+
 .viewTools { display: flex; gap: 8px; margin-left: auto; }
 
 .iconButton {
@@ -166,6 +174,42 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .toolButton.is-disabled { opacity: .35; cursor: not-allowed; }
 .toolButton.is-disabled:hover { border-color: transparent; transform: none; }
+
+/* --- dispatch menu ------------------------------------------------------ */
+
+.dispatchMenu {
+	position: fixed;
+	display: none;
+	z-index: 7;
+	gap: 6px;
+	transform: translate(-50%, -120%);
+	pointer-events: none;
+}
+
+.dispatchButton {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	min-width: 96px;
+	padding: 8px 10px;
+	font-family: var(--display);
+	font-size: 11px;
+	letter-spacing: .04em;
+	line-height: 1.5;
+	text-align: center;
+	white-space: pre-line;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 3px;
+	box-shadow: var(--lift);
+	transition: var(--ease);
+	pointer-events: auto;
+}
+
+.dispatchButton:hover { border-color: var(--bronze); box-shadow: var(--glow); transform: translateY(-2px); }
 
 /* --- full screen overlays ---------------------------------------------- */
 
@@ -250,6 +294,31 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 }
 
 .menuItem-primary { color: var(--bronze); border-color: var(--bronze-deep); }
+
+/* --- level picker ------------------------------------------------------ */
+
+.levelList { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 26px; }
+
+.levelItem {
+	width: 300px;
+	padding: 9px 14px;
+	text-align: left;
+	background: none;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	opacity: .55;
+}
+
+.levelItem:hover { opacity: .85; }
+
+.levelItem.is-chosen { opacity: 1; border-color: var(--bronze-deep); }
+
+.levelName { display: block; font-size: 14px; letter-spacing: .09em; text-transform: uppercase; }
+
+.levelBlurb { display: block; margin-top: 3px; font-size: 12px; line-height: 1.6; opacity: .75; }
 
 /* --- modals ------------------------------------------------------------ */
 
@@ -374,6 +443,8 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 	.readouts { gap: 14px; }
 	.readout { min-width: 64px; }
 	.readout-value { font-size: 17px; }
+	/* The formula is the least essential line at this width; the total stands on its own. */
+	.readout-formula { display: none; }
 	.toolButton { width: 60px; }
 	.modal-content { padding: 26px 24px; }
 }

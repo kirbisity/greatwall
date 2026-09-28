@@ -12,7 +12,7 @@ globalThis.Image = class {
 
 const { Atmosphere } = await import('../src/atmosphere.js');
 const { Camera } = await import('../src/camera.js');
-const { CLOUD_LAYERS, FOG, SEASONS } = await import('../src/config.js');
+const { CAMERA, CLOUD_LAYERS, FOG, SEASONS } = await import('../src/config.js');
 const { loadSettings, saveSettings, settings } = await import('../src/settings.js');
 
 function fakeContext() {
@@ -31,9 +31,18 @@ function camera() {
   return new Camera(1200, 800);
 }
 
-test('one cloud per layer count, across every layer', () => {
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
-  const expected = CLOUD_LAYERS.reduce((total, layer) => total + layer.count, 0);
+/** Spread placements, so clouds land across the field rather than in a heap. */
+function spread() {
+  let step = 0;
+  return () => {
+    step += 1;
+    return (step * 0.6180339887) % 1;
+  };
+}
+
+test('one cloud per layer count, across every layer, plus its winter standbys', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const expected = CLOUD_LAYERS.reduce((total, layer) => total + layer.count + (layer.winterExtra ?? 0), 0);
   assert.equal(atmosphere.clouds.length, expected);
   for (const layer of CLOUD_LAYERS.keys()) {
     assert.ok(atmosphere.clouds.some((cloud) => cloud.layer === layer), `layer ${layer} unused`);
@@ -41,14 +50,14 @@ test('one cloud per layer count, across every layer', () => {
 });
 
 test('ground is further away higher up the screen', () => {
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
   const near = atmosphere.groundDistanceAt(800);
   const far = atmosphere.groundDistanceAt(0);
   assert.ok(far > near, `expected ${far} > ${near}`);
 });
 
 test('fog is one gradient fill whose haze thickens with distance', () => {
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
   const context = fakeContext();
   atmosphere.drawFog(context, 0);
 
@@ -59,82 +68,180 @@ test('fog is one gradient fill whose haze thickens with distance', () => {
   assert.ok(alphaAt(0) > alphaAt(FOG.samples), 'top of screen is hazier than the bottom');
   for (const stop of context.calls.stops) {
     const alpha = Number(stop.color.match(/([\d.]+)\)$/)[1]);
-    assert.ok(alpha >= 0 && alpha <= FOG.maxAlpha + 1e-9, `alpha ${alpha} out of range`);
+    assert.ok(alpha >= 0 && alpha <= FOG.maxOpacity + 1e-9, `alpha ${alpha} out of range`);
   }
 });
 
-test('fog takes its colour from the season', () => {
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
+test('fog takes its colour from the season, exactly at each one\'s midpoint', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
   for (const [index, season] of SEASONS.entries()) {
     const context = fakeContext();
-    atmosphere.drawFog(context, index);
+    atmosphere.drawFog(context, index + 0.5);
     assert.ok(context.calls.stops.every((stop) => stop.color.includes(season.haze)),
       `season ${season.name} should tint with ${season.haze}`);
   }
 });
 
-test('every cloud is drawn once and alpha is restored afterwards', () => {
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5 });
-  const context = fakeContext();
-  atmosphere.drawClouds(context);
-  assert.equal(context.calls.images, atmosphere.clouds.length);
+test('fog blends smoothly across a season turning, not in a hard cut', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const colourAt = (phase) => {
+    const context = fakeContext();
+    atmosphere.drawFog(context, phase);
+    return context.calls.stops[0].color.match(/rgba\(([\d, ]+),/)[1].split(',').map(Number);
+  };
+  // Either side of a season turn (phase 1 = the Autumn/Winter boundary), the
+  // haze should be close to the boundary colour, not jump between the two
+  // seasons' own midpoint colours.
+  const justBefore = colourAt(0.999);
+  const atTheTurn = colourAt(1);
+  const justAfter = colourAt(1.001);
+  const jump = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+  assert.ok(jump(justBefore, atTheTurn) < 2, 'a season turning should not visibly jump the haze');
+  assert.ok(jump(atTheTurn, justAfter) < 2, 'a season turning should not visibly jump the haze');
+});
+
+test('fog thickens as the camera climbs', () => {
+  const low = camera();
+  low.distance = CAMERA.minDistance;
+  low.targetDistance = low.distance;
+  low.elevation = CAMERA.minElevation;
+  low.targetElevation = low.elevation;
+  low.refreshView();
+
+  const high = camera();
+  high.distance = CAMERA.maxDistance;
+  high.targetDistance = high.distance;
+  high.elevation = CAMERA.maxElevation;
+  high.targetElevation = high.elevation;
+  high.refreshView();
+
+  const alphaAtTop = (view) => {
+    const atmosphere = new Atmosphere(view, { random: spread() });
+    const context = fakeContext();
+    atmosphere.drawFog(context, 0);
+    return Number(context.calls.stops[0].color.match(/([\d.]+)\)$/)[1]);
+  };
+  assert.ok(alphaAtTop(high) > alphaAtTop(low), 'a higher camera should read hazier at the same screen row');
+});
+
+function captureClouds(atmosphere, seasonPhase = 0) {
+  const drawn = [];
+  const context = {
+    globalAlpha: 1,
+    drawImage: (image, x, y, w, h) => drawn.push({ x, y, w, h, alpha: context.globalAlpha }),
+  };
+  atmosphere.drawClouds(context, seasonPhase);
+  return { drawn, context };
+}
+
+test('winter stands more clouds up, gained gradually rather than all at once', () => {
+  const WINTER = 1;
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const summerCount = captureClouds(atmosphere, 3.5).drawn.length;
+  const approachingWinter = captureClouds(atmosphere, WINTER - 0.2).drawn.length;
+  const deepWinter = captureClouds(atmosphere, WINTER + 0.5).drawn.length;
+  assert.ok(approachingWinter > summerCount, 'more clouds should already be gathering ahead of winter');
+  assert.ok(deepWinter > approachingWinter, 'winter itself should have even more than the approach to it');
+});
+
+test('clouds are drawn and alpha is restored afterwards', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const { drawn, context } = captureClouds(atmosphere);
+  assert.ok(drawn.length > 0, 'something is in the sky');
+  assert.ok(drawn.every((cloud) => cloud.alpha > 0 && cloud.alpha <= 1), 'sane alpha');
   assert.equal(context.globalAlpha, 1, 'alpha reset so later drawing is opaque');
 });
 
-test('clouds stay placed however far the camera pans or time runs', () => {
+// The point of putting clouds at altitude: a deck is nearer the camera than
+// the ground it floats over, so panning slides it further across the screen
+// than that same patch of ground.
+test('a deck slides past faster than the ground beneath it', () => {
   const view = camera();
-  let clock = 0;
-  const atmosphere = new Atmosphere(view, { random: () => 0.5, now: () => clock });
-  const positions = [];
-  const original = atmosphere.sprite;
-  const context = {
-    globalAlpha: 1,
-    drawImage: (image, x, y, w, h) => positions.push({ x, y, w, h }),
-  };
-  for (const pan of [-50000, -1, 0, 1, 50000]) {
-    view.centerOn({ x: pan, y: -pan });
-    clock += 9e6;
-    atmosphere.drawClouds(context);
+  // Pull back so all three decks have clouds in frame to compare.
+  view.distance = 900;
+  view.targetDistance = 900;
+  view.refreshView();
+  // A frozen clock keeps drift out of it, so the only thing that can move a
+  // cloud in world space is the field wrapping round.
+  const atmosphere = new Atmosphere(view, { random: spread(), now: () => 0 });
+
+  const snapshot = () => new Map(atmosphere.placeClouds().map((placed) => [placed.cloud, placed]));
+  const before = snapshot();
+  view.centerOn({ x: 60, y: 0 });
+  const after = snapshot();
+
+  const byLayer = new Map();
+  for (const [cloud, was] of before) {
+    const now = after.get(cloud);
+    // A cloud that wrapped to the far side of the field is not the same
+    // journey, so it is not a fair comparison.
+    if (!now || Math.hypot(now.world.x - was.world.x, now.world.y - was.world.y) > 1e-6) {
+      continue;
+    }
+    const groundWas = view.toScreen({ x: was.world.x, y: was.world.y, z: 0 });
+    view.centerOn({ x: 0, y: 0 });
+    const groundBefore = view.toScreen({ x: was.world.x, y: was.world.y, z: 0 });
+    view.centerOn({ x: 60, y: 0 });
+
+    const cloudShift = Math.abs(now.screen.x - was.screen.x);
+    const groundShift = Math.abs(groundWas.x - groundBefore.x);
+    assert.ok(cloudShift > groundShift,
+      `cloud moved ${cloudShift.toFixed(0)}px, the ground under it ${groundShift.toFixed(0)}px`);
+    byLayer.set(cloud.layer, cloudShift / groundShift);
   }
-  assert.ok(positions.length > 0);
-  for (const position of positions) {
-    assert.ok(Number.isFinite(position.x) && Number.isFinite(position.y), 'finite position');
-    assert.ok(position.x > -position.w - 1 && position.x < view.width + position.w + 1,
-      `x ${position.x} outside the wrap band`);
-    assert.ok(position.y > -position.h - 1 && position.y < view.height + position.h + 1,
-      `y ${position.y} outside the wrap band`);
-  }
-  assert.equal(atmosphere.sprite, original);
+  assert.ok(byLayer.size >= 2, 'needs at least two decks in view to compare');
+
+  const levels = [...byLayer.keys()].sort((a, b) => a - b);
+  assert.ok(byLayer.get(levels.at(-1)) > byLayer.get(levels[0]),
+    'and the higher deck outruns the lower one by more');
 });
 
-// Drift must come from the clock, not the game loop, or the sky freezes
-// whenever the game is paused behind a menu.
+test('a deck thins out as the camera drops onto it', () => {
+  const view = camera();
+  const atmosphere = new Atmosphere(view, { random: spread() });
+  const high = captureClouds(atmosphere).drawn.length;
+
+  // Drop the camera until it is among the lower decks.
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = CAMERA.minDistance;
+  view.refreshView();
+  const low = captureClouds(atmosphere).drawn;
+  assert.ok(low.length < high, 'the decks overhead are gone');
+  assert.ok(low.every((cloud) => cloud.alpha > 0), 'whatever is left is still visible');
+});
+
 test('clouds keep drifting while the game is paused', () => {
   let clock = 0;
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5, now: () => clock });
-  const xAt = (time) => {
-    clock = time;
-    const seen = [];
-    atmosphere.drawClouds({ globalAlpha: 1, drawImage: (image, x) => seen.push(x) });
-    return seen;
-  };
-  const before = xAt(0);
-  const after = xAt(4000);
-  assert.ok(before.some((x, index) => Math.abs(after[index] - x) > 20),
-    'four seconds of sky time should visibly move the clouds');
+  const atmosphere = new Atmosphere(camera(), { random: spread(), now: () => clock });
+  const before = captureClouds(atmosphere).drawn.map((cloud) => cloud.x);
+  clock = 6000;
+  const after = captureClouds(atmosphere).drawn.map((cloud) => cloud.x);
+  assert.ok(before.some((x, index) => Math.abs(after[index] - x) > 5),
+    'six seconds of sky time should visibly move the clouds');
 });
 
-test('each layer drifts faster than the one below it', () => {
-  let clock = 0;
-  const atmosphere = new Atmosphere(camera(), { random: () => 0.5, now: () => clock });
+test('clouds tile around the camera however far it travels', () => {
+  const view = camera();
+  const atmosphere = new Atmosphere(view, { random: spread() });
+  for (const place of [0, 900, -1300, 40000, -40000]) {
+    view.centerOn({ x: place, y: -place });
+    const drawn = captureClouds(atmosphere).drawn;
+    assert.ok(drawn.length > 0, `sky is empty at ${place}`);
+    for (const cloud of drawn) {
+      assert.ok(Number.isFinite(cloud.x) && Number.isFinite(cloud.y), 'finite position');
+    }
+  }
+});
+
+test('each deck drifts faster than the one below it', () => {
   const speeds = CLOUD_LAYERS.map((layer) => layer.drift);
   for (let i = 1; i < speeds.length; i += 1) {
-    assert.ok(speeds[i] > speeds[i - 1], 'higher layers drift faster');
+    assert.ok(speeds[i] > speeds[i - 1], 'higher decks drift faster');
   }
-  // A full screen width should take under two minutes at the fastest layer.
-  const crossingSeconds = atmosphere.camera.width / speeds[speeds.length - 1];
-  assert.ok(crossingSeconds < 120, `slowest crossing ${crossingSeconds.toFixed(0)}s is too sluggish`);
-  assert.ok(crossingSeconds > 20, `crossing ${crossingSeconds.toFixed(0)}s would be frantic`);
+  const altitudes = CLOUD_LAYERS.map((layer) => layer.altitude);
+  for (let i = 1; i < altitudes.length; i += 1) {
+    assert.ok(altitudes[i] > altitudes[i - 1], 'and sit higher');
+  }
 });
 
 test('atmosphere is on by default', () => {

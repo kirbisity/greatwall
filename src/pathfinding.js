@@ -1,6 +1,6 @@
-import { distanceSquared } from './geometry.js';
-import { NAVIGATION, RAIDER_STEERING_RADIANS } from './config.js';
-import { isBlocked, routeFrom, siegeTarget } from './navigation.js';
+import { distance, distanceSquared, distanceToSegment, pointToLineDistance } from './geometry.js';
+import { AVOIDANCE, NAVIGATION, RAIDER_STEERING_RADIANS, TURN_EASE } from './config.js';
+import { isBlocked, routeFrom, siegeTarget, wallsNear } from './navigation.js';
 
 const FULL_TURN_RADIANS = 2 * Math.PI;
 
@@ -9,47 +9,169 @@ function midpointOf(wall) {
 }
 
 /**
+ * If a straight run from `from` to `to` would cut through a mountain's
+ * repel circle, redirect round it by whichever tangent point keeps the
+ * whole trip shortest.
+ *
+ * This is deliberately geometry, not a steering force: a force only nudges
+ * the aim, and against something as wide as a mountain a raider can still
+ * be turning towards clear ground well after it has already walked through
+ * the peak -- the turn is rate-limited, the approach is not. A tangent point
+ * is somewhere the direct line to it provably clears the mountain, so
+ * following it -- however fast the turn towards it happens -- eventually
+ * does too. Re-picked with every replan, so it keeps pace with wherever the
+ * raider actually is rather than committing to a single detour up front.
+ */
+function avoidMountains(from, to, mountains) {
+  let target = to;
+  for (const mountain of mountains) {
+    const reach = mountain.radius + AVOIDANCE.mountainRepelMargin;
+    const centre = { x: mountain.x, y: mountain.y };
+    const gap = distance(from, centre);
+    // Already inside the mountain's own reach -- nothing to route round
+    // from here; the way out is however it got in.
+    if (gap <= reach || distanceToSegment(centre, from, target) >= reach) {
+      continue;
+    }
+    const baseAngle = Math.atan2(centre.y - from.y, centre.x - from.x);
+    const offset = Math.asin(Math.min(1, reach / gap));
+    const tangentLength = Math.sqrt(gap * gap - reach * reach);
+    const tangents = [baseAngle + offset, baseAngle - offset].map((angle) => ({
+      x: from.x + Math.cos(angle) * tangentLength,
+      y: from.y + Math.sin(angle) * tangentLength,
+    }));
+    target = distance(tangents[0], to) <= distance(tangents[1], to) ? tangents[0] : tangents[1];
+  }
+  return target;
+}
+
+/**
  * Where this raider should head next: straight at the city when the way is
  * open, otherwise the cheapest gateway round the walls, and failing that the
- * wall barring its path.
+ * wall barring its path. A mountain between here and there detours round it
+ * regardless -- see avoidMountains.
  */
 function chooseWaypoint(raider, navigation) {
+  return avoidMountains(raider.position, pickWaypoint(raider, navigation), navigation.mountains);
+}
+
+function pickWaypoint(raider, navigation) {
   const castle = raider.destination;
+  // Companies that pass through walls have nothing to route around.
+  if (!raider.avoidsWalls) {
+    return castle;
+  }
   if (navigation.barriers.length === 0 || !isBlocked(raider.position, castle, navigation.barriers)) {
     raider.siegeTarget = null;
+    raider.heldGateway = null;
     return castle;
   }
 
-  const route = routeFrom(navigation, raider.position);
-  if (route) {
-    raider.siegeTarget = null;
-    return route.waypoint;
+  // A company that has sworn to batter a section keeps at it. Left to think
+  // again it would drop the siege at once, set off down the very route that
+  // stranded it, give up again, and come back: the loop it was in to start.
+  const sworn = raider.siegeSeconds > 0
+    && raider.siegeTarget
+    && navigation.barriers.includes(raider.siegeTarget);
+
+  // The promise has run out. Hand its patience back, so it truly gives the
+  // way round another go instead of settling in against stone it cannot
+  // break. Batter, walk, batter: each stint long enough to be worth making.
+  if (!sworn && raider.siegeTarget) {
+    raider.stuckSeconds = 0;
+    raider.closestApproach = Infinity;
   }
 
-  // Walled in. Keep hitting the same section so the damage adds up.
+  if (!sworn && raider.stuckSeconds < AVOIDANCE.patienceSeconds) {
+    const route = routeFrom(navigation, raider.position, raider.heldGateway);
+    // A way round that far outruns the direct line is not a way round worth
+    // walking; the stone is the shorter road.
+    const direct = Math.hypot(castle.x - raider.position.x, castle.y - raider.position.y);
+    const worthIt = route && (!raider.besieges
+      || route.cost <= direct * AVOIDANCE.detourTolerance);
+    if (worthIt) {
+      raider.siegeTarget = null;
+      raider.heldGateway = route.waypoint;
+      return route.waypoint;
+    }
+  }
+  if (!raider.besieges) {
+    return castle;
+  }
+
+  // Walled in, or out of patience with the way round. Keep hitting the same
+  // section so the damage adds up, and swear to it for a stint so the blows
+  // land instead of being thought better of a frame later.
   if (!raider.siegeTarget || !navigation.barriers.includes(raider.siegeTarget)) {
     raider.siegeTarget = siegeTarget(navigation, raider.position, castle);
+  }
+  if (raider.siegeTarget && raider.siegeSeconds <= 0) {
+    raider.siegeSeconds = AVOIDANCE.siegeCommitSeconds;
   }
   return raider.siegeTarget ? midpointOf(raider.siegeTarget) : castle;
 }
 
+/**
+ * Nudge the aim away from any wall the company is crowding. This is what turns
+ * a graze along the stone into an arc around it, and it stacks with whatever
+ * route the graph handed down. Mountains do not need this: avoidMountains
+ * already routes the waypoint itself clear of one.
+ */
+function shoveOffWalls(company, waypoint, navigation) {
+  let shiftX = 0;
+  let shiftY = 0;
+  for (const wall of wallsNear(navigation.grid, company.position, AVOIDANCE.repelDistance)) {
+    const gap = pointToLineDistance(company.position, wall.start, wall.end);
+    if (gap >= AVOIDANCE.repelDistance || gap === 0) {
+      continue;
+    }
+    const strength = (1 - gap / AVOIDANCE.repelDistance) ** 2 * AVOIDANCE.repelStrength;
+    // Push along the perpendicular, on whichever side the company already sits.
+    const dx = wall.end.x - wall.start.x;
+    const dy = wall.end.y - wall.start.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const side = Math.sign(
+      (company.position.x - wall.start.x) * dy - (company.position.y - wall.start.y) * dx,
+    ) || 1;
+    shiftX += side * dy / length * strength * AVOIDANCE.repelDistance;
+    shiftY += -side * dx / length * strength * AVOIDANCE.repelDistance;
+  }
+  if (shiftX === 0 && shiftY === 0) {
+    return waypoint;
+  }
+  // Hold the push below the pull of the waypoint, so it bends the approach
+  // rather than replacing it and walking the company round in a circle.
+  const pull = Math.hypot(waypoint.x - company.position.x, waypoint.y - company.position.y);
+  const cap = pull * AVOIDANCE.maxShoveFraction;
+  const shove = Math.hypot(shiftX, shiftY);
+  if (shove > cap) {
+    shiftX *= cap / shove;
+    shiftY *= cap / shove;
+  }
+  return { x: waypoint.x + shiftX, y: waypoint.y + shiftY };
+}
+
 function turnTowards(raider, waypoint) {
-  const desired = Math.atan2(waypoint.y - raider.position.y, waypoint.x - raider.position.x);
+  const desired = raider.wander
+    + Math.atan2(waypoint.y - raider.position.y, waypoint.x - raider.position.x);
   let heading = raider.heading;
 
-  const difference = desired - heading;
-  if (difference <= -Math.PI) {
-    heading -= FULL_TURN_RADIANS;
-  } else if (difference >= Math.PI) {
-    heading += FULL_TURN_RADIANS;
+  // Shortest way round to the wanted heading.
+  let difference = desired - heading;
+  while (difference <= -Math.PI) {
+    difference += FULL_TURN_RADIANS;
+  }
+  while (difference > Math.PI) {
+    difference -= FULL_TURN_RADIANS;
   }
 
-  const deadzone = 4 * RAIDER_STEERING_RADIANS;
-  if (heading < desired - deadzone) {
-    heading = Math.min(desired, heading + RAIDER_STEERING_RADIANS);
-  } else if (heading > desired + deadzone) {
-    heading = Math.max(desired, heading - RAIDER_STEERING_RADIANS);
-  }
+  // Ease into it rather than swinging at a fixed rate, which overshoots and
+  // then has to come back.
+  const turn = Math.max(
+    -RAIDER_STEERING_RADIANS,
+    Math.min(RAIDER_STEERING_RADIANS, difference * TURN_EASE),
+  );
+  heading += turn;
 
   raider.velocity.x = raider.type.speed * Math.cos(heading);
   raider.velocity.y = raider.type.speed * Math.sin(heading);
@@ -62,12 +184,31 @@ function needsNewWaypoint(raider, navigation) {
     || distanceSquared(raider.position, raider.waypoint) < NAVIGATION.arriveRadius ** 2;
 }
 
-export function steerRaider(raider, navigation) {
+/**
+ * Drift this company's private bias on its aim by a hair. Geometry alone is
+ * perfectly repeatable, so a company that steers itself into a corner steers
+ * itself into the same corner next time round for ever. A little noise on the
+ * heading is enough to break the cycle, and stays well under the turn easing
+ * so it reads as a company wavering rather than one staggering.
+ */
+function drift(company, random) {
+  const step = (random() * 2 - 1) * AVOIDANCE.wanderStep;
+  company.wander = Math.max(
+    -AVOIDANCE.wanderRadians,
+    Math.min(AVOIDANCE.wanderRadians, company.wander + step),
+  );
+}
+
+export function steerCompany(raider, navigation, random = Math.random) {
   raider.replanCountdown -= 1;
   if (needsNewWaypoint(raider, navigation)) {
     raider.waypoint = chooseWaypoint(raider, navigation);
     raider.planVersion = navigation.version;
     raider.replanCountdown = NAVIGATION.replanFrames;
+    drift(raider, random);
   }
-  turnTowards(raider, raider.waypoint);
+  const aim = raider.siegeTarget || !raider.avoidsWalls
+    ? raider.waypoint
+    : shoveOffWalls(raider, raider.waypoint, navigation);
+  turnTowards(raider, aim);
 }

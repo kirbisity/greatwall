@@ -9,20 +9,27 @@ export const PIXELS_PER_WORLD_UNIT = 50;
  */
 export const CAMERA = {
   focalLength: 900,
-  initialDistance: 380,
+  initialDistance: 180,
   minDistance: 110,
-  maxDistance: 1600,
+  // Ground tiles are a fixed world size (TERRAIN.cellSize) drawn across the
+  // whole visible ground, so the tile count -- and the cost of a repaint --
+  // grows with the square of how far the camera has pulled back. Kept short
+  // enough that even the worst case (pulled all the way out, tilted to its
+  // shallowest) stays under ~20ms rather than the 300ms-plus a full zoom
+  // range would cost.
+  maxDistance: 220,
   initialElevation: 52,
   minElevation: 35,
-  maxElevation: 85,
+  maxElevation: 55,
   elevationStep: 4,
   nearPlane: 1,
 
   // Zoom and tilt ease towards their target rather than snapping; higher is
   // snappier. A drag becomes momentum that decays at `driftDamping`.
-  smoothing: 14,
-  driftDamping: 5.2,
-  driftCutoff: 1.5,
+  smoothing: 5.5,
+  driftDamping: 1.9,
+  driftCutoff: 3,
+  focusCutoff: 0.05,
 
   // The map is unbounded, so the view is. Past `softLimit` the ground starts
   // resisting and compresses asymptotically towards `hardLimit`, which means
@@ -31,7 +38,7 @@ export const CAMERA = {
   hardLimit: 1400,
 };
 
-export const ZOOM_STEP = 0.08;
+export const ZOOM_STEP = 0.045;
 
 // The top menu and any side chrome overlay the canvas; pointer events inside
 // these bands belong to the UI, not the map.
@@ -41,18 +48,28 @@ export const SIDE_BAR_WIDTH = 0;
 export const STARTING_TOKENS = 100;
 export const INCOME_INTERVAL_SECONDS = 2;
 export const REGEN_FRACTION_PER_PAYOUT = 0.0005;
-export const RAIDER_SPAWN_INTERVAL_SECONDS = 4;
+export const RAIDER_SPAWN_INTERVAL_SECONDS = 2;
 export const SEASON_LENGTH_SECONDS = 60;
 
 export const HARVEST_MULTIPLIER = 2;
 export const WINTER_BUILD_MULTIPLIER = 8;
 
 export const WALL = {
-  maxHealth: 100,
-  // A new section is a foundation course that rises to full strength over
-  // `buildSeconds`. It can be attacked the whole time.
+  maxHealth: 300,
+  // A section is pegged out for `planSeconds` before any stone is laid. While
+  // it is only marked out it is not a wall at all: nothing is blocked by it,
+  // nothing routes around it, and it cannot be attacked. That stops a wall
+  // being thrown up in the face of a breach.
+  planSeconds: 6,
+  // Once building starts it rises to full strength over `buildSeconds`, and
+  // can be attacked the whole way up.
   buildSeconds: 10,
   initialFraction: 0.2,
+  // The Repair tool pays to bring a section back, but not at once: it heals
+  // over this many seconds instead, the same way it went up in the first
+  // place, and the tool icon that marks the work stays over it meanwhile.
+  // See Wall#beginRepair.
+  repairSeconds: 10,
   // How close a wall end must come to a city edge before it snaps onto it.
   brimSnapRadius: 26,
   attack: 1,
@@ -61,12 +78,127 @@ export const WALL = {
   minLength: 30,
   maxLength: 200,
   snapRadius: 20,
+  // How close the cursor must come to a section for Raze, Repair or Fortify
+  // to count it as the one being pointed at.
+  pickRadius: 20,
   reachMargin: 2,
-  // A raider stops steering around a wall once it has been breached this far.
-  intactHealth: 80,
+  // Coin per standing section, charged with the rest of the income each
+  // payout — a wall is upkeep, not just a one-off purchase.
+  upkeepPerSection: 1,
+  // A junction may not gather more than this many sections. Past it, a
+  // build attempt is simply refused — see Game#buildWall.
+  maxEdgesPerNode: 3,
+  // How near a section counts as being astride it, for anything that climbs
+  // over rather than going round.
+  crossDistance: 34,
 };
 
-export const RAIDER_STEERING_RADIANS = 0.01;
+/* ==========================================================================
+ * AI TUNING
+ * Everything that governs how the two sides move and fight. Nothing here is
+ * referenced by name outside this block, so it can all be moved freely.
+ * ========================================================================== */
+
+/** Most a company may turn in one frame. Higher turns tighter. */
+export const RAIDER_STEERING_RADIANS = 0.032;
+
+/**
+ * How much of the remaining turn is taken each frame, before the cap above.
+ * Low values ease into a new heading instead of snapping onto it, which is
+ * what keeps a company from sawing back and forth around its aim.
+ */
+export const TURN_EASE = 0.1;
+
+/** How companies treat walls. */
+export const AVOIDANCE = {
+  // Walls are treated as this much wider than they are when planning, so a
+  // company aims well clear of the stone instead of grazing it.
+  wallStandoff: 16,
+  // Inside this distance a wall actively pushes a company away, which is what
+  // makes them arc around an obstacle rather than scrape along it.
+  repelDistance: 26,
+  repelStrength: 0.7,
+  // How far clear of a mountain's own radius a route round it should pass --
+  // see pathfinding.js's avoidMountains.
+  mountainRepelMargin: 30,
+  // The push may only bend the aim this far off the waypoint. Without a cap it
+  // can overpower the waypoint entirely and walk the company round in circles.
+  maxShoveFraction: 0.55,
+
+  // Giving up: a company that has not closed on its destination by
+  // `progressEpsilon` within `patienceSeconds` stops hunting for a way round
+  // and attacks whatever is in its way.
+  patienceSeconds: 7,
+  progressEpsilon: 8,
+
+  // A way round longer than this multiple of the direct line is not worth
+  // walking. Raiders would rather put their shoulders to the stone than march
+  // the length of a wall that someone has drawn right across the map.
+  detourTolerance: 3,
+
+  // Sticking to a choice. Two ways round of near-equal cost trade places as a
+  // company moves, and re-picking the cheaper one every time it thinks walks
+  // it back and forth between them for ever. A new way has to beat the one it
+  // already holds by this much before it is worth swapping to.
+  gatewaySwitchMargin: 40,
+  // Having settled on a section to batter, a company stays on it this long
+  // rather than dropping the siege on its very next thought, wandering back
+  // towards a route it has already failed to walk, and starting over.
+  siegeCommitSeconds: 3,
+
+  // A hair of noise on each company's aim, drifting by `wanderStep` a thought
+  // and held inside `wanderRadians`. Identical companies in identical spots
+  // otherwise make the identical wrong choice for ever; this is what shakes a
+  // deadlocked one out of the loop without it looking drunk.
+  wanderRadians: 0.06,
+  wanderStep: 0.02,
+};
+
+/** Melee: what happens when the two sides meet. */
+export const MELEE = {
+  // Companies lock together once their centres are this close.
+  engageDistance: 32,
+  // Once locked they close right up and interleave, rather than trading blows
+  // at arm's length. This is the separation they settle at.
+  lockedGap: 4,
+  // How fast they close that last distance, in world units a second.
+  closeRate: 26,
+  // Damage is scaled so a typical pairing resolves in about five seconds.
+  damageRate: 1.7,
+  // A fight that has not resolved by now breaks off, so nothing locks forever.
+  maxSeconds: 9,
+  // Both sides are held still for this long after a fight before moving on.
+  recoverySeconds: 0.6,
+};
+
+/** How the imperial army behaves once ordered out. Cost lives on each tier. */
+export const IMPERIAL = {
+  // A company will break off towards any raider inside this range.
+  huntRadius: 320,
+  // Having won, it looks this far for another fight before going home.
+  rehuntRadius: 260,
+  // How close to its ordered ground counts as having arrived.
+  arriveRadius: 30,
+  // Companies are recalled if they stray this far from the city, and will not
+  // take up the hunt again until they are back inside `returnRadius`.
+  leashRadius: 380,
+  returnRadius: 170,
+
+  // Imperial companies walk through walls rather than round them, holding
+  // their formation, but they pick their way over the stone: astride a
+  // section (see WALL.crossDistance) they slow to this much of their pace.
+  crossSpeed: 0.45,
+};
+
+/**
+ * How raiders react to imperial companies. Positive keeps them away, negative
+ * draws them in, zero means they ignore them and press on for the city.
+ */
+export const FEAR = {
+  weight: 0.45,
+  // Only companies inside this range are noticed at all.
+  noticeRadius: 220,
+};
 
 /**
  * Raiders route by a graph of the ways past the wall network. It is rebuilt
@@ -75,11 +207,11 @@ export const RAIDER_STEERING_RADIANS = 0.01;
  */
 export const NAVIGATION = {
   // How far past a wall's tip a gateway sits, clear of the longest weapon reach.
-  gatewayClearance: 12,
+  gatewayClearance: 22,
   // Rebuild cost grows with the square of this, and a build drag rebuilds per
   // section, so it is capped well below what a sane wall layout ever produces.
   maxGateways: 32,
-  replanFrames: 20,
+  replanFrames: 10,
   arriveRadius: 10,
 };
 export const SPAWN_MIN_DISTANCE = 200;
@@ -87,43 +219,146 @@ export const SPAWN_MAX_DISTANCE = 400;
 
 export const CASTLE_TYPES = {
   CC0: {
-    name: 'Small Castle', cost: 300, maxHealth: 100, wealth: 40,
+    name: 'Small Castle', cost: 300, maxHealth: 500, wealth: 40,
     attack: 2, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
   },
   CC1: {
-    name: 'Medium Castle', cost: 1000, maxHealth: 200, wealth: 80,
+    name: 'Medium Castle', cost: 1000, maxHealth: 1000, wealth: 80,
     attack: 2, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
   },
   CC2: {
-    name: 'Fortified City', cost: 3000, maxHealth: 400, wealth: 160,
+    name: 'Fortified City', cost: 3000, maxHealth: 2000, wealth: 160,
     attack: 2, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
   },
 };
 
+/**
+ * How long an upgrade takes to show up on the ground. The old structure sinks
+ * away over `demolishSeconds`, then the new one rises over `buildSeconds` —
+ * near the centre first, the rim last. Until it has finished rising, the
+ * castle still fights and earns at its old strength: only the shape changes
+ * early, not the substance.
+ */
+export const CASTLE_REBUILD = {
+  demolishSeconds: 2,
+  buildSeconds: 20,
+  // The fraction of the build phase spent waiting before the outermost part
+  // so much as stirs, so the centre is well up before the rim starts.
+  staggerFraction: 0.6,
+};
+
+/** Portraits shown over a company, one tier of one per faction. */
+export const AVATARS = {
+  steppeLight: 'images/unit_avatar/avatar_mongol_light.png',
+  steppeRegular: 'images/unit_avatar/avatar_mongol_regular.png',
+  steppeHeavy: 'images/unit_avatar/avatar_mongol_heavy.png',
+  imperialLight: 'images/unit_avatar/avatar_chinese_light.png',
+  imperialRegular: 'images/unit_avatar/avatar_chinese_regular.png',
+  imperialHeavy: 'images/unit_avatar/avatar_chinese_heavy.png',
+  japanLight: 'images/unit_avatar/avatar_japanese_ashigaru.svg',
+  japanRegular: 'images/unit_avatar/avatar_japanese_samurai.svg',
+  japanHeavy: 'images/unit_avatar/avatar_japanese_sohei.svg',
+};
+
+export const AVATAR = {
+  // Drawn at this many pixels wide, within these bounds as the view zooms.
+  width: 38,
+  minWidth: 22,
+  maxWidth: 64,
+  // Clear of the health bar beneath it.
+  gap: 5,
+};
+
+/** The banner flown over a city, planted above the tallest roof. */
+/**
+ * What the Fortify tool buys. A section keeps its identity all the way up —
+ * the same Wall grows rather than being replaced — so a fortified stretch
+ * costs the scene no more geometry than a plain one.
+ *
+ * `cost`, `health` and `upkeep` are multiples of the plain section's own, and
+ * `paid` is everything spent to reach this tier, which is what Raze gives a
+ * share of back:
+ * building plain and fortifying twice comes to 1 + 1 + 2 = four times the
+ * original price, and leaves a section with four times the health and four
+ * times the upkeep. `seconds` is how long the stone takes to grow into its
+ * new shape, during which the section still fights at its old strength.
+ */
+export const WALL_TIERS = [
+  { name: 'Wall', heightScale: 1, widthScale: 1, health: 1, upkeep: 1, cost: 0, paid: 1, seconds: 0 },
+  { name: 'Raised Wall', heightScale: 2, widthScale: 1, health: 2, upkeep: 2, cost: 1, paid: 2, seconds: 10 },
+  { name: 'Reinforced Wall', heightScale: 2, widthScale: 2, health: 4, upkeep: 4, cost: 2, paid: 4, seconds: 20 },
+];
+
+export const FLAG = {
+  sprite: 'images/flags/flag_song.png',
+  width: 20,
+  minWidth: 12,
+  maxWidth: 34,
+};
+
 export const RAIDER_TYPES = {
   CR0: {
-    name: 'Sabre Cavalry', speed: 18, maxHealth: 10, attack: 5,
-    defense: 2, range: 5, lineOfSight: 40,
-    sprites: ['images/units/saber_cavalry_eastern.png', 'images/units/saber_cavalry_eastern1.png'],
+    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
+    defense: 2, range: 5, lineOfSight: 40, avatar: AVATARS.steppeRegular,
   },
   IR0: {
-    name: 'Light Axe Infantry', speed: 7, maxHealth: 20, attack: 2,
-    defense: 3, range: 2, lineOfSight: 30,
-    sprites: ['images/units/light_infantry.png', 'images/units/light_infantry1.png'],
+    name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
+    defense: 3, range: 2, lineOfSight: 30, avatar: AVATARS.steppeLight,
   },
   IR1: {
-    name: 'Light Sword Infantry', speed: 7, maxHealth: 20, attack: 3,
-    defense: 5, range: 2, lineOfSight: 30,
-    sprites: ['images/units/sword_infantry.png', 'images/units/sword_infantry1.png'],
+    name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
+    defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
-    name: 'Spear Cavalry', speed: 20, maxHealth: 10, attack: 10,
-    defense: 2, range: 6, lineOfSight: 50,
-    sprites: ['images/units/spear_cavalry.png', 'images/units/spear_cavalry1.png'],
+    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 8,
+    defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeHeavy,
   },
 };
 
 export const STARTING_CASTLE_TYPE = 'CC0';
+
+/**
+ * The imperial army comes in three tiers, unlocked as the city grows — see
+ * `CASTLE_GUARD_TIERS`. Each carries its own cost, so a heavier company is a
+ * heavier purchase.
+ */
+export const GUARD_TYPES = {
+  IG_LIGHT: {
+    name: 'Imperial Light Guard', speed: 7, maxHealth: 25, attack: 2,
+    defense: 3, range: 2, cost: 260, avatar: AVATARS.imperialLight,
+  },
+  IG0: {
+    name: 'Imperial Guardsman', speed: 6, maxHealth: 30, attack: 3,
+    defense: 4, range: 2, cost: 450, avatar: AVATARS.imperialRegular,
+  },
+  IG_HEAVY: {
+    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40, attack: 3,
+    defense: 6, range: 2, cost: 680, avatar: AVATARS.imperialHeavy,
+  },
+  // The island garrison. Same three rungs at the same prices as the imperial
+  // army, so a level can swap the defenders it fields without also changing
+  // what the player can afford: the ashigaru trade a little armour for pace,
+  // and the sohei a little pace for reach off the wall.
+  JG_ASHIGARU: {
+    name: 'Ashigaru Spearman', speed: 8, maxHealth: 24, attack: 2,
+    defense: 3, range: 3, cost: 260, avatar: AVATARS.japanLight,
+  },
+  JG_SAMURAI: {
+    name: 'Samurai Retainer', speed: 6, maxHealth: 30, attack: 4,
+    defense: 4, range: 2, cost: 450, avatar: AVATARS.japanRegular,
+  },
+  JG_SOHEI: {
+    name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42, attack: 3,
+    defense: 6, range: 3, cost: 680, avatar: AVATARS.japanHeavy,
+  },
+};
+
+/** Which guard tiers a castle can field, unlocked as it grows. */
+export const CASTLE_GUARD_TIERS = {
+  CC0: ['IG_LIGHT'],
+  CC1: ['IG_LIGHT', 'IG0'],
+  CC2: ['IG_LIGHT', 'IG0', 'IG_HEAVY'],
+};
 
 // One row per season; the last row repeats once the seasons run past it.
 export const SEASON_RAIDER_MIX = [
@@ -143,11 +378,141 @@ export const SEASON_MESSAGES = [
 ];
 
 /** Terrain is painted as a radial wash so the map reads as lit from above. */
+/**
+ * The landscape. Height is scenery only — companies walk a flat plane and are
+ * drawn sitting on the ground — but woodland does slow them down.
+ */
+export const TERRAIN = {
+  // Rolling hills, plus a finer grain on top of them.
+  hillScale: 300,
+  hillHeight: 44,
+  detailScale: 130,
+  detailHeight: 4,
+  // Slopes are gentle in world terms, so the shading is exaggerated or the
+  // hills read as a flat plain.
+  slopeRelief: 4,
+
+  // Ground under a settlement is levelled, easing back into the hillside.
+  levelSkirt: 60,
+  // A deliberate rise at the middle of the map, on top of whatever the noise
+  // is doing. Null everywhere but the island, which is built around one --
+  // see Terrain#hillAt and the contours walls terrace up it.
+  hill: null,
+
+  // Woodland. Cover above the threshold grows trees, thicker towards 1.
+  // Only grass grows any -- see Terrain.treesWithin.
+  forestScale: 240,
+  forestThreshold: 0.50,
+  treeSpacing: 18,
+  treeSize: 5.4,
+
+  // Trees are felled this near a wall, and anywhere a city stands.
+  clearOfWall: 16,
+
+  // Companies lose this much of their pace in the thickest wood.
+  forestDrag: 0.45,
+  // What climbing costs. A company is slowed by the gradient of the ground
+  // along the way it is actually heading, so the same hillside is hard work
+  // going up, ordinary going along, and no trouble coming down. Most ground
+  // is nearly level -- measured, the median gradient on every level is
+  // around 0.05 -- so this barely touches the open field and tells heavily
+  // on a hillside: pace 0.82 at a gradient of 0.1, 0.56 at 0.35, 0.31 at 1.
+  climbDrag: 2.2,
+  // Nothing is ever slowed past this, so no slope can leave a company
+  // looking stuck.
+  minClimbPace: 0.25,
+  // How far ahead the ground is sampled to work out that gradient. Short
+  // enough to feel the slope underfoot rather than the hill as a whole.
+  climbSample: 6,
+
+  // Mountains: a few, rough-shaped, standing well above the rolling hills.
+  // One lattice cell (mountainSpacing across) has mountainChance of holding
+  // one at all, so most cells are empty and the ones that aren't are spread
+  // out -- see Terrain's mountainAt. Kept comfortably under mountainSpacing
+  // so a point only ever needs to check its own cell's neighbours.
+  mountainSpacing: 300,
+  mountainChance: 0.35,
+  mountainMinRadius: 45,
+  mountainMaxRadius: 100,
+  mountainMinHeight: 45,
+  mountainMaxHeight: 75,
+  // How far past its silhouette a mountain's slope keeps easing down to the
+  // surrounding ground, rather than ending at a cliff.
+  mountainSkirt: 40,
+  // Noise scale for the wobble on a mountain's outline -- how many bumps a
+  // trip around it passes through, roughly.
+  mountainShapeScale: 2.2,
+  // Ground reads as bare rock once a mountain has raised it by this much.
+  mountainRockBump: 14,
+  // How far out from a settlement mountains are worth asking about at all --
+  // comfortably past where a raider could ever spawn.
+  mountainFieldRadius: 500,
+
+  // Mesh drawn for the ground: a fixed-size tile in world units, a quarter
+  // the size of the old zoom-compensated cell. It is not resized for the
+  // camera, so a tile genuinely grows and shrinks on screen as the camera
+  // zooms rather than being held at a constant apparent size. Drawn across
+  // the whole visible ground -- see CAMERA.maxDistance for how the zoom
+  // range is kept short enough that this stays cheap at any distance.
+  cellSize: 9,
+
+  // Ground colour reads as patches of grass, moss, dirt and bare rock, picked
+  // per cell from its own noise rather than tinted by season -- the year now
+  // shows through the fog, not the dirt underfoot.
+  groundScale: 200,
+  mossThreshold: 0.40,
+  dirtThreshold: 0.60,
+  rockThreshold: 0.78,
+  grassColor: '#6f8a49',
+  mossColor: '#546b39',
+  dirtColor: '#8a7350',
+  rockColor: '#8c887c',
+  // A second, finer noise mottles each band's colour a little, so a patch
+  // of grass reads as textured turf rather than one flat fill.
+  mottleScale: 30,
+  mottleStrength: 0.18,
+
+  // Autumn turns the green bands gold -- but only in patches, picked by a
+  // noise of their own, so the map reads as woodland colour coming on
+  // unevenly rather than the whole field being repainted at once. Ground
+  // above the threshold turns, the more so the further above it sits.
+  autumnPatchScale: 55,
+  autumnPatchThreshold: 0.45,
+  autumnGold: '#c98f2c',
+};
+
+// Each season's own haze colour, how much it thickens the fog (1 is the
+// baseline in FOG.maxAlpha) and how much it swells the cloud deck (1 is the
+// year-round count in CLOUD_LAYERS). Atmosphere.seasonBlend holds these
+// exactly at a season's midpoint and blends across the turn on either side,
+// so nothing here is ever a hard cut in play.
+// `tint` is a wash laid over the whole view at `tintStrength`, and
+// `groundGold` how far the green bands have turned (see Terrain's
+// groundTintAt). Only the season that owns a look carries it: season.js
+// blends between neighbours, so summer's orange is already fading as autumn
+// arrives and autumn's gold is already creeping in before it.
 export const SEASONS = [
-  { name: 'Autumn', light: '#9a7c4b', dark: '#5f4a2a', accent: '#d9a441', haze: '198, 176, 138' },
-  { name: 'Winter', light: '#8d8a83', dark: '#4f4e4b', accent: '#cfd8dc', haze: '198, 202, 206' },
-  { name: 'Spring', light: '#7f8f52', dark: '#4a5530', accent: '#9ccc65', haze: '178, 190, 154' },
-  { name: 'Summer', light: '#948a46', dark: '#5a5228', accent: '#e0c341', haze: '206, 194, 142' },
+  {
+    name: 'Autumn',
+    haze: '214, 194, 146', hazeDensity: 1, cloudBoost: 1,
+    tint: '226, 150, 62', tintStrength: 0, groundGold: 1,
+  },
+  {
+    name: 'Winter',
+    // Snow coming: the thickest haze of the year, and the most cloud.
+    haze: '236, 239, 241', hazeDensity: 3.2, cloudBoost: 1.9,
+    tint: '198, 216, 236', tintStrength: 0, groundGold: 0,
+  },
+  {
+    name: 'Spring',
+    haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1,
+    tint: '168, 222, 168', tintStrength: 0, groundGold: 0,
+  },
+  {
+    name: 'Summer',
+    haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1,
+    tint: '255, 132, 40', tintStrength: 0.16, groundGold: 0,
+  },
 ];
 
 /**
@@ -158,18 +523,46 @@ export const FOG = {
   samples: 6,
   startDistance: 260,
   falloff: 0.00085,
-  maxAlpha: 0.5,
+  maxAlpha: 0.58,
+  // Extra density per world unit of camera height, so a higher, farther-back
+  // view reads as more atmosphere between the eye and the ground.
+  altitudeFactor: 0.003,
+  // However dense the haze and altitude multiply out to, the ground never
+  // vanishes completely beneath it.
+  maxOpacity: 0.92,
 };
 
 /**
- * Cloud layers, lowest first. Following the effect on the personal site, size,
- * opacity and parallax rise together, so larger clouds read as nearer.
+ * Cloud layers, lowest first. Clouds sit at a real altitude and are projected
+ * like anything else, so a higher deck is nearer the camera and slides past
+ * faster than the ground when the view pans — no parallax constant needed.
+ * Sizes and drift are world units.
  */
+// Altitudes and the field below are sized against the camera's own reach
+// (see CAMERA.maxDistance), so the sky keeps working if that reach changes.
+// `winterExtra` clouds stand by beyond a layer's regular `count`, revealing
+// themselves one at a time as SEASONS' cloudBoost climbs towards winter (see
+// Atmosphere's constructor and placeClouds) -- a fuller sky in the cold
+// months, gained gradually rather than switched on at the solstice.
 export const CLOUD_LAYERS = [
-  { size: 340, opacity: 0.10, parallax: 0.20, drift: 9, count: 5 },
-  { size: 520, opacity: 0.15, parallax: 0.34, drift: 15, count: 4 },
-  { size: 760, opacity: 0.19, parallax: 0.52, drift: 24, count: 3 },
+  { altitude: 26, worldSize: 85, opacity: 0.10, drift: 3.5, count: 12, winterExtra: 5 },
+  { altitude: 45, worldSize: 125, opacity: 0.13, drift: 5.5, count: 9, winterExtra: 4 },
+  { altitude: 71, worldSize: 185, opacity: 0.16, drift: 8.5, count: 7, winterExtra: 3 },
 ];
+
+/**
+ * Clouds tile over this square of world, recentred on wherever the view is.
+ * Sized against the ground a default view takes in, so a handful are always
+ * overhead; off-screen decks cost one projection each and are then dropped.
+ */
+export const CLOUD_FIELD = 420;
+/** A deck fades out over this last stretch as the camera descends onto it. */
+export const CLOUD_FADE_HEIGHT = 90;
+/**
+ * A cloud this much wider than the viewport is one the camera has all but
+ * flown into, so it thins out rather than smothering the map.
+ */
+export const CLOUD_ENGULF_WIDTH = 0.8;
 
 export const CLOUD_SPRITE = 'images/cloud.png';
 
@@ -188,8 +581,61 @@ export const PALETTE = {
   barEdge: '#c9a227',
 };
 
-/** World units per sprite pixel, preserving the scale the flat renderer used. */
-export const SPRITE_UNITS_PER_PIXEL = 0.1;
+/**
+ * Smoke and fire on a battered structure. Both scale up as health falls, so a
+ * wall or city reads as more urgently ablaze the closer it is to falling.
+ */
+export const DAMAGE_EFFECTS = {
+  smokeThreshold: 0.6,
+  fireThreshold: 0.3,
+  maxSmokePuffs: 4,
+  maxFirePuffs: 3,
+  puffLifeSeconds: 2.4,
+  smokeRadius: 5,
+  fireRadius: 3,
+};
+
+/** How long the city burns before the game-over screen shows. */
+export const BREACH = {
+  collapseSeconds: 5,
+};
+
+/**
+ * Houses fill in behind the walls on their own, between the castle and the
+ * ring the walls describe — the bigger that ring, the more of them fit.
+ * They add to income but add nothing to defence: a raider that reaches one
+ * burns it down in a moment.
+ */
+export const HOUSES = {
+  // Capacity is read off how far out the walls sit (the average distance
+  // from the castle to each standing wall's midpoint), one house per this
+  // many units past the castle's own footprint, up to maxHouses.
+  radialSpacing: 8,
+  maxHouses: 40,
+  // Kept clear of the castle itself and of any wall, so a house never
+  // crowds either.
+  innerMargin: 8,
+  wallClearance: 10,
+  // How close two houses may sit centre to centre. Kept separate from
+  // radialSpacing — that governs capacity, this just keeps the (now
+  // bigger) models from overlapping each other.
+  minSpacing: 10,
+  // Denser packing means a random point is more often too close to an
+  // existing house, so it gets more tries to find a clear one.
+  placementAttempts: 16,
+
+  spawnIntervalSeconds: 3,
+  riseSeconds: 5,
+  // Coin per house, added to the base city income each payout.
+  income: 5,
+
+  // How close a raider must come to set one alight, and how long the fire
+  // and smoke play out before it is gone for good.
+  contactRadius: 10,
+  burnSeconds: 3,
+
+  footprint: { width: 5.2, depth: 4.6, height: 3.4, roofHeight: 2.6, overhang: 0.85 },
+};
 
 export const WALL_THICKNESS_UNITS = 3;
 export const WALL_HEIGHT_UNITS = 6;

@@ -32,6 +32,22 @@ export function pointToLineDistance(point, lineStart, lineEnd) {
 }
 
 /**
+ * Shortest distance from `point` to the segment `start`-`end` -- unlike
+ * pointToLineDistance, this stops at the ends rather than measuring to the
+ * infinite line through them.
+ */
+export function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) {
+    return distance(point, start);
+  }
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  return distance(point, { x: start.x + t * dx, y: start.y + t * dy });
+}
+
+/**
  * Whether a point sits inside the damage band around a wall segment: close to
  * the infinite line, and within reach of both endpoints.
  * Compares squared magnitudes so the per-frame combat scan stays sqrt-free.
@@ -55,6 +71,15 @@ export function isWithinSegmentBand(point, lineStart, lineEnd, range, reach) {
 }
 
 
+
+/** Grow a segment outwards from its midpoint by `factor` (1 leaves it alone). */
+export function scaleSegment(start, end, factor) {
+  const half = (factor - 1) / 2;
+  return {
+    start: { x: start.x - (end.x - start.x) * half, y: start.y - (end.y - start.y) * half },
+    end: { x: end.x + (end.x - start.x) * half, y: end.y + (end.y - start.y) * half },
+  };
+}
 
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));

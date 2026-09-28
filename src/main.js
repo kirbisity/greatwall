@@ -3,7 +3,7 @@ import { Game } from './game.js';
 import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
-import { loadSprites } from './sprites.js';
+import { LEVELS } from './levels.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 
 // A long stall must not teleport the camera or fast-forward the game.
@@ -29,17 +29,18 @@ class App {
         structures: document.getElementById('canvas2'),
       },
       this.camera,
-      loadSprites(),
     );
     this.input = new Input({
       game: this.game,
       camera: this.camera,
+      renderer: this.renderer,
       hud: this.hud,
       onChange: () => { this.needsDraw = true; },
       onMenu: () => this.openMenu(),
     });
 
     this.running = false;
+    this.chosenLevel = 0;
     this.needsNewGame = true;
     this.needsDraw = true;
     this.lastFrameAt = 0;
@@ -54,6 +55,7 @@ class App {
     this.hud.setCursor('move');
     this.hud.setAtmosphereLabel(settings.atmosphere);
     this.hud.setRoutesLabel(settings.showRoutes);
+    this.showLevels();
     this.draw();
     this.lastFrameAt = performance.now();
     window.requestAnimationFrame(() => this.frame());
@@ -79,7 +81,26 @@ class App {
       this.input.selectTool('build');
     });
     bind('destroyTool', () => this.input.selectTool('destroy'));
+    bind('repairTool', () => this.input.selectTool('repair'));
+    bind('fortifyTool', () => this.input.selectTool('fortify'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
+    bind('attackTool', (event) => {
+      // Without this, the same click bubbles to the map's own click handler,
+      // which reads the tool as already 'attack' and fires an order at
+      // wherever this button happens to sit on screen — before the tier
+      // picker it just opened has had a chance to be used.
+      event.stopPropagation();
+      this.input.selectTool('attack');
+    });
+  }
+
+  /** Picking a level starts it: there is nothing to unlock, so nothing to wait for. */
+  showLevels() {
+    this.hud.showLevels(LEVELS, this.chosenLevel, (index) => {
+      this.chosenLevel = index;
+      this.showLevels();
+      this.restart();
+    });
   }
 
   toggleAtmosphere() {
@@ -129,7 +150,7 @@ class App {
   }
 
   newGame() {
-    this.game.restart();
+    this.game.loadLevel(LEVELS[this.chosenLevel]);
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
     this.draw();
@@ -161,7 +182,10 @@ class App {
       this.needsDraw = false;
       this.draw();
     }
-    if (this.running && this.game.isDefeated) {
+    // The city keeps burning on screen for BREACH.collapseSeconds before the
+    // game actually ends — game.step() freezes the field the moment it falls,
+    // but drawing carries on so the fire and the blackening play out.
+    if (this.running && this.game.breachComplete) {
       this.gameOver();
     }
     window.requestAnimationFrame(() => this.frame());

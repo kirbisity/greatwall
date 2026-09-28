@@ -6,29 +6,46 @@ const CURSORS = {
   zoom: 'zoom-in',
   build: 'url(images/buildBtn.png), default',
   destroy: 'url(images/destroyBtn.png), default',
+  repair: 'url(images/buildBtn.png), cell',
+  fortify: 'url(images/buildBtn.png), copy',
   upgrade: 'url(images/castleBtn.png), default',
+  attack: 'url(images/attackBtn.png), crosshair',
 };
 
-// Outcomes that leave a usable end to keep drawing from.
-const CHAIN_CONTINUES = new Set(['built', 'repaired', 'intact']);
+// Outcomes that leave a usable end to keep drawing from. Drawing over a
+// section that already stands does nothing, but the chain carries on from
+// it, so a new run can branch off a wall that is already up.
+const CHAIN_CONTINUES = new Set(['built', 'exists']);
+
+// Tools that pick out a single section rather than acting on open ground, so
+// hovering is worth showing before a click commits to anything.
+const HOVER_TOOLS = new Set(['repair', 'fortify']);
 
 const DRAG_ZOOM_SENSITIVITY = 5;
-const MAX_DRAG_ZOOM_STEPS = 3;
+const MAX_DRAG_ZOOM_STEPS = 2;
 
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {
-  constructor({ game, camera, hud, onChange, onMenu }) {
+  constructor({ game, camera, renderer, hud, onChange, onMenu }) {
     this.game = game;
     this.camera = camera;
+    this.renderer = renderer;
     this.hud = hud;
     this.onChange = onChange;
     this.onMenu = onMenu;
+
+    // Read through the game rather than captured, so a level change swaps
+    // the landscape under the cursor along with everything else.
+    this.groundHeight = (x, y) => this.game.terrain.heightAt(x, y);
 
     this.tool = 'move';
     this.pointerDown = false;
     this.pointer = { x: 0, y: 0 };
     this.zoomAnchor = null;
     this.chainPoint = null;
+    // Which guard tier the dispatch menu last picked. Sticky across sends,
+    // so repeat orders of the same company do not reopen the menu.
+    this.selectedGuardType = null;
   }
 
   listen() {
@@ -52,20 +69,55 @@ export class Input {
   selectTool(tool) {
     this.tool = this.tool === tool ? 'move' : tool;
     this.applyTool();
+    if (this.tool === 'attack') {
+      this.openDispatchMenu();
+    } else {
+      this.hud.hideDispatchMenu();
+    }
   }
 
   resetTool() {
     this.tool = 'move';
     this.applyTool();
+    this.hud.hideDispatchMenu();
+  }
+
+  /** Show the tier picker above the castle, so an order carries a company. */
+  openDispatchMenu() {
+    const castle = this.game.castles[0];
+    const options = this.game.dispatchOptions();
+    if (!castle || options.length === 0) {
+      return;
+    }
+    const screen = this.camera.toScreen({ ...castle.position, z: 0 })
+      ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
+    this.hud.showDispatchMenu(options, screen, (typeId) => {
+      this.selectedGuardType = typeId;
+      this.hud.hideDispatchMenu();
+    });
   }
 
   applyTool() {
     this.hud.setCursor(CURSORS[this.tool]);
     this.hud.setActiveTool(this.tool);
+    // Leaving a picking tool drops whatever it had picked out, rather than
+    // leaving a stale section glowing under a different tool.
+    this.renderer.hoveredWall = null;
   }
 
   isOverMap(event) {
     return event.clientY >= TOP_BAR_HEIGHT && event.clientX <= this.camera.width - SIDE_BAR_WIDTH;
+  }
+
+  /**
+   * Where the cursor is pointing on the ground, following whatever hill is
+   * under it. Everything the player aims at -- a wall, a company's orders,
+   * the castle -- stands on the landscape, so reading the cursor against a
+   * flat plane put it somewhere else entirely wherever the ground was not
+   * at sea level.
+   */
+  pointerOnGround() {
+    return this.camera.toWorld(this.pointer, this.groundHeight);
   }
 
   trackPointer(event) {
@@ -76,14 +128,35 @@ export class Input {
   }
 
   handleClick(event) {
-    if (!this.isOverMap(event) || this.tool !== 'upgrade') {
+    if (!this.isOverMap(event)) {
       return;
     }
-    this.trackPointer(event);
-    if (this.game.upgradeCastleAt(this.camera.toWorld(this.pointer))) {
-      this.resetTool();
+    if (this.tool === 'upgrade') {
+      this.trackPointer(event);
+      if (this.game.upgradeCastleAt(this.pointerOnGround())) {
+        this.resetTool();
+      }
+      this.onChange();
+      return;
     }
-    this.onChange();
+    if (this.tool === 'attack') {
+      this.trackPointer(event);
+      this.orderAttack(this.pointerOnGround());
+      this.onChange();
+    }
+  }
+
+  /** Muster the picked tier, or the cheapest, and send it to hold a spot. */
+  orderAttack(target) {
+    const options = this.game.dispatchOptions();
+    const chosen = options.find((option) => option.id === this.selectedGuardType) ?? options[0];
+    if (!chosen) {
+      return;
+    }
+    const result = this.game.sendGuard(chosen.id, target);
+    if (result.status === 'poor') {
+      this.hud.showMessage(`${chosen.name} costs $${chosen.cost} to muster`);
+    }
   }
 
   handleMove(event) {
@@ -91,6 +164,7 @@ export class Input {
       return;
     }
     const previous = this.trackPointer(event);
+    this.updateHover();
     if (!this.pointerDown) {
       return;
     }
@@ -104,10 +178,31 @@ export class Input {
       case 'destroy':
         this.dragDestroy();
         break;
+      case 'repair':
+        this.dragRepair();
+        break;
+      case 'fortify':
+        this.dragFortify();
+        break;
       default:
         this.camera.panFrom(previous, this.pointer);
     }
     this.onChange();
+  }
+
+  /**
+   * Which section the repair or fortify tool would act on right now, so the
+   * renderer can pick it out before a click commits to anything. Any other
+   * tool leaves nothing highlighted.
+   */
+  updateHover() {
+    const hovered = HOVER_TOOLS.has(this.tool)
+      ? this.game.wallAt(this.pointerOnGround())
+      : null;
+    if (hovered !== this.renderer.hoveredWall) {
+      this.renderer.hoveredWall = hovered;
+      this.onChange();
+    }
   }
 
   dragZoom(previous) {
@@ -123,7 +218,7 @@ export class Input {
   }
 
   dragBuild() {
-    const target = this.camera.toWorld(this.pointer);
+    const target = this.pointerOnGround();
     if (!this.chainPoint) {
       this.chainPoint = target;
       return;
@@ -144,13 +239,47 @@ export class Input {
       this.hud.showMessage('Walls cannot cross the city');
       return;
     }
+    if (result.status === 'water') {
+      this.chainPoint = null;
+      this.hud.showMessage('Walls cannot be laid in water');
+      return;
+    }
+    if (result.status === 'crowded') {
+      // A junction already at its limit — no message, just let go of the
+      // tool the way it would if the player had simply let up on it.
+      this.chainPoint = null;
+      this.resetTool();
+      return;
+    }
     if (result.status === 'poor') {
       this.hud.showMessage('Not enough money');
     }
   }
 
   dragDestroy() {
-    this.game.removeWallAt(this.camera.toWorld(this.pointer));
+    this.game.removeWallAt(this.pointerOnGround());
+  }
+
+  dragRepair() {
+    const result = this.game.repairWallAt(this.pointerOnGround());
+    if (result.status === 'poor') {
+      this.hud.showMessage('Not enough money to repair it');
+    }
+  }
+
+  /**
+   * Sweeping the tool over a stretch fortifies each section under it. Only
+   * the outcomes worth interrupting for are announced: passing over stone
+   * that is already reinforced, or already growing, says nothing.
+   */
+  dragFortify() {
+    const result = this.game.upgradeWallAt(this.pointerOnGround());
+    if (result.status === 'poor') {
+      this.hud.showMessage(`${result.name} costs $${result.cost}`);
+    }
+    if (result.status === 'max') {
+      this.hud.showMessage('This wall is as strong as stone gets');
+    }
   }
 
   handleWheel(event) {

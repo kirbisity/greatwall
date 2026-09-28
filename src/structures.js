@@ -34,6 +34,24 @@ function boxFaces(centreX, centreY, halfWidth, halfDepth, bottom, top, material)
   return faces;
 }
 
+/**
+ * A battered wall: a frustum standing wider at its foot than at its crest.
+ *
+ * `width`/`depth` are the crest, and `spread` is how much further the foot
+ * reaches on every side, which is how a Japanese castle's stone base is
+ * actually described -- the building on top sits flush with the crest.
+ */
+function batterFaces(centreX, centreY, halfWidth, halfDepth, bottom, top, spread, material) {
+  const foot = corners(centreX, centreY, halfWidth + spread, halfDepth + spread, bottom);
+  const crest = corners(centreX, centreY, halfWidth, halfDepth, top);
+  const faces = [{ points: crest, material }];
+  for (let i = 0; i < 4; i += 1) {
+    const j = (i + 1) % 4;
+    faces.push({ points: [foot[i], foot[j], crest[j], crest[i]], material });
+  }
+  return faces;
+}
+
 function roofRing(centreX, centreY, halfWidth, halfDepth, baseZ, height, t) {
   return corners(
     centreX,
@@ -76,31 +94,50 @@ function lighten(material, factor) {
   return material.map((channel) => Math.min(255, channel * factor));
 }
 
+/**
+ * `growRadius` is how far a part sits from the building's own centre, and
+ * `partBase` is the z it stands on. Neither means anything for an ordinary
+ * static building — they exist so a rebuild in progress can grow or shrink
+ * each part in place, anchored on its own footing, in an order that reads as
+ * rising from the centre outward.
+ */
+function tag(faces, part) {
+  const growRadius = Math.hypot(part.x, part.y);
+  const partBase = part.base ?? 0;
+  const minLight = part.minLight ?? 0;
+  return faces.map((face) => ({ ...face, growRadius, partBase, minLight }));
+}
+
 function compilePart(part) {
   const base = part.base ?? 0;
   const halfWidth = part.width / 2;
   const halfDepth = part.depth / 2;
 
   if (part.type === 'ground') {
-    return [{
+    return tag([{
       points: corners(part.x, part.y, halfWidth, halfDepth, base + GROUND_LIFT),
       material: materialOf(part.material, 'court'),
       ground: true,
-    }];
+    }], part);
   }
 
   if (part.type === 'block') {
-    return boxFaces(part.x, part.y, halfWidth, halfDepth, base, base + part.height,
-      materialOf(part.material, 'rampart'));
+    return tag(boxFaces(part.x, part.y, halfWidth, halfDepth, base, base + part.height,
+      materialOf(part.material, 'rampart')), part);
+  }
+
+  if (part.type === 'batter') {
+    return tag(batterFaces(part.x, part.y, halfWidth, halfDepth, base, base + part.height,
+      part.spread, materialOf(part.material, 'rampart')), part);
   }
 
   // A building is a body with a tiered roof resting on it.
   const roof = { ...DEFAULT_ROOF, ...(part.roof ?? {}) };
   const bodyTop = base + part.height;
-  return [
+  return tag([
     ...boxFaces(part.x, part.y, halfWidth, halfDepth, base, bodyTop, materialOf(part.material, 'plaster')),
     ...roofFaces(part.x, part.y, halfWidth, halfDepth, bodyTop, roof, materialOf(roof.material, 'roofTile')),
-  ];
+  ], part);
 }
 
 /**

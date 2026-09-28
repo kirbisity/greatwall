@@ -28,9 +28,12 @@ already have.
 | Ctrl+Z | Undo the last wall section |
 | `[` and `]` | Tilt the camera |
 
-Settings has an **Atmosphere** toggle (distance haze and drifting cloud layers), on by
-default, and a **Show Routes** toggle that draws the gateways raiders navigate by. Both
-choices are remembered.
+Settings has an **Atmosphere** toggle (distance haze and drifting cloud decks), on by
+default and costing around a millisecond a frame, and a **Show Routes** toggle that draws
+the gateways raiders navigate by. Both choices are remembered.
+
+The clouds sit at real altitudes, so they slide past faster than the ground when the view
+pans and swell faster as it zooms in.
 | Esc | Menu |
 
 A new section goes up as a foundation course and rises to full strength over about ten
@@ -45,7 +48,7 @@ its price, less its damage. Castles pay income and regenerate every two seconds,
 be upgraded twice. Seasons turn every 60 seconds: winter multiplies build costs,
 autumn doubles income, and later seasons bring tougher raiders.
 
-Cavalry die against walls. Infantry walk through them.
+Nothing crosses a standing wall: raiders look for a way round and besiege only when there is none.
 
 ## Tests
 

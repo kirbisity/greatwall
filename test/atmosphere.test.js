@@ -314,16 +314,48 @@ test('snow gathers at winter, thickening gradually rather than all at once', () 
     'expected winter\'s own midpoint to fall thicker than the approach to it');
 });
 
-test('a flake falls, looping back to the top of the screen rather than being replaced', () => {
+test('a flake falls over time rather than standing still', () => {
   let clock = 0;
   const atmosphere = new Atmosphere(camera(), { random: spread(), now: () => clock });
   const before = atmosphere.placeSnow(3.5).map((flake) => flake.y);
   clock = 2000;
   const after = atmosphere.placeSnow(3.5).map((flake) => flake.y);
-  assert.ok(before.some((y, i) => Math.abs(after[i] - y) > 1), 'expected two seconds to visibly move the flakes');
-  for (const y of after) {
-    assert.ok(y >= 0 && y < atmosphere.camera.height, `expected the flake to stay wrapped on screen, got y=${y}`);
+  assert.ok(before.some((y, i) => after[i] !== undefined && Math.abs(after[i] - y) > 1),
+    'expected two seconds to visibly move at least some flakes');
+});
+
+test('a flake is a point near the ground, not fixed to the screen -- panning moves it a lot', () => {
+  const view = camera();
+  // A flake sits close over the ground (well under the lowest cloud
+  // layer), so the same pan that barely shifts the ground itself should
+  // swing a flake a long way across the screen -- the whole point of
+  // placing snow in the world rather than painting it straight onto the
+  // screen.
+  const atmosphere = new Atmosphere(view, { random: spread(), now: () => 0 });
+  const before = atmosphere.placeSnow(3.5);
+  view.centerOn({ x: 40, y: 0 });
+  const after = atmosphere.placeSnow(3.5);
+  assert.ok(before.length > 0 && after.length > 0, 'expected flakes on screen before and after the pan');
+  let moved = 0;
+  for (let i = 0; i < Math.min(before.length, after.length); i += 1) {
+    if (Math.abs(after[i].x - before[i].x) > 20) {
+      moved += 1;
+    }
   }
+  assert.ok(moved > 0, 'expected a 40-unit pan to swing at least one nearby flake more than 20px');
+});
+
+test('a flake swells on a zoom the way anything else standing nearby does', () => {
+  const view = camera();
+  const atmosphere = new Atmosphere(view, { random: spread(), now: () => 0 });
+  const far = atmosphere.placeSnow(3.5);
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = CAMERA.minDistance;
+  view.refreshView();
+  const near = atmosphere.placeSnow(3.5);
+  assert.ok(far.length > 0 && near.length > 0, 'expected flakes on screen at both distances');
+  const avgSize = (flakes) => flakes.reduce((sum, flake) => sum + flake.size, 0) / flakes.length;
+  assert.ok(avgSize(near) > avgSize(far), 'expected flakes to read larger once the camera has zoomed in');
 });
 
 test('snow is drawn as filled circles, and alpha is restored once it is done', () => {

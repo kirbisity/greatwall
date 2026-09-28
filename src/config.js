@@ -619,19 +619,26 @@ export const CLOUD_ENGULF_WIDTH = 0.8;
 export const CLOUD_SPRITE = 'images/cloud.png';
 
 /**
- * Falling snow: screen-space particles rather than world objects, since
- * weather overhead does not need the camera's own perspective the way a
- * cloud deck does. How many fall at all is read off winter's own
- * cloudBoost (see Atmosphere#placeSnow), the same value that already
- * gathers more cloud ahead of winter, so the two thicken together and both
- * fade the same gradual way everything else in the year does.
+ * Falling snow: world objects close over the ground, tiled and wrapped
+ * around the camera's own focus exactly the way a cloud deck is (see
+ * Atmosphere#placeSnow) -- so a flake slides past on a pan and swells on a
+ * zoom the same way anything else nearby does, rather than sitting fixed
+ * to the screen regardless of where the camera looks. Low altitude is
+ * what reads as close: well under the lowest cloud layer, a flake is
+ * between the camera and the ground rather than part of the sky. How many
+ * fall at all is read off winter's own cloudBoost, the same value that
+ * already gathers more cloud ahead of winter, so the two thicken together
+ * and both fade the same gradual way everything else in the year does.
  */
 export const SNOW_COUNT = 70;
-export const SNOW_MIN_SIZE = 1;
-export const SNOW_MAX_SIZE = 2.6;
-export const SNOW_MIN_FALL = 30;
-export const SNOW_MAX_FALL = 70;
-export const SNOW_DRIFT = 18;
+export const SNOW_FIELD = 80;
+export const SNOW_ALTITUDE_TOP = 18;
+export const SNOW_ALTITUDE_BOTTOM = 1;
+export const SNOW_MIN_SIZE = 0.15;
+export const SNOW_MAX_SIZE = 0.4;
+export const SNOW_MIN_FALL = 3;
+export const SNOW_MAX_FALL = 7;
+export const SNOW_DRIFT = 4;
 
 export const HEALTH_COLORS = [
   { above: 0.66, color: '#7fb069' },

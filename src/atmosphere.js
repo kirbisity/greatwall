@@ -6,8 +6,11 @@ import {
   CLOUD_SPRITE,
   FOG,
   SEASONS,
+  SNOW_ALTITUDE_BOTTOM,
+  SNOW_ALTITUDE_TOP,
   SNOW_COUNT,
   SNOW_DRIFT,
+  SNOW_FIELD,
   SNOW_MAX_FALL,
   SNOW_MAX_SIZE,
   SNOW_MIN_FALL,
@@ -60,12 +63,12 @@ export class Atmosphere {
       }));
       return [...core, ...extra];
     });
-    // Screen-space and re-seeded once, not per level: winter looks the same
-    // over a desert as over the mainland, the way the sky's haze already
-    // does.
+    // Seeded once, not per level: winter looks the same over a desert as
+    // over the mainland, the way the sky's haze already does.
     this.snowflakes = Array.from({ length: SNOW_COUNT }, () => ({
       x: random(),
       y: random(),
+      z: random(),
       size: SNOW_MIN_SIZE + random() * (SNOW_MAX_SIZE - SNOW_MIN_SIZE),
       fall: SNOW_MIN_FALL + random() * (SNOW_MAX_FALL - SNOW_MIN_FALL),
       driftPhase: random() * Math.PI * 2,
@@ -221,10 +224,15 @@ export class Atmosphere {
   }
 
   /**
-   * Where each flake currently sits on screen, falling and looping back to
-   * the top rather than being replaced -- cheap enough that winter's flakes
-   * and summer's cloudless sky cost the same to hold in memory, and empty
-   * outside winter's own reach costs nothing at all to draw.
+   * Where each flake currently sits on screen -- a world point close over
+   * the ground, tiled and wrapped around the camera's own focus exactly
+   * the way a cloud deck is (see placeClouds), so it slides past on a pan
+   * and swells on a zoom the way anything else standing nearby does. That
+   * parallax is what reads as close: a flake fixed to the screen regardless
+   * of where the camera looks would read as part of the screen, not the
+   * scene. Falling is a fourth, vertical wrap on top of the horizontal two,
+   * between SNOW_ALTITUDE_TOP and _BOTTOM rather than across the whole
+   * height of the world.
    */
   placeSnow(seasonPhase = 0) {
     const { cloudBoost } = seasonBlend(seasonPhase);
@@ -232,14 +240,28 @@ export class Atmosphere {
     if (snowfall <= 0) {
       return [];
     }
+    const view = this.camera.view;
     const { width, height } = this.camera;
+    const focus = this.camera.focus;
     const drift = this.drift;
+    const half = SNOW_FIELD / 2;
+    const fallRange = SNOW_ALTITUDE_TOP - SNOW_ALTITUDE_BOTTOM;
     const placed = [];
     for (const flake of this.snowflakes) {
-      const y = wrap(flake.y * height + drift * flake.fall, height);
       const sway = Math.sin(drift * flake.driftRate + flake.driftPhase) * SNOW_DRIFT;
-      const x = wrap(flake.x * width + sway, width);
-      placed.push({ x, y, size: flake.size, alpha: flake.alpha * snowfall });
+      const worldX = focus.x + wrap(flake.x * SNOW_FIELD + sway - focus.x + half, SNOW_FIELD) - half;
+      const worldY = focus.y + wrap(flake.y * SNOW_FIELD - focus.y + half, SNOW_FIELD) - half;
+      const worldZ = SNOW_ALTITUDE_TOP - wrap(flake.z * fallRange + drift * flake.fall, fallRange);
+      const screen = projectPoint(view, worldX, worldY, worldZ);
+      if (!screen) {
+        continue;
+      }
+      const pixelSize = view.focal / screen.depth * flake.size;
+      if (screen.x < -pixelSize || screen.x > width + pixelSize
+        || screen.y < -pixelSize || screen.y > height + pixelSize) {
+        continue;
+      }
+      placed.push({ x: screen.x, y: screen.y, size: pixelSize, alpha: flake.alpha * snowfall });
     }
     return placed;
   }

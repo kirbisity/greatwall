@@ -759,9 +759,12 @@ test('the island is planted far thicker than a plain, unmodified wood', () => {
   // level is free to tune its own density (the mainland has since grown
   // thicker too), so the stable claim is that the island is deliberately
   // far past what a level asking for nothing at all would grow, not that
-  // it beats whichever number the mainland happens to carry today.
+  // it beats whichever number the mainland happens to carry today. Widening
+  // the beach (see Terrain#beachAt) rightly costs the wood some ground near
+  // the coast, so the margin is smaller than it once was without the claim
+  // itself becoming any less true.
   const plain = new Terrain(1, {}, null).treesWithin(-reach, -reach, reach, reach).length;
-  assert.ok(island > plain * 10,
+  assert.ok(island > plain * 5,
     `expected the island to read as a wood, got ${island} trees against a plain wood's ${plain}`);
 });
 

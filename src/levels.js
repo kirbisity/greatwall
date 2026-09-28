@@ -27,13 +27,20 @@ const DESERT = {
   detailHeight: 1.5,
   slopeRelief: 2.6,
   // Mesas: broader and blunter than the green land's peaks, with a
-  // steadier outline.
-  mountainMinRadius: 70,
-  mountainMaxRadius: 140,
-  mountainMinHeight: 40,
-  mountainMaxHeight: 70,
+  // steadier outline. Widened past the green land's own range too, so a
+  // squat outcrop and a mesa proper both turn up rather than one size of
+  // rock repeated.
+  mountainMinRadius: 55,
+  mountainMaxRadius: 170,
+  mountainMinHeight: 32,
+  mountainMaxHeight: 85,
   mountainShapeScale: 1.3,
   mountainSkirt: 55,
+  // Dune lines rather than an isotropic bump field -- angled off true
+  // north the way a prevailing wind would actually lay them, and taller
+  // than the green land's own ridge: dune relief is the dominant shape of
+  // a real desert, not a texture on top of a hill.
+  ridge: { angle: 35, scale: 100, alongScale: 500, height: 20 },
   // Nothing grows here, and nothing turns in autumn.
   forestThreshold: 1,
   turnsInAutumn: false,
@@ -59,9 +66,16 @@ export const LEVELS = [
     // the castle itself (see Terrain#forestAt): the city stands on open
     // ground the player can actually see, with the treeline beginning
     // just past it rather than crowding the walls from the first frame.
+    // A ridge runs parallel to the river (angle 0, the river's own line)
+    // rather than across it -- river valleys terrace along their length,
+    // not against it -- and the peaks widen past the default range for a
+    // skyline with real high ground on it, not just one size of foothill.
     land: {
-      mountainMinHeight: 34,
-      mountainMaxHeight: 56,
+      mountainMinHeight: 30,
+      mountainMaxHeight: 68,
+      mountainMinRadius: 38,
+      mountainMaxRadius: 115,
+      ridge: { angle: 0, scale: 130, alongScale: 700, height: 12 },
       treeSpacing: 7,
       forestScale: 280,
       forestThreshold: 0.05,
@@ -92,9 +106,12 @@ export const LEVELS = [
     // any season alone gets, starting well short of the ordinary distance
     // so it presses in past the middle ground, with the whole sky driven
     // past overhead several times faster than an ordinary wind -- see
-    // Atmosphere#placeClouds.
+    // Atmosphere#placeClouds. `floor` is what keeps it a sandstorm rather
+    // than aerial haze: without it the gradient still clears up close to
+    // the camera, and a player zoomed in to build a wall would see the
+    // storm vanish around them -- see Atmosphere#drawFog.
     mist: {
-      color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, windSpeed: 4,
+      color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, windSpeed: 4, floor: 0.55,
     },
   },
   {
@@ -107,22 +124,27 @@ export const LEVELS = [
     land: {
       hillScale: 300,
       hillHeight: 46,
-      mountainMinRadius: 34,
-      mountainMaxRadius: 60,
-      mountainMinHeight: 26,
-      mountainMaxHeight: 44,
+      // Widened past a single size of foothill, same as the mainland's own
+      // range, so a small island still shows some size variety rather than
+      // every peak reading the same.
+      mountainMinRadius: 28,
+      mountainMaxRadius: 72,
+      mountainMinHeight: 22,
+      mountainMaxHeight: 52,
       mountainSkirt: 26,
       // The rise the whole level is built around: the keep stands on its
       // summit and the walls climb it. `spurs` is how far its reach wanders
       // with the direction and `grain` how rough its surface is, which is
-      // what keeps it from reading as a dome.
+      // what keeps it from reading as a dome -- widened a little further so
+      // the flanks read as terraced ground, not a bald mound with texture
+      // painted on.
       hill: {
         radius: 150,
         height: 50,
         spurs: 34,
         spurScale: 2.4,
-        grain: 7.5,
-        grainScale: 70,
+        grain: 10,
+        grainScale: 55,
       },
       // Cherry blossom rather than the mainland's wood: pink, and smaller,
       // so a stand of them reads as an orchard rather than a green forest
@@ -153,8 +175,13 @@ export const LEVELS = [
       coast: 34,
       // How many times the coastline wanders on one walk round the island.
       coastScale: 2.4,
+      // A real strip of sand inland of the shore, the same bank colour as
+      // the wet side fading in from the waterline, so the two meet without
+      // a seam rather than the coast cutting straight from surf to turf --
+      // see Terrain#beachAt.
+      beachWidth: 55,
       // Over what distance the water deepens past the beach, and by how much.
-      shelf: 140,
+      shelf: 170,
       depth: 26,
       color: '#2f5f86',
       bankColor: '#cbb98d',

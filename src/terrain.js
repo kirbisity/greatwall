@@ -251,6 +251,30 @@ export class Terrain {
   }
 
   /**
+   * A ridge or dune line, on top of whatever the rolling hills are doing --
+   * noise sampled mostly across one axis and only slowly along it, so the
+   * land reads as parallel rises and hollows running a single direction
+   * (a valley's own terraces, a dune field's own lines) rather than another
+   * layer of the same isotropic bump the hills already are. Off by default;
+   * a level asks for one by giving it a direction and the two scales that
+   * set how far apart the lines run and how far they carry before
+   * wandering.
+   */
+  ridgeAt(x, y) {
+    const ridge = this.land.ridge;
+    if (!ridge) {
+      return 0;
+    }
+    const angle = ridge.angle * Math.PI / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const along = x * cos + y * sin;
+    const across = -x * sin + y * cos;
+    const wave = valueNoise(across / ridge.scale, along / ridge.alongScale, this.seed + 967);
+    return (wave - 0.5) * 2 * ridge.height;
+  }
+
+  /**
    * How far out to sea this point lies: 0 ashore, 1 in open water. The
    * coastline is the shore radius pushed in and out by a noise of its own,
    * so an island has bays and headlands rather than being a drawn circle.
@@ -266,6 +290,28 @@ export class Terrain {
       return 0;
     }
     return Math.min(1, (reach - shore) / sea.shelf);
+  }
+
+  /**
+   * How sandy this dry point reads, 0 well inland to 1 right at the
+   * waterline -- a sea's own beach fading into the land beyond it rather
+   * than the shoreline cutting straight from wet sand to turf. `seaAt`
+   * already blends the wet side from bank colour to open water; this is
+   * the same bank colour carried inland over `sea.beachWidth`, so the two
+   * meet at the shore without a seam.
+   */
+  beachAt(x, y) {
+    const sea = this.sea;
+    if (!sea || !sea.beachWidth) {
+      return 0;
+    }
+    const reach = Math.hypot(x, y);
+    const shore = this.shoreAt(Math.atan2(y, x));
+    const inland = shore - reach;
+    if (inland < 0 || inland >= sea.beachWidth) {
+      return 0;
+    }
+    return 1 - inland / sea.beachWidth;
   }
 
   /**
@@ -433,6 +479,7 @@ export class Terrain {
     const fine = valueNoise(x / this.land.detailScale, y / this.land.detailScale, this.seed + 17);
     let height = (broad - 0.5) * this.land.hillHeight + (fine - 0.5) * this.land.detailHeight;
     height += this.hillAt(x, y);
+    height += this.ridgeAt(x, y);
     const mountains = this.mountainsNear(x, y);
     for (let i = 0; i < mountains.length; i += 1) {
       height += mountainBumpAt(mountains[i], x, y, this.land);
@@ -690,6 +737,14 @@ export class Terrain {
       green += (field[1] - green) * oasis;
       blue += (field[2] - blue) * oasis;
     }
+    // A sea's own beach, carried inland from the shore -- see beachAt.
+    const beach = onSlope ? 0 : this.beachAt(x, y);
+    if (beach > 0) {
+      const sand = this.bands.bank;
+      red += (sand[0] - red) * beach;
+      green += (sand[1] - green) * beach;
+      blue += (sand[2] - blue) * beach;
+    }
     into[0] = toChannel(red);
     into[1] = toChannel(green);
     into[2] = toChannel(blue);
@@ -784,7 +839,7 @@ export class Terrain {
         const band = this.groundBandAt(x, y);
         if ((band !== this.land.grassColor && band !== this.land.mossColor)
           || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0
-          || this.pondAt(x, y) > 0) {
+          || this.pondAt(x, y) > 0 || this.beachAt(x, y) > 0) {
           continue;
         }
         if (isCleared && isCleared(x, y)) {

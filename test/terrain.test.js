@@ -64,6 +64,46 @@ test('a different seed grows a different patchwork', () => {
   assert.ok(differs, 'expected the two seeds to disagree somewhere');
 });
 
+// --- ridges and dune lines --------------------------------------------
+
+test('with no ridge at all, a level\'s height is untouched by it', () => {
+  const terrain = new Terrain(1);
+  assert.equal(terrain.ridgeAt(40, 40), 0);
+});
+
+test('a ridge running along the x axis varies across it, not along it', () => {
+  const terrain = new Terrain(1, { ridge: { angle: 0, scale: 100, alongScale: 900, height: 12 } });
+  // Two points a long way apart along the ridge's own length (x) should
+  // read close to each other; the same step across it (y) should not.
+  const alongA = terrain.ridgeAt(0, 0);
+  const alongB = terrain.ridgeAt(400, 0);
+  const across = terrain.ridgeAt(0, 400);
+  assert.ok(Math.abs(alongA - alongB) < Math.abs(alongA - across),
+    `expected less change along the ridge (${Math.abs(alongA - alongB)}) than across it (${Math.abs(alongA - across)})`);
+});
+
+test('a ridge stays within the height it was given', () => {
+  const terrain = new Terrain(1, { ridge: { angle: 20, scale: 80, alongScale: 500, height: 15 } });
+  for (let x = -500; x < 500; x += 37) {
+    for (let y = -500; y < 500; y += 53) {
+      const bump = terrain.ridgeAt(x, y);
+      assert.ok(bump >= -15 && bump <= 15, `expected -15..15, got ${bump} at (${x}, ${y})`);
+    }
+  }
+});
+
+test('a ridge folds into the ground a level already has, not a separate layer', () => {
+  const flat = new Terrain(1, { hillHeight: 0, detailHeight: 0, mountainChance: 0 });
+  const ridged = new Terrain(1, { hillHeight: 0, detailHeight: 0, mountainChance: 0, ridge: { angle: 15, scale: 90, alongScale: 600, height: 14 } });
+  let differs = false;
+  for (let x = -400; x < 400 && !differs; x += 41) {
+    if (Math.abs(flat.wildHeightAt(x, 0) - ridged.wildHeightAt(x, 0)) > 1) {
+      differs = true;
+    }
+  }
+  assert.ok(differs, 'expected the ridge to actually shape the ground');
+});
+
 test('there are a few mountains, not none and not a range', () => {
   const terrain = new Terrain(1);
   const mountains = terrain.mountainsWithin(-1000, -1000, 1000, 1000);
@@ -260,6 +300,58 @@ test('with no ponds at all, a level pays nothing for the feature', () => {
   const terrain = new Terrain(1);
   assert.equal(terrain.pondAt(50, 0), 0);
   assert.equal(terrain.oasisAt(50, 0), 0);
+});
+
+// --- a sea's own beach -----------------------------------------------------
+
+function beachTerrain(overrides = {}) {
+  return new Terrain(1, {}, null, {
+    shore: 200, coast: 0, coastScale: 1, beachWidth: 40, shelf: 100, depth: 10,
+    color: '#2f5f86', bankColor: '#cbb98d', ...overrides,
+  });
+}
+
+test('a beach is full sand right at the waterline, and bare past its own width', () => {
+  const terrain = beachTerrain();
+  assert.equal(terrain.beachAt(200, 0), 1, 'expected full sand exactly at the shore');
+  assert.equal(terrain.beachAt(200 - 40, 0), 0, 'expected nothing right at the beach\'s own inland edge');
+  assert.equal(terrain.beachAt(0, 0), 0, 'expected the shore\'s own centre to be well past any beach at all');
+});
+
+test('a beach fades inland rather than cutting from sand to turf', () => {
+  const terrain = beachTerrain();
+  const near = terrain.beachAt(190, 0); // 10 inland
+  const far = terrain.beachAt(170, 0); // 30 inland
+  assert.ok(near > 0 && far > 0 && near > far,
+    `expected the beach to fade with distance inland, got ${near} at 10 and ${far} at 30`);
+});
+
+test('the wet side and the dry side of a shore meet without a seam', () => {
+  const terrain = beachTerrain();
+  // Just short of the shore (dry, full sand) against just past it (wet,
+  // barely off the bank) -- Terrain#waterTint's own channel*1.6 means the
+  // wet side is already most of the way to full water tint one unit in,
+  // so the two colours should already read close rather than jumping.
+  const dryTint = terrain.groundTintAt(200 - 0.5, 0);
+  const wetTint = terrain.groundTintAt(200 + 0.5, 0);
+  const jump = Math.max(...dryTint.map((channel, i) => Math.abs(channel - wetTint[i])));
+  assert.ok(jump < 40, `expected the shore to blend rather than cut, got a jump of ${jump}`);
+});
+
+test('with no beachWidth at all, a sea behaves exactly as it did before', () => {
+  const terrain = beachTerrain({ beachWidth: 0 });
+  assert.equal(terrain.beachAt(190, 0), 0, 'expected no beach at all without a width for it');
+});
+
+test('a beach never reaches the trees, whatever the forest noise says', () => {
+  const terrain = new Terrain(1, { forestThreshold: 0, treeSpacing: 4 }, null, {
+    shore: 200, coast: 0, coastScale: 1, beachWidth: 40, shelf: 100, depth: 10,
+    color: '#2f5f86', bankColor: '#cbb98d',
+  });
+  const trees = terrain.treesWithin(150, -30, 210, 30);
+  for (const tree of trees) {
+    assert.equal(terrain.beachAt(tree.x, tree.y), 0, `a tree grew on the beach at (${tree.x}, ${tree.y})`);
+  }
 });
 
 test('groundTintAt and groundColorAt describe the same colour', () => {

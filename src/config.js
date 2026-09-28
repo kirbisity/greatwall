@@ -405,6 +405,11 @@ export const TERRAIN = {
   // is doing. Null everywhere but the island, which is built around one --
   // see Terrain#hillAt and the contours walls terrace up it.
   hill: null,
+  // A ridge or dune line running a level's own direction, on top of the
+  // rolling hills -- `{ angle, scale, alongScale, height }`, see
+  // Terrain#ridgeAt. Null by default: rolling hills alone already suit a
+  // level that never asks for one.
+  ridge: null,
 
   // Tiny standing water a level can scatter near its city -- an oasis in a
   // desert, say -- entirely apart from its river or sea. Empty by default,

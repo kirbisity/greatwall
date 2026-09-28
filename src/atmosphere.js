@@ -118,13 +118,20 @@ export class Atmosphere {
     // middle distance too.
     const startDistance = FOG.startDistance * (mist ? mist.start : 1);
     const altitude = 1 + this.camera.view.position.z * FOG.altitudeFactor;
+    // This whole gradient is really aerial haze -- clear at the camera,
+    // thickening with distance -- which is right for an ordinary sky but
+    // wrong for standing dust: a sandstorm presses in at any range, not
+    // just the horizon. `floor` is a level's own lower bound on top of that
+    // falloff, so a close, zoomed-in view still reads as caught in it
+    // rather than clearing up the moment the camera pulls in.
+    const floor = mist?.floor ?? 0;
     const gradient = context.createLinearGradient(0, 0, 0, height);
     for (let step = 0; step <= FOG.samples; step += 1) {
       const offset = step / FOG.samples;
       const distance = this.groundDistanceAt(offset * height);
       const beyond = Math.max(0, distance - startDistance);
       const density = 1 - Math.exp(-beyond * FOG.falloff);
-      const alpha = Math.min(FOG.maxOpacity, density * FOG.maxAlpha * hazeDensity * altitude);
+      const alpha = Math.min(FOG.maxOpacity, Math.max(floor, density * FOG.maxAlpha * hazeDensity * altitude));
       gradient.addColorStop(offset, `rgba(${haze},${alpha.toFixed(3)})`);
     }
     context.fillStyle = gradient;

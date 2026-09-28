@@ -127,6 +127,36 @@ test('fog thickens as the camera climbs', () => {
   assert.ok(alphaAtTop(high) > alphaAtTop(low), 'a higher camera should read hazier at the same screen row');
 });
 
+test('a mist\'s own floor keeps a close, zoomed-in view from clearing up', () => {
+  const view = camera();
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = view.distance;
+  view.refreshView();
+  const atmosphere = new Atmosphere(view, { random: spread() });
+
+  const plain = fakeContext();
+  atmosphere.drawFog(plain, 0.5);
+  const plainAlphas = plain.calls.stops.map((stop) => Number(stop.color.match(/([\d.]+)\)$/)[1]));
+  assert.ok(Math.min(...plainAlphas) < 0.3, 'expected an ordinary sky to read thin this close to the ground');
+
+  const sandstorm = fakeContext();
+  atmosphere.drawFog(sandstorm, 0.5, { color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, floor: 0.55 });
+  const stormAlphas = sandstorm.calls.stops.map((stop) => Number(stop.color.match(/([\d.]+)\)$/)[1]));
+  assert.ok(Math.min(...stormAlphas) >= 0.55, `expected every row to hold the floor, got ${Math.min(...stormAlphas)}`);
+});
+
+test('with no floor of its own, a mist behaves exactly as it did before', () => {
+  const view = camera();
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = view.distance;
+  view.refreshView();
+  const atmosphere = new Atmosphere(view, { random: spread() });
+  const withoutFloor = fakeContext();
+  atmosphere.drawFog(withoutFloor, 0.5, { color: '196, 214, 226', blend: 0.45, density: 1.25, start: 0.8 });
+  const noFloorAlphas = withoutFloor.calls.stops.map((stop) => Number(stop.color.match(/([\d.]+)\)$/)[1]));
+  assert.ok(Math.min(...noFloorAlphas) < 0.3, 'expected a mist with no floor to still thin out close to the ground');
+});
+
 function captureClouds(atmosphere, seasonPhase = 0) {
   const drawn = [];
   const context = {

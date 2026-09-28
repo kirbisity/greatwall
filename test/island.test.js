@@ -363,14 +363,7 @@ test('the cursor lands where it looks, even high on the hill', async () => {
       }
     }
     assert.ok(flatWorst > 30, `a flat reading should be well out at ${elevation} degrees`);
-    // The beach's own dip (see Terrain#beachAt/wildHeightAt) is real
-    // terrain the march can climb straight past at the camera's shallowest
-    // legal angle, where a ray comes in almost parallel to the ground --
-    // measured, bounded to single-digit pixels there and nowhere else.
-    // Confirmed zero everywhere but this one extreme: both other elevations
-    // still hold the sub-pixel bar.
-    const tolerance = elevation === CAMERA.minElevation ? 10 : 1;
-    assert.ok(followedWorst < tolerance,
+    assert.ok(followedWorst < 1,
       `the cursor drifted ${followedWorst.toFixed(1)} pixels at ${elevation} degrees`);
   }
 });

@@ -184,11 +184,10 @@ export const LEVELS = [
       // A real strip of sand inland of the shore, the same bank colour as
       // the wet side fading in from the waterline, so the two meet without
       // a seam rather than the coast cutting straight from surf to turf --
-      // see Terrain#beachAt. Dipped a little below the grass above it too,
-      // so the beach reads as its own shelf rather than sharing the
-      // grassland's own level.
+      // see Terrain#beachAt. Colour only: a height dip here read as the
+      // beach scooped out rather than a shelf, so the two stay level and
+      // only the tint tells them apart.
       beachWidth: 55,
-      beachDip: 8,
       // Over what distance the water deepens past the beach, and by how
       // much -- narrow, so the open sea reads as a clear colour past the
       // shallows rather than the two blurring into one long fade.

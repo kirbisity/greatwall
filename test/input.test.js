@@ -178,7 +178,9 @@ function gestureInput({ tool = 'move', game = {} } = {}) {
   // A fresh point every time, as the real camera gives: handing back the
   // live pointer would let a wall's start slide along with the finger.
   input.camera.toWorld = (point) => ({ ...point });
-  input.camera.panFrom = (from, to) => calls.pan.push({ from: { ...from }, to: { ...to } });
+  input.camera.panFrom = (from, to, options = {}) => calls.pan.push({
+    from: { ...from }, to: { ...to }, direct: Boolean(options.direct),
+  });
   input.camera.zoomAt = (anchor, factor) => calls.zoom.push({ anchor: { ...anchor }, factor });
   input.camera.release = () => { calls.release += 1; };
   if (tool !== 'move') {
@@ -196,7 +198,8 @@ test('one finger dragging the map pans it, the way the mouse does', () => {
   input.handlePointerUp(finger(1, 340, 310));
 
   assert.equal(calls.pan.length, 1);
-  assert.deepEqual(calls.pan[0], { from: { x: 300, y: 300 }, to: { x: 340, y: 310 } });
+  assert.deepEqual(calls.pan[0].from, { x: 300, y: 300 });
+  assert.deepEqual(calls.pan[0].to, { x: 340, y: 310 });
   assert.equal(calls.release, 1, 'lifting the finger lets the camera coast');
 });
 
@@ -293,4 +296,34 @@ test('the mouse still hovers, and still drags, through the same handlers', () =>
   const mouse = { pointerId: 1, pointerType: 'mouse', clientX: 300, clientY: 300 };
   input.handlePointerMove(mouse);
   assert.equal(renderer.hoveredWall, wall, 'hovering with no button down still picks out a section');
+});
+
+test('undo takes back the last section, from the keyboard or the button alike', () => {
+  let undone = 0;
+  const { input, changes } = makeInput({ game: { undoLastWall: () => { undone += 1; return true; } } });
+  input.handleKey({ key: 'z', code: 'KeyZ', ctrlKey: true });
+  input.undo();
+  assert.equal(undone, 2, 'Ctrl+Z and the undo button should reach the same place');
+  assert.ok(changes.length >= 2, 'and each should redraw');
+});
+
+test('a finger holds the ground it grabs; a mouse drag keeps its weight', () => {
+  const touch = gestureInput();
+  touch.input.handlePointerDown(finger(1, 300, 300));
+  touch.input.handlePointerMove(finger(1, 340, 300));
+  assert.equal(touch.calls.pan[0].direct, true, 'a finger should drag the ground directly');
+
+  const mouse = gestureInput();
+  const cursor = (x) => ({ pointerId: 1, pointerType: 'mouse', clientX: x, clientY: 300 });
+  mouse.input.handlePointerDown(cursor(300));
+  mouse.input.handlePointerMove(cursor(340));
+  assert.equal(mouse.calls.pan[0].direct, false, 'a mouse should keep the eased feel it was tuned with');
+});
+
+test('two fingers panning hold the ground as well', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 200, 300));
+  input.handlePointerDown(finger(2, 300, 300));
+  input.handlePointerMove(finger(1, 240, 300));
+  assert.ok(calls.pan.length > 0 && calls.pan.every((call) => call.direct));
 });

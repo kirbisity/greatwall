@@ -500,3 +500,8 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	.overlay-content { padding-top: 7vh; }
 }
 
+/* The controls and instructions for the device in hand: a finger has no
+   Ctrl+Z and no scroll wheel, and a mouse has no need of an undo button. */
+@media (pointer: coarse) { .mouseOnly { display: none !important; } }
+@media (pointer: fine) { .touchOnly { display: none !important; } }
+

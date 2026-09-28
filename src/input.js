@@ -50,6 +50,10 @@ export class Input {
     // at once is a pinch: see beginPinch.
     this.contacts = new Map();
     this.pinch = null;
+    // Whether the drag in hand is a finger or stylus, which holds the ground
+    // it grabbed, rather than a mouse, which eases after it -- see
+    // Camera#panFrom.
+    this.holdsGround = false;
     this.zoomAnchor = null;
     this.chainPoint = null;
     // Which guard tier the dispatch menu last picked. Sticky across sends,
@@ -90,6 +94,7 @@ export class Input {
       // Sync first so the initial drag delta is zero instead of a jump from (0, 0).
       this.trackPointer(event);
       this.pointerDown = true;
+      this.holdsGround = event.pointerType === 'touch' || event.pointerType === 'pen';
       return;
     }
     this.beginPinch();
@@ -158,9 +163,9 @@ export class Input {
   updatePinch() {
     const now = this.measurePinch();
     if (this.pinch.gap > 0 && now.gap > 0) {
-      this.camera.zoomAt(now.midpoint, now.gap / this.pinch.gap);
+      this.camera.zoomAt(now.midpoint, now.gap / this.pinch.gap, { direct: true });
     }
-    this.camera.panFrom(this.pinch.midpoint, now.midpoint);
+    this.camera.panFrom(this.pinch.midpoint, now.midpoint, { direct: true });
     this.pinch = now;
     this.onChange();
   }
@@ -284,7 +289,7 @@ export class Input {
         this.dragFortify();
         break;
       default:
-        this.camera.panFrom(previous, this.pointer);
+        this.camera.panFrom(previous, this.pointer, { direct: this.holdsGround });
     }
     this.onChange();
   }
@@ -404,8 +409,13 @@ export class Input {
       return;
     }
     if (event.ctrlKey && event.code === 'KeyZ') {
-      this.game.undoLastWall();
-      this.onChange();
+      this.undo();
     }
+  }
+
+  /** Take back the last section laid -- Ctrl+Z, or the undo button on a touchscreen. */
+  undo() {
+    this.game.undoLastWall();
+    this.onChange();
   }
 }

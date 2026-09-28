@@ -378,3 +378,77 @@ test('screens a laptop size and up are left exactly as they were', () => {
     assert.equal(v.focal, CAMERA.focalLength, `${width}x${height} should not have changed`);
   }
 });
+
+// --- how a drag feels under a finger versus a mouse ----------------------
+
+/** Drag steadily across a phone and report how far the grabbed ground trails. */
+function trailWhileDragging({ direct }) {
+  const camera = new Camera(375, 667);
+  let finger = { x: 120, y: 400 };
+  const grabbed = camera.toWorld(finger);
+  let worst = 0;
+  for (let frame = 0; frame < 20; frame += 1) {
+    const next = { x: finger.x + 10, y: finger.y };
+    camera.panFrom(finger, next, { direct });
+    finger = next;
+    camera.update(1 / 60);
+    const onScreen = projectPoint(camera.view, grabbed.x, grabbed.y, 0);
+    worst = Math.max(worst, Math.hypot(onScreen.x - finger.x, onScreen.y - finger.y));
+  }
+  return { camera, worst };
+}
+
+test('under a finger the ground stays where it was grabbed', () => {
+  const { worst } = trailWhileDragging({ direct: true });
+  assert.ok(worst < 1, `the ground slid ${worst.toFixed(1)}px out from under the finger`);
+});
+
+test('under a mouse the view keeps its weight', () => {
+  const { worst } = trailWhileDragging({ direct: false });
+  assert.ok(worst > 20, `the mouse drag should still lag behind a little, it lagged ${worst.toFixed(1)}px`);
+});
+
+test('a finger let go still flings the map on', () => {
+  const { camera } = trailWhileDragging({ direct: true });
+  camera.release();
+  const atRelease = { ...camera.focus };
+  for (let frame = 0; frame < 30; frame += 1) {
+    camera.update(1 / 60);
+  }
+  assert.ok(Math.hypot(camera.focus.x - atRelease.x, camera.focus.y - atRelease.y) > 5,
+    'a throw should carry on after the finger lifts');
+});
+
+test('under two fingers the ground stays put as they pinch', () => {
+  const camera = new Camera(375, 667);
+  let a = { x: 170, y: 330 };
+  let b = { x: 210, y: 330 };
+  const grabbedA = camera.toWorld(a);
+  const grabbedB = camera.toWorld(b);
+  let worst = 0;
+  // A gentle spread, well inside the zoom range: at the limit the fingers
+  // carry on and the ground cannot follow, which no lens can help.
+  for (let frame = 0; frame < 12; frame += 1) {
+    const nextA = { x: a.x - 1, y: a.y };
+    const nextB = { x: b.x + 1, y: b.y };
+    const midBefore = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const mid = { x: (nextA.x + nextB.x) / 2, y: (nextA.y + nextB.y) / 2 };
+    camera.zoomAt(mid, (nextB.x - nextA.x) / (b.x - a.x), { direct: true });
+    camera.panFrom(midBefore, mid, { direct: true });
+    a = nextA;
+    b = nextB;
+    camera.update(1 / 60);
+    for (const [grabbed, fingerAt] of [[grabbedA, a], [grabbedB, b]]) {
+      const onScreen = projectPoint(camera.view, grabbed.x, grabbed.y, 0);
+      worst = Math.max(worst, Math.hypot(onScreen.x - fingerAt.x, onScreen.y - fingerAt.y));
+    }
+  }
+  assert.ok(worst < 1.5, `the ground slid ${worst.toFixed(1)}px under the pinching fingers`);
+});
+
+test('the wheel still eases in, as it was tuned to', () => {
+  const camera = new Camera(1512, 807);
+  camera.zoomAt({ x: 756, y: 400 }, 1.2);
+  camera.update(1 / 60);
+  assert.ok(camera.distance > camera.targetDistance + 1, 'one frame in, a wheel zoom should still be on its way');
+});

@@ -162,6 +162,55 @@ test('past the feather, the clearing leaves the noise\'s own cover untouched', (
     'well clear of the city, the two should read exactly the same cover');
 });
 
+test('a pond is open water at its centre and dry ground past its field', () => {
+  const terrain = new Terrain(1, { ponds: [{ x: 50, y: 0, radius: 6, fieldRadius: 20 }] });
+  assert.equal(terrain.pondAt(50, 0), 1, 'expected open water dead centre');
+  assert.equal(terrain.pondAt(50 + 30, 0), 0, 'expected dry ground well past the field');
+});
+
+test('the field around a pond is green right at the water and fades out by its own edge', () => {
+  const terrain = new Terrain(1, { ponds: [{ x: 50, y: 0, radius: 6, fieldRadius: 20 }] });
+  assert.equal(terrain.oasisAt(50, 0), 1, 'expected full green at the water');
+  assert.equal(terrain.oasisAt(50 + 6, 0), 1, 'expected full green right at the water\'s edge too');
+  const partway = terrain.oasisAt(50 + 13, 0);
+  assert.ok(partway > 0 && partway < 1, `expected the field partway out (${partway}) strictly between full and none`);
+  assert.equal(terrain.oasisAt(50 + 20, 0), 0, 'expected dry ground exactly at the field\'s own edge');
+});
+
+test('a pond paints as water and its field as green, not the desert underneath either', () => {
+  const desert = { grassColor: '#d9c188', forestThreshold: 1, ponds: [{ x: 50, y: 0, radius: 6, fieldRadius: 20 }] };
+  const terrain = new Terrain(1, desert);
+  const [waterR, waterG, waterB] = terrain.groundTintAt(50, 0);
+  assert.ok(waterB > waterR, `expected the pond's centre to read as water, got rgb(${waterR}, ${waterG}, ${waterB})`);
+  const [fieldR, fieldG, fieldB] = terrain.groundTintAt(50 + 10, 0);
+  assert.ok(fieldG > fieldR && fieldG > fieldB,
+    `expected the field to read as green, got rgb(${fieldR}, ${fieldG}, ${fieldB})`);
+});
+
+test('a pond sits in a shallow dip, not flush with the ground around it', () => {
+  const land = { ponds: [{ x: 50, y: 0, radius: 6, fieldRadius: 20 }] };
+  const withPond = new Terrain(1, land);
+  const plain = new Terrain(1, {});
+  assert.ok(withPond.heightAt(50, 0) < plain.heightAt(50, 0) - 1,
+    'expected the pond to dip the ground it sits on');
+});
+
+test('no tree takes root inside a pond, whatever the forest noise says', () => {
+  const land = { forestThreshold: 0, treeSpacing: 4, ponds: [{ x: 50, y: 0, radius: 10, fieldRadius: 20 }] };
+  const terrain = new Terrain(1, land);
+  const trees = terrain.treesWithin(30, -20, 70, 20);
+  for (const tree of trees) {
+    const distance = Math.hypot(tree.x - 50, tree.y);
+    assert.ok(distance >= 10, `a tree grew at distance ${distance.toFixed(1)}, inside the pond`);
+  }
+});
+
+test('with no ponds at all, a level pays nothing for the feature', () => {
+  const terrain = new Terrain(1);
+  assert.equal(terrain.pondAt(50, 0), 0);
+  assert.equal(terrain.oasisAt(50, 0), 0);
+});
+
 test('groundTintAt and groundColorAt describe the same colour', () => {
   const terrain = new Terrain(1);
   for (let x = -600; x < 600; x += 37) {

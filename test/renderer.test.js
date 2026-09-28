@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createView } from '../src/projection.js';
 import { Renderer } from '../src/renderer.js';
+import { Terrain } from '../src/terrain.js';
+import { LEVELS } from '../src/levels.js';
+import { Camera } from '../src/camera.js';
 
 const GREEN_SEASONS = { Autumn: '#d9b23a', Winter: '#eef2f5', Spring: '#4a603a', Summer: '#4a603a' };
 
@@ -31,6 +34,39 @@ function woodsRenderer() {
     distance: 150,
   };
   return { renderer, calls };
+}
+
+/** A renderer with just enough of itself to run drawGround against a real
+ *  Terrain, and a context that only counts how much it was asked to paint. */
+function groundRenderer() {
+  const calls = { fillRect: 0 };
+  const context = {
+    createRadialGradient() { return { addColorStop() {} }; },
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    fill() {},
+    fillRect() { calls.fillRect += 1; },
+    set fillStyle(value) { context._fillStyle = value; },
+    get fillStyle() { return context._fillStyle; },
+  };
+  const renderer = Object.create(Renderer.prototype);
+  renderer.ground = context;
+  renderer.paintedGround = null;
+  renderer.meshTint = [0, 0, 0];
+  renderer.camera = new Camera(800, 600);
+  return { renderer, calls };
+}
+
+function stubGame(level, terrain) {
+  return {
+    level,
+    terrain,
+    seasonPhase: 2.5,
+    terrainRevision: 0,
+    treesWithin: (minX, minY, maxX, maxY) => terrain.treesWithin(minX, minY, maxX, maxY),
+  };
 }
 
 /** One tree at the origin, in a wood whose colours are given once per season. */
@@ -135,4 +171,22 @@ test('the turn is gradual, not a cut on the season\'s first tick', () => {
   const partwayRed = redAt(4.2);
   assert.ok(partwayRed > summerRed && partwayRed < autumnRed,
     `expected the turn partway through, got ${partwayRed} outside ${summerRed}..${autumnRed}`);
+});
+
+test('switching levels repaints the ground even when the camera has not moved', () => {
+  const { renderer, calls } = groundRenderer();
+  const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river);
+  const desert = new Terrain(1, LEVELS[1].land);
+
+  renderer.drawGround(stubGame(LEVELS[0], mainland));
+  const firstPaint = calls.fillRect;
+  assert.ok(firstPaint > 0, 'expected the first call to actually paint something');
+
+  renderer.drawGround(stubGame(LEVELS[0], mainland));
+  assert.equal(calls.fillRect, firstPaint,
+    'expected an unmoved camera on the same level to skip repainting');
+
+  renderer.drawGround(stubGame(LEVELS[1], desert));
+  assert.ok(calls.fillRect > firstPaint,
+    'expected switching to a different level, and its Terrain, to repaint even though the camera did not move');
 });

@@ -244,6 +244,25 @@ test('each deck drifts faster than the one below it', () => {
   }
 });
 
+test('a level\'s own wind drives the whole sky faster, not just its haze', () => {
+  // Built at clock 0, then queried at a later, fixed instant: the only
+  // thing that can move a cloud between the two calls below is the wind
+  // multiplier itself, not time actually passing between them.
+  let clock = 0;
+  const atmosphere = new Atmosphere(camera(), { random: spread(), now: () => clock });
+  clock = 2000;
+  const calm = new Map(atmosphere.placeClouds(0, null).map((placed) => [placed.cloud, placed]));
+  const storm = new Map(atmosphere.placeClouds(0, { windSpeed: 4 }).map((placed) => [placed.cloud, placed]));
+  let moved = 0;
+  for (const [cloud, was] of calm) {
+    const now = storm.get(cloud);
+    if (now && Math.abs(now.world.x - was.world.x) > 5) {
+      moved += 1;
+    }
+  }
+  assert.ok(moved > 0, 'expected a stronger wind to carry at least some clouds further along');
+});
+
 test('atmosphere is on by default', () => {
   assert.equal(settings.atmosphere, true);
 });

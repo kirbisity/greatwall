@@ -51,6 +51,9 @@ function bandsFor(land) {
     dirt: band(land.dirtColor),
     rock: band(land.rockColor),
     gold: hexChannels(land.autumnGold),
+    pond: hexChannels(land.pondColor),
+    pondBank: hexChannels(land.pondBankColor),
+    oasis: hexChannels(land.oasisColor),
   };
 }
 
@@ -266,6 +269,42 @@ export class Terrain {
   }
 
   /**
+   * How far into a pond this point sits: 0 on dry land, 1 at its centre.
+   * A level's own tiny standing water -- an oasis near the city, say --
+   * entirely separate from its river or sea, so a level can carry both a
+   * long watercourse and a scatter of small ponds at once (see levels.js).
+   */
+  pondAt(x, y) {
+    let channel = 0;
+    for (const pond of this.land.ponds) {
+      const distance = Math.hypot(x - pond.x, y - pond.y);
+      if (distance < pond.radius) {
+        channel = Math.max(channel, 1 - distance / pond.radius);
+      }
+    }
+    return channel;
+  }
+
+  /**
+   * How green the ground reads this near a pond, 0 dry to 1 right at its
+   * edge, fading out over the field beyond -- cultivated ground standing
+   * out from whatever band the noise underneath would otherwise have
+   * painted, independent of it the same way a mountain's rock is.
+   */
+  oasisAt(x, y) {
+    let greenness = 0;
+    for (const pond of this.land.ponds) {
+      const distance = Math.hypot(x - pond.x, y - pond.y);
+      if (distance <= pond.radius) {
+        greenness = 1;
+      } else if (distance < pond.fieldRadius) {
+        greenness = Math.max(greenness, 1 - (distance - pond.radius) / (pond.fieldRadius - pond.radius));
+      }
+    }
+    return greenness;
+  }
+
+  /**
    * How far the coast reaches along a bearing, in world units.
    *
    * Sampled on the ring itself rather than across the plane, so the headland
@@ -405,6 +444,10 @@ export class Terrain {
     const offshore = this.seaAt(x, y);
     if (offshore > 0) {
       height -= this.sea.depth * ease(offshore);
+    }
+    const pond = this.pondAt(x, y);
+    if (pond > 0) {
+      height -= this.land.pondDepth * ease(pond);
     }
     return height;
   }
@@ -602,17 +645,25 @@ export class Terrain {
    * everywhere at once.
    */
   groundTintAt(x, y, into = [0, 0, 0], gold = 0) {
+    // A pond is its own small body of water, checked ahead of a level's
+    // river or sea since the two never mean to overlap but nothing stops a
+    // level carrying both at once.
+    const pond = this.pondAt(x, y);
+    const riverSea = Math.max(this.riverAt(x, y), this.seaAt(x, y));
+    if (pond > 0 && pond >= riverSea) {
+      return this.waterTint(pond, into, this.bands.pond, this.bands.pondBank);
+    }
+    if (riverSea > 0) {
+      // Shore shading into open water, so the edge is a beach rather than a
+      // painted line.
+      return this.waterTint(riverSea, into, this.bands.water, this.bands.bank);
+    }
     // Ground reads as bare rock once a mountain has raised it enough to
     // matter, whatever band the noise underneath would otherwise have said
     // -- the outer skirt stays whatever it was, so a mountain rises out of
     // the ground it stands on rather than starting with a hard edge.
-    const channel = Math.max(this.riverAt(x, y), this.seaAt(x, y));
-    if (channel > 0) {
-      // Shore shading into open water, so the edge is a beach rather than a
-      // painted line.
-      return this.waterTint(channel, into);
-    }
-    const band = this.isMountainSlope(x, y) ? this.bands.rock : this.bandAt(x, y);
+    const onSlope = this.isMountainSlope(x, y);
+    const band = onSlope ? this.bands.rock : this.bandAt(x, y);
     const base = band.channels;
     // A finer noise mottles the band's colour, so a patch reads as textured
     // rather than a flat fill -- the same trick as the band itself, one size
@@ -629,6 +680,16 @@ export class Terrain {
       green += (gold[1] - green) * turning;
       blue += (gold[2] - blue) * turning;
     }
+    // Cultivated ground around a pond, standing out the same way a
+    // mountain's rock does -- independent of whatever band and turn the
+    // noise underneath would otherwise have painted.
+    const oasis = onSlope ? 0 : this.oasisAt(x, y);
+    if (oasis > 0) {
+      const field = this.bands.oasis;
+      red += (field[0] - red) * oasis;
+      green += (field[1] - green) * oasis;
+      blue += (field[2] - blue) * oasis;
+    }
     into[0] = toChannel(red);
     into[1] = toChannel(green);
     into[2] = toChannel(blue);
@@ -641,10 +702,8 @@ export class Terrain {
     return `#${hexByte(tint[0])}${hexByte(tint[1])}${hexByte(tint[2])}`;
   }
 
-  /** The river's own colour at a point, banks blending into open water. */
-  waterTint(channel, into) {
-    const bank = this.bands.bank;
-    const water = this.bands.water;
+  /** A body of water's own colour at a point, banks blending into open water. */
+  waterTint(channel, into, water = this.bands.water, bank = this.bands.bank) {
     const depth = ease(Math.min(1, channel * 1.6));
     into[0] = toChannel(bank[0] + (water[0] - bank[0]) * depth);
     into[1] = toChannel(bank[1] + (water[1] - bank[1]) * depth);
@@ -707,7 +766,8 @@ export class Terrain {
         // rock, or a mountain's slope, which reads as rock regardless of
         // what the band underneath says.
         if (this.groundBandAt(x, y) !== this.land.grassColor
-          || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0) {
+          || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0
+          || this.pondAt(x, y) > 0) {
           continue;
         }
         if (isCleared && isCleared(x, y)) {

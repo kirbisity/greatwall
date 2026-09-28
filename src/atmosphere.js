@@ -113,8 +113,14 @@ export class Atmosphere {
   /**
    * Where each cloud currently sits on screen. Decks above the camera, and
    * those outside the viewport, are dropped here rather than drawn.
+   *
+   * `mist` is a level's own standing weather, if it has one (see levels.js):
+   * `windSpeed` multiplies how fast the whole sky drifts, so a sandstorm's
+   * cloud can race past overhead while an ordinary sky drifts at its own
+   * pace, without either level's clouds needing a count or size of their
+   * own.
    */
-  placeClouds(seasonPhase = 0) {
+  placeClouds(seasonPhase = 0, mist = null) {
     if (!this.sprite.width) {
       return [];
     }
@@ -122,7 +128,7 @@ export class Atmosphere {
     const { width, height } = this.camera;
     const aspect = this.sprite.height / this.sprite.width;
     const focus = this.camera.focus;
-    const drift = this.drift;
+    const drift = this.drift * (mist?.windSpeed ?? 1);
     const cameraHeight = view.position.z;
     const half = CLOUD_FIELD / 2;
     const { cloudBoost } = seasonBlend(seasonPhase);
@@ -186,8 +192,8 @@ export class Atmosphere {
     context.fillRect(0, 0, this.camera.width, this.camera.height);
   }
 
-  drawClouds(context, seasonPhase = 0) {
-    for (const placed of this.placeClouds(seasonPhase)) {
+  drawClouds(context, seasonPhase = 0, mist = null) {
+    for (const placed of this.placeClouds(seasonPhase, mist)) {
       context.globalAlpha = placed.alpha;
       context.drawImage(this.sprite,
         placed.screen.x - placed.width / 2, placed.screen.y - placed.height / 2,

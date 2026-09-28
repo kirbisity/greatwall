@@ -517,7 +517,7 @@ export class Renderer {
     // Haze and cloud sit above the world but below the readouts.
     if (settings.atmosphere) {
       this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawClouds(this.overlay, game.seasonPhase);
+      this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.level.mist);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
@@ -564,8 +564,12 @@ export class Renderer {
     // groundGold is 0 at both ends but the canopy is white, then green).
     const canopyTurned = Math.round(game.seasonPhase * GOLD_STEPS) / GOLD_STEPS;
     // Reshaped ground is part of what the mesh draws, so a platform climbing
-    // has to count as a change the same way the camera moving does.
-    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${canopyTurned}|${game.terrainRevision}`;
+    // has to count as a change the same way the camera moving does. The
+    // level's own id is part of the key too: switching levels swaps in a
+    // whole new Terrain, and without the id here that swap can go
+    // unnoticed if the camera happens to end up back where it started,
+    // leaving the previous level's ground painted under the new one.
+    const key = `${game.level.id}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${canopyTurned}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }

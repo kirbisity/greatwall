@@ -403,6 +403,17 @@ export const TERRAIN = {
   // see Terrain#hillAt and the contours walls terrace up it.
   hill: null,
 
+  // Tiny standing water a level can scatter near its city -- an oasis in a
+  // desert, say -- entirely apart from its river or sea. Empty by default,
+  // so only a level that asks for one pays for it. Each is `{ x, y, radius,
+  // fieldRadius }`: dry outside fieldRadius, a cultivated green fading in
+  // from there, open water inside radius -- see Terrain#pondAt/oasisAt.
+  ponds: [],
+  pondColor: '#2f6f86',
+  pondBankColor: '#cbb98d',
+  pondDepth: 5,
+  oasisColor: '#4a7c3a',
+
   // Woodland. Cover above the threshold grows trees, thicker towards 1.
   // Only grass grows any -- see Terrain.treesWithin.
   forestScale: 240,

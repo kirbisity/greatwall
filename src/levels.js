@@ -37,6 +37,13 @@ const DESERT = {
   // Nothing grows here, and nothing turns in autumn.
   forestThreshold: 1,
   turnsInAutumn: false,
+  // A tiny oasis a short way from the city: two ponds close enough together
+  // to read as one small cultivated patch rather than two separate dots,
+  // the only green this level has anywhere -- see Terrain#pondAt/oasisAt.
+  ponds: [
+    { x: 55, y: 25, radius: 6, fieldRadius: 22 },
+    { x: 40, y: 40, radius: 4, fieldRadius: 16 },
+  ],
 };
 
 export const LEVELS = [
@@ -81,10 +88,14 @@ export const LEVELS = [
     name: 'The Dust Sea',
     blurb: 'A desert siege. Raiders from every side.',
     land: DESERT,
-    // Dust hanging in the air the year round: the season still says how
-    // thick the haze is, this says what colour it is and how much more of
-    // it there is than a temperate sky would hold.
-    mist: { color: '226, 194, 112', blend: 0.8, density: 1.9, start: 0.45 },
+    // A standing sandstorm rather than an ordinary dusty haze: thicker than
+    // any season alone gets, starting well short of the ordinary distance
+    // so it presses in past the middle ground, with the whole sky driven
+    // past overhead several times faster than an ordinary wind -- see
+    // Atmosphere#placeClouds.
+    mist: {
+      color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, windSpeed: 4,
+    },
   },
   {
     id: 'shiro-island',

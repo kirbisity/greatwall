@@ -146,6 +146,19 @@ export class Input {
     }
   }
 
+  /** Muster the picked tier, or the cheapest, and send it to hold a spot. */
+  orderAttack(target) {
+    const options = this.game.dispatchOptions();
+    const chosen = options.find((option) => option.id === this.selectedGuardType) ?? options[0];
+    if (!chosen) {
+      return;
+    }
+    const result = this.game.sendGuard(chosen.id, target);
+    if (result.status === 'poor') {
+      this.hud.showMessage(`${chosen.name} costs $${chosen.cost} to muster`);
+    }
+  }
+
   handleMove(event) {
     if (!this.isOverMap(event)) {
       return;

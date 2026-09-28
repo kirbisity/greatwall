@@ -128,13 +128,14 @@ export const LEVELS = [
       // The stonework simply turns a corner; no turret is raised where two
       // runs meet.
       towers: false,
-      // Three times the usual stone, because raiders do not have to break a
-      // section to get past it -- they go over.
-      healthScale: 3,
+      // Five times the usual stone, because raiders do not have to break a
+      // section to get past it -- they go over, and wear it down the whole
+      // time they are up there.
+      healthScale: 5,
       // What going over costs: a crawl while astride the stone, and a share
       // of the company's strength for the crossing. A wall here buys time
       // and lives rather than denying the ground outright.
-      climb: { reach: 16, speed: 0.35, healthCost: 0.3 },
+      climb: { reach: 20, speed: 0.16, healthCost: 0.3 },
     },
     buildings: JAPAN_BUILDINGS,
     // The island's keeps are a fraction of the size of the imperial city's,

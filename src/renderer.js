@@ -25,7 +25,7 @@ import {
   projectPoint,
 } from './projection.js';
 import { Atmosphere } from './atmosphere.js';
-import { seasonBlend } from './season.js';
+import { seasonBlend, seasonalColorMix } from './season.js';
 import { settings } from './settings.js';
 import { compileStructure } from './structures.js';
 import { compileUnit } from './units.js';
@@ -151,15 +151,6 @@ function healthColor(fraction) {
 
 function shade(tint, light) {
   return `rgb(${Math.round(tint[0] * light)},${Math.round(tint[1] * light)},${Math.round(tint[2] * light)})`;
-}
-
-/** A level's colour fields are hex strings; shade() wants channels. */
-function hexChannels(hex) {
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
 }
 
 /** A stable pseudo-random value in [0, 1) for a given number, no state kept. */
@@ -544,11 +535,10 @@ export class Renderer {
    * The ground: a shaded mesh of the landscape with its woodland standing on
    * it, painted onto its own layer.
    *
-   * None of it moves, so it is only repainted when the view does. While the
-   * camera is still — which is most of a fight — the whole landscape costs
-   * nothing at all. Ground colour is fixed by position, not by season, so
-   * this never needs repainting for the year turning either — only the fog
-   * over it does that.
+   * None of it moves, so it is only repainted when the view does, or when
+   * the year has turned enough to matter — the grass gilding in autumn, or
+   * a wood's own canopy turning through the seasons — tracked as a coarse,
+   * quantised step in the cache key below rather than every frame.
    *
    * The key is the camera's exact numbers, not a rounded fingerprint of
    * them: settling the camera snaps focus, distance and elevation to their
@@ -567,9 +557,15 @@ export class Renderer {
     // the eye catches over the minute it takes.
     const gold = seasonBlend(game.seasonPhase).groundGold;
     const turned = Math.round(gold * GOLD_STEPS) / GOLD_STEPS;
+    // The canopy turns on its own schedule -- green to gold to white and
+    // back -- independent of the ground's own gold, so it needs its own
+    // step in the key or a wood can sit unrepainted through a season the
+    // ground itself doesn't visibly turn for (winter to spring, say, where
+    // groundGold is 0 at both ends but the canopy is white, then green).
+    const canopyTurned = Math.round(game.seasonPhase * GOLD_STEPS) / GOLD_STEPS;
     // Reshaped ground is part of what the mesh draws, so a platform climbing
     // has to count as a change the same way the camera moving does.
-    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${game.terrainRevision}`;
+    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${canopyTurned}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -756,14 +752,19 @@ export class Renderer {
    *
    * Colour comes from the land rather than a fixed constant, so a level can
    * plant a wood of its own kind -- the island's cherry blossoms are the
-   * same shape, only pink and smaller -- without a second drawing path.
+   * same shape, only pink and smaller -- without a second drawing path. And
+   * from the season along with the land: a canopy turns gradually across
+   * the year the same way the sky's own haze does, held at each season's
+   * colour through its midpoint rather than cutting to it on the first
+   * tick -- see Season#seasonalColorMix.
    *
    * Each canopy is two tiers rather than one solid cone, echoing the tiered
    * roofs every building in the game already wears: a narrower, lighter cap
    * catching the open sky, sitting on a wider, shaded skirt. One shape drawn
    * twice, not two different trees, so the added cost is one more fill and
-   * one more projected point per tree -- the colours themselves are worked
-   * out once for the whole wood, not per tree.
+   * one more projected point per tree -- the colours themselves, including
+   * the seasonal blend, are worked out once for the whole wood, not per
+   * tree.
    */
   drawWoods(game, bounds) {
     const context = this.ground;
@@ -771,7 +772,7 @@ export class Renderer {
     const trees = game.treesWithin(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
     const trunks = this.camera.distance < TRUNK_DISTANCE;
     const trunkFill = game.terrain.land.trunkColor;
-    const canopyChannels = hexChannels(game.terrain.land.canopyColor);
+    const canopyChannels = seasonalColorMix(game.seasonPhase, game.terrain.land.canopySeasons);
     const capFill = shade(canopyChannels, CANOPY_CAP_LIGHT);
     const skirtFill = shade(canopyChannels, CANOPY_SKIRT_LIGHT);
 

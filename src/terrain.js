@@ -1,3 +1,4 @@
+import { hexChannels } from './color.js';
 import { TERRAIN } from './config.js';
 
 /**
@@ -27,15 +28,6 @@ function ease(t) {
   return t * t * (3 - 2 * t);
 }
 
-/** A '#rrggbb' colour as [r, g, b]. */
-function channelsOf(hex) {
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
-}
-
 function toChannel(value) {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
@@ -52,13 +44,13 @@ function hexByte(value) {
  * desert has none of.
  */
 function bandsFor(land) {
-  const band = (hex, turns = false) => ({ hex, channels: channelsOf(hex), turns });
+  const band = (hex, turns = false) => ({ hex, channels: hexChannels(hex), turns });
   return {
     grass: band(land.grassColor, land.turnsInAutumn),
     moss: band(land.mossColor, land.turnsInAutumn),
     dirt: band(land.dirtColor),
     rock: band(land.rockColor),
-    gold: channelsOf(land.autumnGold),
+    gold: hexChannels(land.autumnGold),
   };
 }
 
@@ -183,8 +175,8 @@ export class Terrain {
     this.bands = bandsFor(this.land);
     const water = river ?? sea;
     if (water) {
-      this.bands.water = channelsOf(water.color);
-      this.bands.bank = channelsOf(water.bankColor);
+      this.bands.water = hexChannels(water.color);
+      this.bands.bank = hexChannels(water.bankColor);
     }
     // Ground the player or the game has reshaped: one entry per settlement
     // levelled flat, plus any platform raised on top of the wild ground. Both

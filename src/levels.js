@@ -119,7 +119,14 @@ export const LEVELS = [
       // for which ground counts as grass at all) compound to a sliver of
       // the map. Loosening the first is what turns a sliver into a wood
       // worth walking through.
-      canopyColor: '#eaacc7',
+      //
+      // Pink only while the blossom is actually out, in spring; the same
+      // turn to yellow and then white as any other wood the rest of the
+      // year, and a plain green in summer once the blossom has dropped --
+      // the same green the mainland wears then, not a colour of its own.
+      canopySeasons: {
+        Autumn: '#d9b23a', Winter: '#eef2f5', Spring: '#eaacc7', Summer: '#4a603a',
+      },
       treeSize: 3,
       treeSpacing: 7,
       forestThreshold: 0.24,

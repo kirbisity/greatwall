@@ -737,17 +737,17 @@ test('nothing overlaps a wall where walls stop a company dead', () => {
 
 test("a wood's colour comes from the land, and the default is the mainland's green", () => {
   const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river);
-  assert.equal(mainland.land.canopyColor, TERRAIN.canopyColor);
+  assert.deepEqual(mainland.land.canopySeasons, TERRAIN.canopySeasons);
   assert.equal(mainland.land.trunkColor, TERRAIN.trunkColor);
 });
 
 test('the island plants cherry blossom: pink, and smaller than the mainland wood', () => {
   const terrain = islandTerrain();
-  assert.notEqual(terrain.land.canopyColor, TERRAIN.canopyColor, 'the island should not be the plain green');
+  assert.notDeepEqual(terrain.land.canopySeasons, TERRAIN.canopySeasons, 'the island should not be the plain green');
   // Pink reads as more red and more blue than green, against a fill that is
   // the other way round -- a cheap check that this is not just A different
-  // green.
-  const [r, g, b] = terrain.land.canopyColor.match(/[0-9a-f]{2}/gi).map((h) => parseInt(h, 16));
+  // green. Spring is when the blossom is actually out.
+  const [r, g, b] = terrain.land.canopySeasons.Spring.match(/[0-9a-f]{2}/gi).map((h) => parseInt(h, 16));
   assert.ok(r > g && b > g, `expected a pink, got rgb(${r}, ${g}, ${b})`);
   assert.ok(terrain.land.treeSize < TERRAIN.treeSize, 'a blossom tree should be smaller than the mainland wood');
 });
@@ -780,7 +780,7 @@ test('the mainland and the desert are untouched by the island planting its own w
       continue;
     }
     const terrain = new Terrain(1, level.land, level.river ?? null, level.sea ?? null);
-    assert.equal(terrain.land.canopyColor, TERRAIN.canopyColor, `${level.id} should keep the plain wood`);
+    assert.deepEqual(terrain.land.canopySeasons, TERRAIN.canopySeasons, `${level.id} should keep the plain wood`);
     assert.equal(terrain.land.treeSize, TERRAIN.treeSize, `${level.id} should keep the plain tree size`);
   }
 });

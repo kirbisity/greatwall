@@ -409,11 +409,19 @@ export const TERRAIN = {
   forestThreshold: 0.50,
   treeSpacing: 18,
   treeSize: 5.4,
-  // What a tree is drawn in -- a level may plant a wood of its own colour
-  // (see the island's cherry blossoms in levels.js) without touching
-  // anything else about how thick it grows.
+  // What a tree is drawn in. The trunk is fixed; the canopy turns with the
+  // year, held exactly at each season's own midpoint and blended gradually
+  // across the boundary between two -- see Season#seasonalColorMix, which
+  // this is read through rather than read directly, and the key order must
+  // match SEASONS's own names. A level overrides only the seasons where its
+  // own wood differs (see the island's cherry blossoms in levels.js) --
+  // the object is replaced wholesale by a patch, not merged key by key, so
+  // an override gives every season a colour rather than leaving the rest to
+  // fall through from here.
   trunkColor: '#543e2a',
-  canopyColor: '#4a603a',
+  canopySeasons: {
+    Autumn: '#d9b23a', Winter: '#eef2f5', Spring: '#4a603a', Summer: '#4a603a',
+  },
 
   // Trees are felled this near a wall, and anywhere a city stands.
   clearOfWall: 16,

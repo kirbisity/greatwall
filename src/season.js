@@ -1,3 +1,4 @@
+import { hexChannels } from './color.js';
 import { SEASONS } from './config.js';
 
 /**
@@ -40,4 +41,27 @@ export function mixChannels(from, to, t) {
   const a = from.split(',');
   const b = to.split(',');
   return a.map((channel, i) => Math.round(mix(Number(channel), Number(b[i]), t))).join(', ');
+}
+
+/**
+ * Blend a hex colour given once per season -- a level's own tree canopy, say
+ * -- the same gradual way the sky's own haze and tint turn: held exactly at
+ * each season's midpoint, blending linearly across the boundary between two
+ * rather than cutting on the season's first tick.
+ *
+ * Kept separate from seasonBlend rather than folded into it: that function
+ * reads a single fixed table (SEASONS itself), and a caller with a table of
+ * its own should not have to teach it that table exists. Returns channels,
+ * not a string, so the caller can shade them or format them however its own
+ * drawing already does -- exactly what an already-established colour field
+ * gets read as elsewhere in the renderer.
+ */
+export function seasonalColorMix(phase, hexBySeason) {
+  const count = SEASONS.length;
+  const raw = phase - 0.5;
+  const base = Math.floor(raw);
+  const t = raw - base;
+  const from = hexChannels(hexBySeason[SEASONS[((base % count) + count) % count].name]);
+  const to = hexChannels(hexBySeason[SEASONS[(((base + 1) % count) + count) % count].name]);
+  return from.map((channel, i) => Math.round(mix(channel, to[i], t)));
 }

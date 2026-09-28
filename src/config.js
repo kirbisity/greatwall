@@ -618,6 +618,21 @@ export const CLOUD_ENGULF_WIDTH = 0.8;
 
 export const CLOUD_SPRITE = 'images/cloud.png';
 
+/**
+ * Falling snow: screen-space particles rather than world objects, since
+ * weather overhead does not need the camera's own perspective the way a
+ * cloud deck does. How many fall at all is read off winter's own
+ * cloudBoost (see Atmosphere#placeSnow), the same value that already
+ * gathers more cloud ahead of winter, so the two thicken together and both
+ * fade the same gradual way everything else in the year does.
+ */
+export const SNOW_COUNT = 70;
+export const SNOW_MIN_SIZE = 1;
+export const SNOW_MAX_SIZE = 2.6;
+export const SNOW_MIN_FALL = 30;
+export const SNOW_MAX_FALL = 70;
+export const SNOW_DRIFT = 18;
+
 export const HEALTH_COLORS = [
   { above: 0.66, color: '#7fb069' },
   { above: 0.33, color: '#e0b84c' },

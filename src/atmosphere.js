@@ -6,6 +6,12 @@ import {
   CLOUD_SPRITE,
   FOG,
   SEASONS,
+  SNOW_COUNT,
+  SNOW_DRIFT,
+  SNOW_MAX_FALL,
+  SNOW_MAX_SIZE,
+  SNOW_MIN_FALL,
+  SNOW_MIN_SIZE,
 } from './config.js';
 import { groundAt, projectPoint } from './projection.js';
 import { mixChannels, seasonBlend } from './season.js';
@@ -54,6 +60,18 @@ export class Atmosphere {
       }));
       return [...core, ...extra];
     });
+    // Screen-space and re-seeded once, not per level: winter looks the same
+    // over a desert as over the mainland, the way the sky's haze already
+    // does.
+    this.snowflakes = Array.from({ length: SNOW_COUNT }, () => ({
+      x: random(),
+      y: random(),
+      size: SNOW_MIN_SIZE + random() * (SNOW_MAX_SIZE - SNOW_MIN_SIZE),
+      fall: SNOW_MIN_FALL + random() * (SNOW_MAX_FALL - SNOW_MIN_FALL),
+      driftPhase: random() * Math.PI * 2,
+      driftRate: 0.3 + random() * 0.4,
+      alpha: 0.4 + random() * 0.5,
+    }));
   }
 
   /** Seconds of sky time elapsed. */
@@ -198,6 +216,41 @@ export class Atmosphere {
       context.drawImage(this.sprite,
         placed.screen.x - placed.width / 2, placed.screen.y - placed.height / 2,
         placed.width, placed.height);
+    }
+    context.globalAlpha = 1;
+  }
+
+  /**
+   * Where each flake currently sits on screen, falling and looping back to
+   * the top rather than being replaced -- cheap enough that winter's flakes
+   * and summer's cloudless sky cost the same to hold in memory, and empty
+   * outside winter's own reach costs nothing at all to draw.
+   */
+  placeSnow(seasonPhase = 0) {
+    const { cloudBoost } = seasonBlend(seasonPhase);
+    const snowfall = Math.max(0, (cloudBoost - 1) / (MAX_CLOUD_BOOST - 1));
+    if (snowfall <= 0) {
+      return [];
+    }
+    const { width, height } = this.camera;
+    const drift = this.drift;
+    const placed = [];
+    for (const flake of this.snowflakes) {
+      const y = wrap(flake.y * height + drift * flake.fall, height);
+      const sway = Math.sin(drift * flake.driftRate + flake.driftPhase) * SNOW_DRIFT;
+      const x = wrap(flake.x * width + sway, width);
+      placed.push({ x, y, size: flake.size, alpha: flake.alpha * snowfall });
+    }
+    return placed;
+  }
+
+  drawSnow(context, seasonPhase = 0) {
+    for (const flake of this.placeSnow(seasonPhase)) {
+      context.globalAlpha = flake.alpha;
+      context.fillStyle = '#ffffff';
+      context.beginPath();
+      context.arc(flake.x, flake.y, flake.size, 0, Math.PI * 2);
+      context.fill();
     }
     context.globalAlpha = 1;
   }

@@ -73,8 +73,10 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	align-items: center;
 	gap: 24px;
 	width: 100%;
-	height: 64px;
-	padding: 0 18px;
+	/* Launched from a home screen the status bar sits over the page, so the
+	   bar grows down past it; everywhere else the inset is nothing. */
+	height: calc(64px + env(safe-area-inset-top));
+	padding: env(safe-area-inset-top) 18px 0;
 	background: var(--panel);
 	border-bottom: 1px solid var(--bronze-dark);
 	box-shadow: 0 2px 0 rgba(201, 162, 39, .18), 0 10px 24px rgba(0, 0, 0, .45);
@@ -134,8 +136,8 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .toolDock {
 	position: absolute;
-	left: 22px;
-	bottom: 22px;
+	left: calc(22px + env(safe-area-inset-left));
+	bottom: calc(22px + env(safe-area-inset-bottom));
 	z-index: 6;
 	display: flex;
 	gap: 8px;

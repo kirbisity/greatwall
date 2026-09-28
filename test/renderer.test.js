@@ -70,7 +70,7 @@ function stubGame(level, terrain) {
 }
 
 /** One tree at the origin, in a wood whose colours are given once per season. */
-function oneTreeGame({ tree, seasonPhase = 2.5, canopySeasons = GREEN_SEASONS } = {}) {
+function oneTreeGame({ tree, seasonPhase = 0.5, canopySeasons = GREEN_SEASONS } = {}) {
   return {
     seasonPhase,
     treesWithin: () => [{ x: 0, y: 0, z: 0, size: 5, ...tree }],
@@ -118,7 +118,7 @@ test("each level's own colours reach the canopy, not a fixed constant", () => {
   // Spring's own midpoint, so the blend has settled on the season's colour
   // rather than still crossing into it -- see the seasonal tests below for
   // the crossing itself.
-  const game = oneTreeGame({ seasonPhase: 2.5, canopySeasons: cherry });
+  const game = oneTreeGame({ seasonPhase: 0.5, canopySeasons: cherry });
   renderer.drawWoods(game, { minX: -10, minY: -10, maxX: 10, maxY: 10 });
   for (const fill of calls.fillStyles) {
     const [r, g, b] = fillChannels(fill);
@@ -130,8 +130,8 @@ test("each level's own colours reach the canopy, not a fixed constant", () => {
 
 test('the canopy holds a season\'s own colour at its midpoint', () => {
   const { renderer, calls } = woodsRenderer();
-  // Autumn's midpoint is phase 0.5 -- see Season#seasonalColorMix.
-  renderer.drawWoods(oneTreeGame({ seasonPhase: 0.5 }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
+  // Autumn's midpoint is phase 2.5 -- see Season#seasonalColorMix.
+  renderer.drawWoods(oneTreeGame({ seasonPhase: 2.5 }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
   for (const fill of calls.fillStyles) {
     const [r, g, b] = fillChannels(fill);
     // Autumn's own colour, #d9b23a, is warm and has no blue in it at all;
@@ -142,14 +142,17 @@ test('the canopy holds a season\'s own colour at its midpoint', () => {
 
 test('the canopy turns white through winter, and green again by spring', () => {
   const { renderer, calls } = woodsRenderer();
-  renderer.drawWoods(oneTreeGame({ seasonPhase: 1.5 }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
+  renderer.drawWoods(oneTreeGame({ seasonPhase: 3.5 }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
   for (const fill of calls.fillStyles) {
     const [r, g, b] = fillChannels(fill);
     assert.ok(Math.abs(r - g) < 15 && Math.abs(g - b) < 25, `expected near-white at winter's midpoint, got ${fill}`);
   }
 
   calls.fillStyles.length = 0;
-  renderer.drawWoods(oneTreeGame({ seasonPhase: 2.5 }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
+  // A full cycle on from winter's own midpoint (3.5), rather than 0.5,
+  // so this reads as the spring that actually follows winter, not one
+  // that happens to sit earlier in the phase numbering.
+  renderer.drawWoods(oneTreeGame({ seasonPhase: 4.5 }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
   for (const fill of calls.fillStyles) {
     const [r, g, b] = fillChannels(fill);
     assert.ok(g > r && g > b, `expected green again at spring's midpoint, got ${fill}`);
@@ -166,9 +169,9 @@ test('the turn is gradual, not a cut on the season\'s first tick', () => {
     renderer.drawWoods(oneTreeGame({ seasonPhase }), { minX: -10, minY: -10, maxX: 10, maxY: 10 });
     return fillChannels(calls.fillStyles[0])[0];
   };
-  const summerRed = redAt(3.5);
-  const autumnRed = redAt(0.5);
-  const partwayRed = redAt(4.2);
+  const summerRed = redAt(1.5);
+  const autumnRed = redAt(2.5);
+  const partwayRed = redAt(2.2);
   assert.ok(partwayRed > summerRed && partwayRed < autumnRed,
     `expected the turn partway through, got ${partwayRed} outside ${summerRed}..${autumnRed}`);
 });

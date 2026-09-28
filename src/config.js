@@ -373,12 +373,15 @@ export const SEASON_RAIDER_MIX = [
   ['CR1', 'CR1', 'CR1', 'IR1', 'IR1'],
 ];
 
+// Positional against SEASONS, now starting from Spring -- index 0 is never
+// shown (a level opens already in spring, with nothing to announce), so it
+// stands in for the season the game begins in rather than being dead space.
 export const SEASON_MESSAGES = [
-  'Its autumn now',
-  'Freezing Winter comes, cost of wall construction doubles.',
-  'Spring comes, a new type of raider occurs.',
+  'Spring',
   'Summer comes, a new type of raider occurs.',
   'Autumn comes, a good harvest doubles the income of the castle',
+  'Freezing Winter comes, cost of wall construction doubles.',
+  'Spring comes, a new type of raider occurs.',
 ];
 
 /** Terrain is painted as a radial wash so the map reads as lit from above. */
@@ -527,7 +530,22 @@ export const TERRAIN = {
 // groundTintAt). Only the season that owns a look carries it: season.js
 // blends between neighbours, so summer's orange is already fading as autumn
 // arrives and autumn's gold is already creeping in before it.
+// Spring first: a level begins here (see Game#seconds), so the year's own
+// cycle -- Spring into Summer into Autumn into Winter and back -- runs in
+// its real order rather than needing a second mapping to say so. See
+// game.js's AUTUMN/WINTER constants, and SEASON_MESSAGES, which are
+// positional against this same order.
 export const SEASONS = [
+  {
+    name: 'Spring',
+    haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1,
+    tint: '168, 222, 168', tintStrength: 0, groundGold: 0,
+  },
+  {
+    name: 'Summer',
+    haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1,
+    tint: '255, 132, 40', tintStrength: 0.16, groundGold: 0,
+  },
   {
     name: 'Autumn',
     haze: '214, 194, 146', hazeDensity: 1, cloudBoost: 1,
@@ -538,16 +556,6 @@ export const SEASONS = [
     // Snow coming: the thickest haze of the year, and the most cloud.
     haze: '236, 239, 241', hazeDensity: 3.2, cloudBoost: 1.9,
     tint: '198, 216, 236', tintStrength: 0, groundGold: 0,
-  },
-  {
-    name: 'Spring',
-    haze: '196, 216, 196', hazeDensity: 1, cloudBoost: 1,
-    tint: '168, 222, 168', tintStrength: 0, groundGold: 0,
-  },
-  {
-    name: 'Summer',
-    haze: '218, 172, 160', hazeDensity: 1, cloudBoost: 1,
-    tint: '255, 132, 40', tintStrength: 0.16, groundGold: 0,
   },
 ];
 

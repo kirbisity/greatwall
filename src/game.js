@@ -44,8 +44,9 @@ import {
 } from './config.js';
 
 const SEASONS_PER_YEAR = 4;
-const AUTUMN = 0;
-const WINTER = 1;
+// Positional against SEASONS, which now starts from Spring -- see config.js.
+const AUTUMN = 2;
+const WINTER = 3;
 const WALL_HINT_SECONDS = 20;
 const UPGRADE_HINT_SECONDS = 40;
 
@@ -254,9 +255,15 @@ export class Game {
    * continuous instead, at the cost of reading fractionally behind
    * `this.season` for that same one second -- invisible in the sky, unlike
    * a jump would be.
+   *
+   * The extra half-season puts `this.seconds === 0` exactly on Spring's own
+   * midpoint (see SEASONS in config.js), rather than mid-blend into it, so a
+   * level opens already looking like spring instead of fading in from
+   * whatever the last season of a cycle happens to be. Everything past the
+   * first frame keeps exactly the same shape it always had, just shifted.
    */
   get seasonPhase() {
-    return this.seconds / SEASON_LENGTH_SECONDS;
+    return this.seconds / SEASON_LENGTH_SECONDS + 0.5;
   }
 
   wallCost(length) {

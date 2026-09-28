@@ -135,9 +135,9 @@ function captureClouds(atmosphere, seasonPhase = 0) {
 }
 
 test('winter stands more clouds up, gained gradually rather than all at once', () => {
-  const WINTER = 1;
+  const WINTER = 3;
   const atmosphere = new Atmosphere(camera(), { random: spread() });
-  const summerCount = captureClouds(atmosphere, 3.5).drawn.length;
+  const summerCount = captureClouds(atmosphere, 1.5).drawn.length;
   const approachingWinter = captureClouds(atmosphere, WINTER - 0.2).drawn.length;
   const deepWinter = captureClouds(atmosphere, WINTER + 0.5).drawn.length;
   assert.ok(approachingWinter > summerCount, 'more clouds should already be gathering ahead of winter');

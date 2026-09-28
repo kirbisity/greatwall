@@ -185,14 +185,14 @@ test('the dust sea hangs its own mist, and the season still thickens it', async 
   assert.ok(mist.density > 1, 'and for it to be thicker than a temperate sky');
 
   // Its colour pulls the season's haze towards the dust, without replacing it.
-  const summer = seasonBlend(3.5);
+  const summer = seasonBlend(1.5);
   const dusty = mixChannels(summer.haze, mist.color, mist.blend);
   assert.notEqual(dusty, summer.haze);
   const channels = dusty.split(',').map(Number);
   assert.ok(channels[0] > channels[2], 'dust should read warm, not blue');
 
   // Winter is still the densest month of a dusty year.
-  assert.ok(seasonBlend(1.5).hazeDensity * mist.density > seasonBlend(3.5).hazeDensity * mist.density);
+  assert.ok(seasonBlend(3.5).hazeDensity * mist.density > seasonBlend(1.5).hazeDensity * mist.density);
 });
 
 // --- level three: the island of the keep --------------------------------

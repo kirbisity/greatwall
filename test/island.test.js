@@ -603,6 +603,41 @@ test('the wall wears from being climbed, but is not broken doing it', () => {
   const ringed = stormTheCity(ringedGame(ISLAND));
   assert.ok(ringed.wallWear > 0, 'going over should wear the stone');
   assert.equal(ringed.wallsStanding, 10, 'but one raider should not bring a section down');
+
+  // The margin matters: at full strength a company in contact for ten
+  // seconds brings down any section, and a crossing lasts several times
+  // that, so climbing has to scuff the stone rather than batter it.
+  const total = ringed.wallsStanding * 1500;
+  assert.ok(ringed.wallWear < total * 0.2,
+    `one crossing took ${Math.round(ringed.wallWear / total * 100)}% off the whole ring`);
+});
+
+test('climbing scuffs a wall where battering breaks it', async () => {
+  const { Raider } = await import('../src/entities.js');
+  const wearOver = (level) => {
+    const game = new Game({ random: () => 0.5, level });
+    game.tokens = 1000000;
+    const wall = game.buildWall({ x: 120, y: -60 }, { x: 120, y: 60 }).wall;
+    wall.finish();
+    game.raiders.length = 0;
+    const raider = new Raider('CR0', { x: 121, y: 0 });
+    raider.aimAt(game.castles[0].position);
+    game.raiders.push(raider);
+    const before = wall.health;
+    // Held in contact for a fixed spell, so only the wear rate differs.
+    for (let frame = 0; frame < 60 * 5; frame += 1) {
+      raider.position = { x: 121, y: 0 };
+      game.resolveWallContact(game.navigation(), raider);
+    }
+    return (before - wall.health) / wall.maxHealth;
+  };
+
+  const battered = wearOver(LEVELS[0]);
+  const climbed = wearOver(ISLAND);
+  assert.ok(battered > 0.5, `five seconds of battering should tell, it took ${(battered * 100).toFixed(0)}%`);
+  assert.ok(climbed < battered / 10,
+    `climbing took ${(climbed * 100).toFixed(1)}% where battering took ${(battered * 100).toFixed(0)}%`);
+  assert.equal(ISLAND.wall.climb.wear < 1, true);
 });
 
 test('everywhere else a wall still stops a raider dead', () => {

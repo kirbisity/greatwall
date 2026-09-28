@@ -182,9 +182,38 @@ export class Game {
     });
   }
 
-  /** What a company's pace is multiplied by for the ground it is crossing. */
-  paceOn(position) {
-    return 1 - this.terrain.forestAt(position.x, position.y) * TERRAIN.forestDrag;
+  /**
+   * What a company's pace is multiplied by for the ground it is crossing:
+   * woodland to push through, and whatever climb lies along its way.
+   */
+  paceOn(company) {
+    const { x, y } = company.position;
+    const throughWoods = 1 - this.terrain.forestAt(x, y) * TERRAIN.forestDrag;
+    return throughWoods * this.climbPace(company);
+  }
+
+  /**
+   * How much a company is slowed by the ground rising ahead of it.
+   *
+   * Measured along the way it is actually heading rather than by how steep
+   * the ground is, so a slope is hard work going up it, ordinary going along
+   * it, and no trouble at all coming down -- which is what makes holding the
+   * high ground worth anything.
+   */
+  climbPace(company) {
+    const speed = Math.hypot(company.velocity.x, company.velocity.y);
+    if (speed === 0) {
+      return 1;
+    }
+    const step = TERRAIN.climbSample;
+    const { x, y } = company.position;
+    const aheadX = x + (company.velocity.x / speed) * step;
+    const aheadY = y + (company.velocity.y / speed) * step;
+    const climb = (this.terrain.heightAt(aheadX, aheadY) - this.terrain.heightAt(x, y)) / step;
+    if (climb <= 0) {
+      return 1;
+    }
+    return Math.max(TERRAIN.minClimbPace, 1 / (1 + climb * TERRAIN.climbDrag));
   }
 
   get isDefeated() {
@@ -623,7 +652,7 @@ export class Game {
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
       const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
-      guard.advance(squeeze * this.paceOn(guard.position) / FPS);
+      guard.advance(squeeze * this.paceOn(guard) / FPS);
     }
   }
 
@@ -644,7 +673,7 @@ export class Game {
    * given up and is besieging plants itself and swings instead.
    */
   advanceAgainstWalls(navigation, raider) {
-    const pace = this.paceOn(raider.position);
+    const pace = this.paceOn(raider);
     const climb = this.wallClimb;
     // A wall that can be climbed never stops a step; it only makes the step
     // slow, the same way imperial companies pick their way over stone.
@@ -716,18 +745,20 @@ export class Game {
   }
 
   resolveWallContact(navigation, raider) {
-    // Where walls are climbed rather than broken, a company pays once for
-    // the crossing (see chargeWallClimb) instead of trading blows with the
-    // stone the whole way over -- which, measured, killed every company that
-    // tried it. The wall still takes the wear, which is why it is built
-    // three times as strong there.
-    const tradesBlows = this.wallClimb === null;
+    // Where walls are climbed rather than broken, going over is not an
+    // attack on the stone. A company pays once for the crossing (see
+    // chargeWallClimb) rather than trading blows the whole way, and it
+    // scuffs the wall at a fraction of its strength instead of battering
+    // it: at full attack a company in contact for ten seconds brings down
+    // any section, and a crossing takes four times that.
+    const climb = this.wallClimb;
+    const wear = climb ? climb.wear : 1;
     const reachMargin = WALL.reachMargin;
     for (const wall of wallsNear(navigation.grid, raider.position, raider.type.range + reachMargin)) {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
-        wall.takeHit(raider.type.attack);
-        if (tradesBlows) {
+        wall.takeHit(raider.type.attack * wear);
+        if (!climb) {
           raider.takeHit(WALL.attack);
           if (!raider.isAlive) {
             return;

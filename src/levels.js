@@ -135,7 +135,16 @@ export const LEVELS = [
       // What going over costs: a crawl while astride the stone, and a share
       // of the company's strength for the crossing. A wall here buys time
       // and lives rather than denying the ground outright.
-      climb: { reach: 20, speed: 0.16, healthCost: 0.3 },
+      climb: {
+        reach: 20,
+        speed: 0.16,
+        healthCost: 0.3,
+        // Scrambling over stone is not battering it. At full strength a
+        // company in contact for ten seconds brings down a section, and a
+        // crossing lasts four times that, so climbing alone would demolish
+        // every wall it touched.
+        wear: 0.06,
+      },
     },
     buildings: JAPAN_BUILDINGS,
     // The island's keeps are a fraction of the size of the imperial city's,

@@ -411,6 +411,19 @@ export const TERRAIN = {
 
   // Companies lose this much of their pace in the thickest wood.
   forestDrag: 0.45,
+  // What climbing costs. A company is slowed by the gradient of the ground
+  // along the way it is actually heading, so the same hillside is hard work
+  // going up, ordinary going along, and no trouble coming down. Most ground
+  // is nearly level -- measured, the median gradient on every level is
+  // around 0.05 -- so this barely touches the open field and tells heavily
+  // on a hillside: pace 0.82 at a gradient of 0.1, 0.56 at 0.35, 0.31 at 1.
+  climbDrag: 2.2,
+  // Nothing is ever slowed past this, so no slope can leave a company
+  // looking stuck.
+  minClimbPace: 0.25,
+  // How far ahead the ground is sampled to work out that gradient. Short
+  // enough to feel the slope underfoot rather than the hill as a whole.
+  climbSample: 6,
 
   // Mountains: a few, rough-shaped, standing well above the rolling hills.
   // One lattice cell (mountainSpacing across) has mountainChance of holding

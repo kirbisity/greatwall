@@ -17,6 +17,20 @@ const JACOBIAN_STEP = 0.5;
  * Snapshot of the camera for one frame. World space is x east, y north, z up;
  * the ground is z = 0. Screen space is pixels with y down.
  */
+/**
+ * The focal length for a screen of this size.
+ *
+ * Fixed in pixels, a narrow screen was simply zoomed in: measured, a phone
+ * held upright saw 75 units of ground across where a desktop saw 302 -- too
+ * little to take in one ring of wall. Scaled by the short side instead, and
+ * never past the full figure, a phone sees about as much as a laptop does
+ * and nothing a laptop's size or larger changes at all.
+ */
+export function focalFor(width, height) {
+  const shortSide = Math.min(width, height);
+  return CAMERA.focalLength * Math.min(1, shortSide / CAMERA.focalReferenceSide);
+}
+
 export function createView({ focus, distance, elevation, width, height }) {
   const angle = elevation * DEGREES_TO_RADIANS;
   const sin = Math.sin(angle);
@@ -25,7 +39,7 @@ export function createView({ focus, distance, elevation, width, height }) {
     position: { x: focus.x, y: focus.y - distance * cos, z: distance * sin },
     up: { x: 0, y: sin, z: cos },
     forward: { x: 0, y: cos, z: -sin },
-    focal: CAMERA.focalLength,
+    focal: focalFor(width, height),
     centreX: width / 2,
     centreY: height / 2,
   };

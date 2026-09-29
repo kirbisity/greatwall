@@ -90,7 +90,10 @@ test('the app boots, plays frames and reacts to input without touching a missing
   const dom = installDom();
   const { app } = await import('../src/main.js');
 
-  assert.ok(dom.documentListeners.has('mousemove'), 'input is listening');
+  // Pointer events, so a finger reaches the same handlers a mouse does.
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+    assert.ok(dom.documentListeners.has(type), `input is listening for ${type}`);
+  }
   assert.ok(dom.windowListeners.has('load'), 'load handler registered');
 
   dom.windowListeners.get('load')();
@@ -106,11 +109,11 @@ test('the app boots, plays frames and reacts to input without touching a missing
   assert.match(dom.elements.get('token0').innerText, /^\$\d+$/);
   assert.match(dom.elements.get('season0').innerText, /Autumn|Winter|Spring|Summer/);
 
-  // A drag that starts without a prior mousemove must not jump the map.
+  // A drag that starts without a prior pointer move must not jump the map.
   const focusBefore = { ...app.camera.focus };
-  dom.documentListeners.get('mousedown')({ clientX: 600, clientY: 300 });
-  dom.documentListeners.get('mousemove')({ clientX: 600, clientY: 300 });
-  dom.documentListeners.get('mouseup')({ clientX: 600, clientY: 300 });
+  dom.documentListeners.get('pointerdown')({ pointerId: 1, clientX: 600, clientY: 300 });
+  dom.documentListeners.get('pointermove')({ pointerId: 1, clientX: 600, clientY: 300 });
+  dom.documentListeners.get('pointerup')({ pointerId: 1, clientX: 600, clientY: 300 });
   app.camera.update(1 / 60);
   assert.equal(app.camera.focus.x, focusBefore.x, 'no pan jump on first drag');
   assert.equal(app.camera.focus.y, focusBefore.y, 'no pan jump on first drag');
@@ -122,11 +125,11 @@ test('the app boots, plays frames and reacts to input without touching a missing
   dom.elements.get('buildTool').listeners.get('click')();
   // Clear of the city footprint the whole way, so the drag lays a section
   // instead of being rejected as crossing the castle.
-  dom.documentListeners.get('mousedown')({ clientX: 850, clientY: 400 });
+  dom.documentListeners.get('pointerdown')({ pointerId: 1, clientX: 850, clientY: 400 });
   for (let x = 850; x < 1250; x += 50) {
-    dom.documentListeners.get('mousemove')({ clientX: x, clientY: 400 });
+    dom.documentListeners.get('pointermove')({ pointerId: 1, clientX: x, clientY: 400 });
   }
-  dom.documentListeners.get('mouseup')({ clientX: 1250, clientY: 400 });
+  dom.documentListeners.get('pointerup')({ pointerId: 1, clientX: 1250, clientY: 400 });
   assert.ok(app.game.walls.length > 0, 'the build drag laid wall sections');
 
   const builtWalls = app.game.walls.length;

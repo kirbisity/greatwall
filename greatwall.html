@@ -2,11 +2,20 @@
 <html lang="en">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<title>Greatwall - The wall building game</title>
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link rel="stylesheet" type="text/css" href="greatwall.css" />
-	<link rel="icon" href="../images/favicon.png">
+	<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1510'/%3E%3Cpath d='M5 24V8h4v5h2V8h4v5h2V8h4v5h2V8h4v16z' fill='%23c9a227'/%3E%3C/svg%3E">
+	<!-- Installable from a phone's browser: a home-screen launch gets the
+	     whole screen, without the browser's own bars. -->
+	<link rel="manifest" href="manifest.webmanifest">
+	<link rel="apple-touch-icon" href="images/icon-180.png">
+	<meta name="theme-color" content="#1a1510">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-title" content="Greatwall">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 
 <body>
@@ -47,6 +56,7 @@
 			<button id="move" class="iconButton" title="Pan the map"><img src="images/moveBtn.png" alt="Move"></button>
 			<button id="zoom" class="iconButton" title="Zoom the view"><img src="images/zoomBtn.png" alt="Zoom"></button>
 			<button id="help" class="iconButton" title="How to play"><img src="images/helpBtn.png" alt="Help"></button>
+			<button id="undo" class="iconButton touchOnly" title="Undo the last section"><img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2014L4%209l5-5'/%3E%3Cpath%20d='M4%209h10.5a5.5%205.5%200%200%201%200%2011H11'/%3E%3C/svg%3E" alt="Undo"></button>
 		</div>
 	</header>
 
@@ -55,18 +65,6 @@
 			<img src="images/buildBtn.png" alt="">
 			<span class="toolName">Build</span>
 		</button>
-		<button id="destroyTool" class="toolButton" title="Drag over a wall to demolish it">
-			<img src="images/destroyBtn.png" alt="">
-			<span class="toolName">Raze</span>
-		</button>
-		<button id="repairTool" class="toolButton" title="Drag over a damaged wall to mend it">
-			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='2'%20y='13'%20width='20'%20height='8'%20rx='1'/%3E%3Cpath%20d='M2%2017h20M9%2013v4M16%2017v4'/%3E%3Cpath%20d='M12%202.5v8M8%206.5h8'/%3E%3C/svg%3E" alt="">
-			<span class="toolName">Repair</span>
-		</button>
-		<button id="fortifyTool" class="toolButton" title="Drag over a wall to raise it, then to widen it">
-			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='3'%20y='14'%20width='18'%20height='7'%20rx='1'/%3E%3Cpath%20d='M3%2017.5h18M9%2014v3.5M15%2017.5V21'/%3E%3Cpath%20d='M12%202.5v9M8%206.5l4-4%204%204'/%3E%3C/svg%3E" alt="">
-			<span class="toolName">Fortify</span>
-		</button>
 		<button id="attackTool" class="toolButton" title="Muster a company, then click where to send it">
 			<img src="images/attackBtn.png" alt="">
 			<span class="toolName">Attack</span>
@@ -74,6 +72,18 @@
 		<button id="upgradeTool" class="toolButton" title="Click the castle to upgrade it">
 			<img src="images/castleBtn.png" alt="">
 			<span class="toolName">Upgrade</span>
+		</button>
+		<button id="fortifyTool" class="toolButton" title="Drag over a wall to raise it, then to widen it">
+			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='3'%20y='14'%20width='18'%20height='7'%20rx='1'/%3E%3Cpath%20d='M3%2017.5h18M9%2014v3.5M15%2017.5V21'/%3E%3Cpath%20d='M12%202.5v9M8%206.5l4-4%204%204'/%3E%3C/svg%3E" alt="">
+			<span class="toolName">Fortify</span>
+		</button>
+		<button id="repairTool" class="toolButton" title="Drag over a damaged wall to mend it">
+			<img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Crect%20x='2'%20y='13'%20width='20'%20height='8'%20rx='1'/%3E%3Cpath%20d='M2%2017h20M9%2013v4M16%2017v4'/%3E%3Cpath%20d='M12%202.5v8M8%206.5h8'/%3E%3C/svg%3E" alt="">
+			<span class="toolName">Repair</span>
+		</button>
+		<button id="destroyTool" class="toolButton" title="Drag over a wall to demolish it">
+			<img src="images/destroyBtn.png" alt="">
+			<span class="toolName">Raze</span>
 		</button>
 	</nav>
 
@@ -92,7 +102,7 @@
 				<button id="startBtn2" class="menuItem menuItem-primary">Start</button>
 				<button id="restartBtn" class="menuItem">Restart</button>
 				<button id="settingsBtn" class="menuItem">Settings</button>
-				<a href="../index.html" class="menuItem">Quit</a>
+				<a href="index.html" class="menuItem">Quit</a>
 			</div>
 		</div>
 	</div>
@@ -120,14 +130,17 @@
 			<p>Raiders ride for your city. Walls are the only thing between them and your people.</p>
 			<ul class="helpList">
 				<li><b>Build</b> &mdash; drag to raise a wall. Sections cost coin by length, and ends snap to other walls and to the city edge.</li>
-				<li><b>Attack</b> &mdash; pick a company's tier above the castle, then click where to send it. It will run down the nearest raiders, then come home.</li>
+				<li class="mouseOnly"><b>Moving the view</b> &mdash; drag the map to pan it and scroll to zoom. A tool takes over the drag; the <b>Move</b> button puts it down again.</li>
+				<li class="touchOnly"><b>Moving the view</b> &mdash; drag one finger to pan and pinch two to zoom. With a tool up, slide two fingers together to pan; tap <b>Move</b> to put the tool down.</li>
+				<li><b>Attack</b> &mdash; pick a company's tier above the castle, then click or tap where to send it. It will run down the nearest raiders, then come home.</li>
 				<li><b>Repair</b> &mdash; drag over a damaged or unfinished section to pay for its mending. The stone climbs back to full over the following seconds under the mason's hammer. Drawing over a section that already stands does nothing.</li>
 				<li><b>Fortify</b> &mdash; drag over a section to raise it. The first order doubles its height over ten seconds; a second doubles its width over twenty. Each doubles its strength and its upkeep, so a reinforced wall costs four times the plain one to raise and four times as much to keep. Reinforced is as far as stone goes.</li>
 				<li>A new section is pegged out for six seconds &mdash; a yellow line under the mason's hammer &mdash; and stops nothing until the stone starts rising. It takes about ten seconds more to reach full height, and can be attacked the whole way up.</li>
 				<li><b>Raze</b> &mdash; drag over a wall to demolish it. Half the price returns, less its damage.</li>
-				<li><b>Upgrade</b> &mdash; click your castle to grow it. A courtyard complex becomes a walled compound, then a moated city, unlocking heavier companies as it grows. The old buildings clear and the new ones rise over the following seconds, but the city fights and earns at its old strength until they do.</li>
-				<li><b>Ctrl+Z</b> &mdash; undo the last section you laid.</li>
-				<li><b>[</b> and <b>]</b> &mdash; tilt the view. Lower to see your walls stand.</li>
+				<li><b>Upgrade</b> &mdash; click or tap your castle to grow it. A courtyard complex becomes a walled compound, then a moated city, unlocking heavier companies as it grows. The old buildings clear and the new ones rise over the following seconds, but the city fights and earns at its old strength until they do.</li>
+				<li class="mouseOnly"><b>Ctrl+Z</b> &mdash; undo the last section you laid.</li>
+				<li class="touchOnly"><b>Undo</b> &mdash; the curved arrow under the top bar takes back the last section you laid.</li>
+				<li class="mouseOnly"><b>[</b> and <b>]</b> &mdash; tilt the view. Lower to see your walls stand.</li>
 			</ul>
 			<p class="helpNote">Nothing crosses a standing wall. Raiders hunt for a way round, and batter their way through only when there is none. Cavalry are quick but die fast against stone; infantry are slow and grind it down. Winter multiplies the cost of stone; autumn doubles the harvest.</p>
 			<p class="helpNote">Houses fill in behind the walls on their own — the farther out the ring, the more it can hold. Each one adds to the income shown at the top. A raider that reaches one burns it down in a moment, so a breach costs more than the stone.</p>

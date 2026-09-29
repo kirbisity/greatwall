@@ -16,7 +16,7 @@ const { CAMERA, CLOUD_LAYERS, FOG, SEASONS } = await import('../src/config.js');
 const { loadSettings, saveSettings, settings } = await import('../src/settings.js');
 
 function fakeContext() {
-  const calls = { fills: 0, images: 0, stops: [] };
+  const calls = { fills: 0, images: 0, stops: [], arcs: 0 };
   return {
     calls,
     globalAlpha: 1,
@@ -24,6 +24,9 @@ function fakeContext() {
     createLinearGradient: () => ({ addColorStop: (offset, color) => calls.stops.push({ offset, color }) }),
     fillRect: () => { calls.fills += 1; },
     drawImage: () => { calls.images += 1; },
+    beginPath: () => {},
+    arc: () => { calls.arcs += 1; },
+    fill: () => {},
   };
 }
 
@@ -124,6 +127,36 @@ test('fog thickens as the camera climbs', () => {
   assert.ok(alphaAtTop(high) > alphaAtTop(low), 'a higher camera should read hazier at the same screen row');
 });
 
+test('a mist\'s own floor keeps a close, zoomed-in view from clearing up', () => {
+  const view = camera();
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = view.distance;
+  view.refreshView();
+  const atmosphere = new Atmosphere(view, { random: spread() });
+
+  const plain = fakeContext();
+  atmosphere.drawFog(plain, 0.5);
+  const plainAlphas = plain.calls.stops.map((stop) => Number(stop.color.match(/([\d.]+)\)$/)[1]));
+  assert.ok(Math.min(...plainAlphas) < 0.3, 'expected an ordinary sky to read thin this close to the ground');
+
+  const sandstorm = fakeContext();
+  atmosphere.drawFog(sandstorm, 0.5, { color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, floor: 0.55 });
+  const stormAlphas = sandstorm.calls.stops.map((stop) => Number(stop.color.match(/([\d.]+)\)$/)[1]));
+  assert.ok(Math.min(...stormAlphas) >= 0.55, `expected every row to hold the floor, got ${Math.min(...stormAlphas)}`);
+});
+
+test('with no floor of its own, a mist behaves exactly as it did before', () => {
+  const view = camera();
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = view.distance;
+  view.refreshView();
+  const atmosphere = new Atmosphere(view, { random: spread() });
+  const withoutFloor = fakeContext();
+  atmosphere.drawFog(withoutFloor, 0.5, { color: '196, 214, 226', blend: 0.45, density: 1.25, start: 0.8 });
+  const noFloorAlphas = withoutFloor.calls.stops.map((stop) => Number(stop.color.match(/([\d.]+)\)$/)[1]));
+  assert.ok(Math.min(...noFloorAlphas) < 0.3, 'expected a mist with no floor to still thin out close to the ground');
+});
+
 function captureClouds(atmosphere, seasonPhase = 0) {
   const drawn = [];
   const context = {
@@ -135,9 +168,9 @@ function captureClouds(atmosphere, seasonPhase = 0) {
 }
 
 test('winter stands more clouds up, gained gradually rather than all at once', () => {
-  const WINTER = 1;
+  const WINTER = 3;
   const atmosphere = new Atmosphere(camera(), { random: spread() });
-  const summerCount = captureClouds(atmosphere, 3.5).drawn.length;
+  const summerCount = captureClouds(atmosphere, 1.5).drawn.length;
   const approachingWinter = captureClouds(atmosphere, WINTER - 0.2).drawn.length;
   const deepWinter = captureClouds(atmosphere, WINTER + 0.5).drawn.length;
   assert.ok(approachingWinter > summerCount, 'more clouds should already be gathering ahead of winter');
@@ -244,6 +277,25 @@ test('each deck drifts faster than the one below it', () => {
   }
 });
 
+test('a level\'s own wind drives the whole sky faster, not just its haze', () => {
+  // Built at clock 0, then queried at a later, fixed instant: the only
+  // thing that can move a cloud between the two calls below is the wind
+  // multiplier itself, not time actually passing between them.
+  let clock = 0;
+  const atmosphere = new Atmosphere(camera(), { random: spread(), now: () => clock });
+  clock = 2000;
+  const calm = new Map(atmosphere.placeClouds(0, null).map((placed) => [placed.cloud, placed]));
+  const storm = new Map(atmosphere.placeClouds(0, { windSpeed: 4 }).map((placed) => [placed.cloud, placed]));
+  let moved = 0;
+  for (const [cloud, was] of calm) {
+    const now = storm.get(cloud);
+    if (now && Math.abs(now.world.x - was.world.x) > 5) {
+      moved += 1;
+    }
+  }
+  assert.ok(moved > 0, 'expected a stronger wind to carry at least some clouds further along');
+});
+
 test('atmosphere is on by default', () => {
   assert.equal(settings.atmosphere, true);
 });
@@ -272,4 +324,83 @@ test('settings round-trip through storage', () => {
   assert.equal(settings.atmosphere, false, 'the stored preference wins');
   settings.atmosphere = true;
   delete globalThis.localStorage;
+});
+
+// --- falling snow ----------------------------------------------------------
+
+test('no snow falls outside winter\'s own reach', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  assert.equal(atmosphere.placeSnow(1.5).length, 0, 'expected no snow at summer\'s own midpoint');
+});
+
+test('snow gathers at winter, thickening gradually rather than all at once', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const deepWinter = atmosphere.placeSnow(3.5);
+  // Close enough to winter's own midpoint (3.5) for the temperature to have
+  // already dipped below freezing, but short of it -- see Season#snowCoverAt.
+  const approaching = atmosphere.placeSnow(3.3);
+  assert.ok(deepWinter.length > 0, 'expected snow at winter\'s own midpoint');
+  assert.ok(approaching.length > 0, 'expected snow already falling on the approach to winter');
+  const totalAlpha = (flakes) => flakes.reduce((sum, flake) => sum + flake.alpha, 0);
+  assert.ok(totalAlpha(deepWinter) > totalAlpha(approaching),
+    'expected winter\'s own midpoint to fall thicker than the approach to it');
+});
+
+test('a flake falls over time rather than standing still', () => {
+  let clock = 0;
+  const atmosphere = new Atmosphere(camera(), { random: spread(), now: () => clock });
+  const before = atmosphere.placeSnow(3.5).map((flake) => flake.y);
+  clock = 2000;
+  const after = atmosphere.placeSnow(3.5).map((flake) => flake.y);
+  assert.ok(before.some((y, i) => after[i] !== undefined && Math.abs(after[i] - y) > 1),
+    'expected two seconds to visibly move at least some flakes');
+});
+
+test('a flake is a point near the ground, not fixed to the screen -- panning moves it a lot', () => {
+  const view = camera();
+  // A flake sits close over the ground (well under the lowest cloud
+  // layer), so the same pan that barely shifts the ground itself should
+  // swing a flake a long way across the screen -- the whole point of
+  // placing snow in the world rather than painting it straight onto the
+  // screen.
+  const atmosphere = new Atmosphere(view, { random: spread(), now: () => 0 });
+  const before = atmosphere.placeSnow(3.5);
+  view.centerOn({ x: 40, y: 0 });
+  const after = atmosphere.placeSnow(3.5);
+  assert.ok(before.length > 0 && after.length > 0, 'expected flakes on screen before and after the pan');
+  let moved = 0;
+  for (let i = 0; i < Math.min(before.length, after.length); i += 1) {
+    if (Math.abs(after[i].x - before[i].x) > 20) {
+      moved += 1;
+    }
+  }
+  assert.ok(moved > 0, 'expected a 40-unit pan to swing at least one nearby flake more than 20px');
+});
+
+test('a flake swells on a zoom the way anything else standing nearby does', () => {
+  const view = camera();
+  const atmosphere = new Atmosphere(view, { random: spread(), now: () => 0 });
+  const far = atmosphere.placeSnow(3.5);
+  view.distance = CAMERA.minDistance;
+  view.targetDistance = CAMERA.minDistance;
+  view.refreshView();
+  const near = atmosphere.placeSnow(3.5);
+  assert.ok(far.length > 0 && near.length > 0, 'expected flakes on screen at both distances');
+  const avgSize = (flakes) => flakes.reduce((sum, flake) => sum + flake.size, 0) / flakes.length;
+  assert.ok(avgSize(near) > avgSize(far), 'expected flakes to read larger once the camera has zoomed in');
+});
+
+test('snow is drawn as filled circles, and alpha is restored once it is done', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const context = fakeContext();
+  atmosphere.drawSnow(context, 3.5);
+  assert.ok(context.calls.arcs > 0, 'expected at least one flake drawn at winter\'s own midpoint');
+  assert.equal(context.globalAlpha, 1, 'expected alpha restored for whatever draws next');
+});
+
+test('summer draws no snow at all, not even at zero alpha', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  const context = fakeContext();
+  atmosphere.drawSnow(context, 1.5);
+  assert.equal(context.calls.arcs, 0);
 });

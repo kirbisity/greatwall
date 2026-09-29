@@ -22,6 +22,14 @@ export const MATERIALS = {
   shikkui: [232, 228, 216],
   roofSlate: [74, 84, 92],
   roofSlateDark: [58, 66, 74],
+  // For the desert's cliff shrine: sun-bleached rock and the shadowed
+  // cave mouths let into it.
+  sandstone: [176, 140, 90],
+  caveDark: [42, 35, 28],
+  // For a torii, the one part of any level built in a colour nothing else
+  // on the map wears, which is the point of it.
+  vermilion: [176, 58, 42],
+  vermilionDark: [132, 42, 30],
 };
 
 /**

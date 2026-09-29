@@ -34,12 +34,22 @@ body {
 	background: var(--ink);
 	user-select: none;
 	-webkit-user-select: none;
+	/* A game, not a document: no rubber-band bounce, no long-press callout,
+	   no grey flash where a finger lands. */
+	overscroll-behavior: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
 }
 
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
 button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .layer { position: absolute; left: 0; top: 0; }
+/* The map takes every gesture itself -- drag, pinch, tap -- so the browser
+   must not scroll or zoom the page underneath it (see Input#listen). */
+.layer { touch-action: none; }
+/* Controls keep ordinary taps but lose double-tap-to-zoom and its delay. */
+button, .menuItem, .levelItem { touch-action: manipulation; }
 #background { z-index: 1; }
 #canvas1 { z-index: 2; }
 #canvas2 { z-index: 3; }
@@ -63,8 +73,10 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 	align-items: center;
 	gap: 24px;
 	width: 100%;
-	height: 64px;
-	padding: 0 18px;
+	/* Launched from a home screen the status bar sits over the page, so the
+	   bar grows down past it; everywhere else the inset is nothing. */
+	height: calc(64px + env(safe-area-inset-top));
+	padding: env(safe-area-inset-top) 18px 0;
 	background: var(--panel);
 	border-bottom: 1px solid var(--bronze-dark);
 	box-shadow: 0 2px 0 rgba(201, 162, 39, .18), 0 10px 24px rgba(0, 0, 0, .45);
@@ -120,12 +132,13 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 .iconButton.is-active { border-color: var(--bronze); background: linear-gradient(180deg, #4a3c18, #2a2110); }
 .iconButton.is-active img { filter: invert(78%) sepia(64%) saturate(520%) hue-rotate(2deg); }
 
+
 /* --- tool dock --------------------------------------------------------- */
 
 .toolDock {
 	position: absolute;
-	left: 22px;
-	bottom: 22px;
+	left: calc(22px + env(safe-area-inset-left));
+	bottom: calc(22px + env(safe-area-inset-bottom));
 	z-index: 6;
 	display: flex;
 	gap: 8px;
@@ -218,7 +231,10 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 	inset: 0;
 	z-index: 10;
 	height: 0;
-	overflow: hidden;
+	/* Clipped sideways so the slide-open animation stays clean, but free to
+	   scroll downwards on a screen shorter than the menu. */
+	overflow-x: hidden;
+	overflow-y: auto;
 	transition: height 420ms cubic-bezier(.4, 0, .2, 1);
 	background:
 		radial-gradient(circle at 50% 38%, rgba(60, 46, 22, .55), rgba(6, 5, 4, .97) 70%),
@@ -228,7 +244,9 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 #settingMenu { z-index: 11; }
 
-.overlay-content { position: relative; top: 14vh; width: 100%; text-align: center; }
+/* Padding rather than an offset, so the space counts towards what can be
+   scrolled and the last button is never stranded below the fold. */
+.overlay-content { position: relative; padding: 14vh 0 40px; width: 100%; text-align: center; }
 
 .gameTitle {
 	margin: 0;
@@ -300,8 +318,11 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 .levelList { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 26px; }
 
 .levelItem {
+	display: flex;
+	align-items: center;
+	gap: 12px;
 	width: 300px;
-	padding: 9px 14px;
+	padding: 8px 14px 8px 8px;
 	text-align: left;
 	background: none;
 	border: 1px solid transparent;
@@ -310,15 +331,33 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 	font: inherit;
 	cursor: pointer;
 	opacity: .55;
+	transition: var(--ease);
 }
 
 .levelItem:hover { opacity: .85; }
 
 .levelItem.is-chosen { opacity: 1; border-color: var(--bronze-deep); }
 
+/*
+ * Drawn at THUMBNAIL_COLUMNS x THUMBNAIL_ROWS (see levelThumbnail.js) and
+ * stretched blocky rather than smoothed -- a handful of true pixels read as
+ * a map at a glance; a blurred-up photo would not.
+ */
+.levelThumb {
+	flex: none;
+	width: 84px;
+	height: 63px;
+	border: 1px solid var(--bronze-dark);
+	border-radius: 2px;
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+}
+
+.levelText { flex: 1; min-width: 0; }
+
 .levelName { display: block; font-size: 14px; letter-spacing: .09em; text-transform: uppercase; }
 
-.levelBlurb { display: block; margin-top: 3px; font-size: 12px; line-height: 1.6; opacity: .75; }
+.levelBlurb { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; opacity: .7; }
 
 /* --- modals ------------------------------------------------------------ */
 
@@ -448,3 +487,73 @@ button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 	.toolButton { width: 60px; }
 	.modal-content { padding: 26px 24px; }
 }
+
+/* Phones in portrait. Everything the player needs has to be reachable with a
+   thumb: measured at 375px wide, the dock ran 69px off the screen -- taking
+   Upgrade with it -- and the view tools sat entirely past the right edge. */
+@media (max-width: 480px) {
+	#topMenu {
+		gap: 8px;
+		height: calc(56px + env(safe-area-inset-top));
+		padding: env(safe-area-inset-top) 8px 0;
+	}
+	.readouts { flex: 1; min-width: 0; justify-content: space-between; gap: 6px; }
+	.readout { min-width: 0; }
+	.readout-label { font-size: 8px; letter-spacing: .1em; }
+	.readout-value, .readout-season .readout-value { font-size: 15px; }
+
+	/* Stacked down the right edge beneath the bar, clear of the readouts. */
+	.viewTools {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: calc(8px + env(safe-area-inset-right));
+		flex-direction: column;
+		margin: 0;
+	}
+
+	.toolDock {
+		left: calc(8px + env(safe-area-inset-left));
+		right: calc(8px + env(safe-area-inset-right));
+		bottom: calc(8px + env(safe-area-inset-bottom));
+		gap: 4px;
+		padding: 6px;
+	}
+	.toolButton { flex: 1 1 0; width: auto; min-width: 0; padding: 8px 0 6px; }
+	.toolName { font-size: 9px; letter-spacing: .06em; }
+
+	.overlay-content { padding-top: 7vh; }
+}
+
+/* The controls and instructions for the device in hand: a finger has no
+   Ctrl+Z and no scroll wheel, and a mouse has no need of an undo button. */
+@media (pointer: coarse) { .mouseOnly { display: none !important; } }
+@media (pointer: fine) { .touchOnly { display: none !important; } }
+
+/* Phones on their side, where height is what is short. Measured at 844x390
+   the bars left only 56% of the screen as clear map, so the dock stands down
+   the left edge instead of across the bottom and the top bar slims. Every
+   control keeps a target at least 44px tall. */
+@media (max-height: 500px) and (orientation: landscape) {
+	#topMenu {
+		gap: 12px;
+		height: calc(48px + env(safe-area-inset-top));
+		padding: env(safe-area-inset-top) calc(10px + env(safe-area-inset-right)) 0 calc(10px + env(safe-area-inset-left));
+	}
+	.iconButton { width: 40px; height: 40px; }
+	.readout-value { font-size: 16px; }
+	.readout-season .readout-value { font-size: 15px; }
+	.readout-formula { display: none; }
+
+	.toolDock {
+		flex-direction: column;
+		top: calc(54px + env(safe-area-inset-top));
+		bottom: auto;
+		left: calc(6px + env(safe-area-inset-left));
+		gap: 3px;
+		padding: 4px;
+	}
+	.toolButton { width: 60px; min-height: 44px; padding: 6px 0 5px; gap: 2px; }
+	.toolButton img { width: 20px; height: 20px; }
+	.toolName { font-size: 9px; letter-spacing: .06em; }
+}
+

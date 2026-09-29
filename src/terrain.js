@@ -1,3 +1,4 @@
+import { hexChannels } from './color.js';
 import { TERRAIN } from './config.js';
 
 /**
@@ -27,15 +28,6 @@ function ease(t) {
   return t * t * (3 - 2 * t);
 }
 
-/** A '#rrggbb' colour as [r, g, b]. */
-function channelsOf(hex) {
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
-}
-
 function toChannel(value) {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
@@ -52,13 +44,17 @@ function hexByte(value) {
  * desert has none of.
  */
 function bandsFor(land) {
-  const band = (hex, turns = false) => ({ hex, channels: channelsOf(hex), turns });
+  const band = (hex, turns = false) => ({ hex, channels: hexChannels(hex), turns });
   return {
     grass: band(land.grassColor, land.turnsInAutumn),
     moss: band(land.mossColor, land.turnsInAutumn),
     dirt: band(land.dirtColor),
     rock: band(land.rockColor),
-    gold: channelsOf(land.autumnGold),
+    gold: hexChannels(land.autumnGold),
+    pond: hexChannels(land.pondColor),
+    pondBank: hexChannels(land.pondBankColor),
+    oasis: hexChannels(land.oasisColor),
+    snow: hexChannels(land.snowColor),
   };
 }
 
@@ -116,6 +112,15 @@ const CELL_LIMIT = 4096;
 const ZONE_SCAN_LIMIT = 8;
 const ZONE_BUCKET = 120;
 const EMPTY_ZONES = [];
+
+// How much of a beach's own width (nearest its inland edge) it takes to
+// settle at the full dip below the grass above it -- see wildHeightAt's own
+// use of beachAt. Short on purpose: reaching bottom quickly and then
+// holding level the rest of the way to the shore is what reads as a
+// stepped-down shelf. Spreading the same drop evenly across the whole
+// width instead -- beachAt's own raw curve -- eases in and out at both
+// ends, which is exactly what read as a scooped bowl rather than a step.
+const BEACH_STEP_FRACTION = 0.35;
 
 /**
  * Every mountain whose cell could possibly reach this point. Bounded to the
@@ -183,8 +188,8 @@ export class Terrain {
     this.bands = bandsFor(this.land);
     const water = river ?? sea;
     if (water) {
-      this.bands.water = channelsOf(water.color);
-      this.bands.bank = channelsOf(water.bankColor);
+      this.bands.water = hexChannels(water.color);
+      this.bands.bank = hexChannels(water.bankColor);
     }
     // Ground the player or the game has reshaped: one entry per settlement
     // levelled flat, plus any platform raised on top of the wild ground. Both
@@ -256,6 +261,30 @@ export class Terrain {
   }
 
   /**
+   * A ridge or dune line, on top of whatever the rolling hills are doing --
+   * noise sampled mostly across one axis and only slowly along it, so the
+   * land reads as parallel rises and hollows running a single direction
+   * (a valley's own terraces, a dune field's own lines) rather than another
+   * layer of the same isotropic bump the hills already are. Off by default;
+   * a level asks for one by giving it a direction and the two scales that
+   * set how far apart the lines run and how far they carry before
+   * wandering.
+   */
+  ridgeAt(x, y) {
+    const ridge = this.land.ridge;
+    if (!ridge) {
+      return 0;
+    }
+    const angle = ridge.angle * Math.PI / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const along = x * cos + y * sin;
+    const across = -x * sin + y * cos;
+    const wave = valueNoise(across / ridge.scale, along / ridge.alongScale, this.seed + 967);
+    return (wave - 0.5) * 2 * ridge.height;
+  }
+
+  /**
    * How far out to sea this point lies: 0 ashore, 1 in open water. The
    * coastline is the shore radius pushed in and out by a noise of its own,
    * so an island has bays and headlands rather than being a drawn circle.
@@ -271,6 +300,64 @@ export class Terrain {
       return 0;
     }
     return Math.min(1, (reach - shore) / sea.shelf);
+  }
+
+  /**
+   * How sandy this dry point reads, 0 well inland to 1 right at the
+   * waterline -- a sea's own beach fading into the land beyond it rather
+   * than the shoreline cutting straight from wet sand to turf. `seaAt`
+   * already blends the wet side from bank colour to open water; this is
+   * the same bank colour carried inland over `sea.beachWidth`, so the two
+   * meet at the shore without a seam.
+   */
+  beachAt(x, y) {
+    const sea = this.sea;
+    if (!sea || !sea.beachWidth) {
+      return 0;
+    }
+    const reach = Math.hypot(x, y);
+    const shore = this.shoreAt(Math.atan2(y, x));
+    const inland = shore - reach;
+    if (inland < 0 || inland >= sea.beachWidth) {
+      return 0;
+    }
+    return 1 - inland / sea.beachWidth;
+  }
+
+  /**
+   * How far into a pond this point sits: 0 on dry land, 1 at its centre.
+   * A level's own tiny standing water -- an oasis near the city, say --
+   * entirely separate from its river or sea, so a level can carry both a
+   * long watercourse and a scatter of small ponds at once (see levels.js).
+   */
+  pondAt(x, y) {
+    let channel = 0;
+    for (const pond of this.land.ponds) {
+      const distance = Math.hypot(x - pond.x, y - pond.y);
+      if (distance < pond.radius) {
+        channel = Math.max(channel, 1 - distance / pond.radius);
+      }
+    }
+    return channel;
+  }
+
+  /**
+   * How green the ground reads this near a pond, 0 dry to 1 right at its
+   * edge, fading out over the field beyond -- cultivated ground standing
+   * out from whatever band the noise underneath would otherwise have
+   * painted, independent of it the same way a mountain's rock is.
+   */
+  oasisAt(x, y) {
+    let greenness = 0;
+    for (const pond of this.land.ponds) {
+      const distance = Math.hypot(x - pond.x, y - pond.y);
+      if (distance <= pond.radius) {
+        greenness = 1;
+      } else if (distance < pond.fieldRadius) {
+        greenness = Math.max(greenness, 1 - (distance - pond.radius) / (pond.fieldRadius - pond.radius));
+      }
+    }
+    return greenness;
   }
 
   /**
@@ -402,6 +489,7 @@ export class Terrain {
     const fine = valueNoise(x / this.land.detailScale, y / this.land.detailScale, this.seed + 17);
     let height = (broad - 0.5) * this.land.hillHeight + (fine - 0.5) * this.land.detailHeight;
     height += this.hillAt(x, y);
+    height += this.ridgeAt(x, y);
     const mountains = this.mountainsNear(x, y);
     for (let i = 0; i < mountains.length; i += 1) {
       height += mountainBumpAt(mountains[i], x, y, this.land);
@@ -410,9 +498,44 @@ export class Terrain {
     if (channel > 0) {
       height -= this.river.depth * ease(channel);
     }
+    // A step down onto the beach, so the grass above it reads as a low
+    // bluff rather than the sand sharing its own level -- see beachAt.
+    // Grass itself is untouched (beachAt is 0 past the beach's own inland
+    // edge); the beach drops quickly to its own full depth (see
+    // BEACH_STEP_FRACTION) and holds level the rest of the way to the
+    // shore, reading as a stepped-down shelf rather than a bowl scooped
+    // out of the coastline. The sea's own depth then continues from
+    // exactly that same depth rather than its own separate zero -- without
+    // this the two met at a step right at the waterline (the beach already
+    // sunk by a full beachDip, the sea only just starting from nothing),
+    // which is what actually read as a trench dug along the coast rather
+    // than a shelf.
+    //
+    // Kept modest deliberately: the cursor's own terrain march (see
+    // projection.js's terrainPointAt) steps in fixed strides, and a deep
+    // enough dip lets a ray at the camera's shallowest legal angle climb
+    // straight past it rather than crossing it. That only bites once the
+    // grass-to-sea profile has an actual discontinuity in it, though --
+    // measured against this continuous composition, a dip up to 12-15
+    // units still lands the cursor to about a hundredth of a pixel, and it
+    // is 16 units and up where the march starts drifting off by tens of
+    // pixels. A level asking for a dip past that would need the march
+    // itself taught to step finer near the coast, not just a bigger number
+    // here.
+    const beachDip = this.sea?.beachDip ?? 0;
     const offshore = this.seaAt(x, y);
     if (offshore > 0) {
-      height -= this.sea.depth * ease(offshore);
+      height -= beachDip + this.sea.depth * ease(offshore);
+    } else {
+      const beach = this.beachAt(x, y);
+      if (beach > 0) {
+        const settled = Math.min(1, beach / BEACH_STEP_FRACTION);
+        height -= beachDip * ease(settled);
+      }
+    }
+    const pond = this.pondAt(x, y);
+    if (pond > 0) {
+      height -= this.land.pondDepth * ease(pond);
     }
     return height;
   }
@@ -607,20 +730,31 @@ export class Terrain {
    * `gold` is how far through autumn the year has got (see season.js). It
    * only takes the green bands, and only where its own patch noise runs
    * high, so the turn comes on in drifts across the map rather than
-   * everywhere at once.
+   * everywhere at once. `snowCover` is the same idea for a hard winter --
+   * see Season#snowCoverAt -- but reaches every band, mountain rock
+   * included, since a real peak catches the first snow of the year rather
+   * than standing bare while the ground around it turns white.
    */
-  groundTintAt(x, y, into = [0, 0, 0], gold = 0) {
+  groundTintAt(x, y, into = [0, 0, 0], gold = 0, snowCover = 0) {
+    // A pond is its own small body of water, checked ahead of a level's
+    // river or sea since the two never mean to overlap but nothing stops a
+    // level carrying both at once.
+    const pond = this.pondAt(x, y);
+    const riverSea = Math.max(this.riverAt(x, y), this.seaAt(x, y));
+    if (pond > 0 && pond >= riverSea) {
+      return this.waterTint(pond, into, this.bands.pond, this.bands.pondBank);
+    }
+    if (riverSea > 0) {
+      // Shore shading into open water, so the edge is a beach rather than a
+      // painted line.
+      return this.waterTint(riverSea, into, this.bands.water, this.bands.bank);
+    }
     // Ground reads as bare rock once a mountain has raised it enough to
     // matter, whatever band the noise underneath would otherwise have said
     // -- the outer skirt stays whatever it was, so a mountain rises out of
     // the ground it stands on rather than starting with a hard edge.
-    const channel = Math.max(this.riverAt(x, y), this.seaAt(x, y));
-    if (channel > 0) {
-      // Shore shading into open water, so the edge is a beach rather than a
-      // painted line.
-      return this.waterTint(channel, into);
-    }
-    const band = this.isMountainSlope(x, y) ? this.bands.rock : this.bandAt(x, y);
+    const onSlope = this.isMountainSlope(x, y);
+    const band = onSlope ? this.bands.rock : this.bandAt(x, y);
     const base = band.channels;
     // A finer noise mottles the band's colour, so a patch reads as textured
     // rather than a flat fill -- the same trick as the band itself, one size
@@ -637,6 +771,33 @@ export class Terrain {
       green += (gold[1] - green) * turning;
       blue += (gold[2] - blue) * turning;
     }
+    // Cultivated ground around a pond, standing out the same way a
+    // mountain's rock does -- independent of whatever band and turn the
+    // noise underneath would otherwise have painted.
+    const oasis = onSlope ? 0 : this.oasisAt(x, y);
+    if (oasis > 0) {
+      const field = this.bands.oasis;
+      red += (field[0] - red) * oasis;
+      green += (field[1] - green) * oasis;
+      blue += (field[2] - blue) * oasis;
+    }
+    // A sea's own beach, carried inland from the shore -- see beachAt.
+    const beach = onSlope ? 0 : this.beachAt(x, y);
+    if (beach > 0) {
+      const sand = this.bands.bank;
+      red += (sand[0] - red) * beach;
+      green += (sand[1] - green) * beach;
+      blue += (sand[2] - blue) * beach;
+    }
+    // Snow settles last, over whatever the ground already shows -- see the
+    // docstring above for why a mountain's rock does not sit this out.
+    const snow = snowCover > 0 ? snowCover * this.snowPatchAt(x, y) : 0;
+    if (snow > 0) {
+      const white = this.bands.snow;
+      red += (white[0] - red) * snow;
+      green += (white[1] - green) * snow;
+      blue += (white[2] - blue) * snow;
+    }
     into[0] = toChannel(red);
     into[1] = toChannel(green);
     into[2] = toChannel(blue);
@@ -649,10 +810,8 @@ export class Terrain {
     return `#${hexByte(tint[0])}${hexByte(tint[1])}${hexByte(tint[2])}`;
   }
 
-  /** The river's own colour at a point, banks blending into open water. */
-  waterTint(channel, into) {
-    const bank = this.bands.bank;
-    const water = this.bands.water;
+  /** A body of water's own colour at a point, banks blending into open water. */
+  waterTint(channel, into, water = this.bands.water, bank = this.bands.bank) {
     const depth = ease(Math.min(1, channel * 1.6));
     into[0] = toChannel(bank[0] + (water[0] - bank[0]) * depth);
     into[1] = toChannel(bank[1] + (water[1] - bank[1]) * depth);
@@ -672,13 +831,55 @@ export class Terrain {
     return (patch - this.land.autumnPatchThreshold) / (1 - this.land.autumnPatchThreshold);
   }
 
+  /**
+   * How readily this patch settles white in winter, 0 to 1 -- picked by its
+   * own noise the same way autumn's gold is, so snow gathers in drifts
+   * rather than an even wash, and on its own patch of ground independent
+   * of wherever autumn's own gold happened to catch.
+   */
+  snowPatchAt(x, y) {
+    const patch = valueNoise(x / this.land.snowPatchScale, y / this.land.snowPatchScale, this.seed + 941);
+    if (patch <= this.land.snowPatchThreshold) {
+      return 0;
+    }
+    return (patch - this.land.snowPatchThreshold) / (1 - this.land.snowPatchThreshold);
+  }
+
   /** How thick the woodland is here, 0 to 1. */
   forestAt(x, y) {
     const cover = valueNoise(x / this.land.forestScale, y / this.land.forestScale, this.seed + 91);
-    if (cover <= this.land.forestThreshold) {
+    const density = cover <= this.land.forestThreshold
+      ? 0
+      : Math.min(1, (cover - this.land.forestThreshold) / (1 - this.land.forestThreshold));
+    const scaled = Math.min(1, density * this.treeDensityScaleAt(x, y));
+    const radius = this.land.cityClearRadius;
+    if (radius <= 0) {
+      return scaled;
+    }
+    // The castle always stands at the origin, so the clearing is centred
+    // there rather than needing a level to say where its own city is.
+    const distance = Math.hypot(x, y);
+    if (distance <= radius) {
       return 0;
     }
-    return Math.min(1, (cover - this.land.forestThreshold) / (1 - this.land.forestThreshold));
+    const feather = this.land.cityClearFeather;
+    if (feather <= 0 || distance >= radius + feather) {
+      return scaled;
+    }
+    return scaled * (distance - radius) / feather;
+  }
+
+  /**
+   * How much a point's own ground band thins or thickens whatever wood
+   * would otherwise stand on it -- the lighter of the two greens (grass)
+   * reads as open ground even where the noise says a wood belongs, the
+   * darker (moss) as a proper thicket. Ground that carries no wood at all
+   * regardless (dirt, rock) never asks, so its own scale here is moot.
+   */
+  treeDensityScaleAt(x, y) {
+    return this.groundBandAt(x, y) === this.land.mossColor
+      ? this.land.mossTreeDensity
+      : this.land.grassTreeDensity;
   }
 
   /**
@@ -697,11 +898,15 @@ export class Terrain {
         if (roll > this.forestAt(x, y)) {
           continue;
         }
-        // Woodland only takes root on open grass -- not moss, dirt, bare
-        // rock, or a mountain's slope, which reads as rock regardless of
-        // what the band underneath says.
-        if (this.groundBandAt(x, y) !== this.land.grassColor
-          || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0) {
+        // Woodland only takes root on the ground's two greens -- not dirt,
+        // bare rock, or a mountain's slope, which reads as rock regardless
+        // of what the band underneath says. Which of the two it is only
+        // says how much wood grows there, already folded into forestAt's
+        // own density above -- see Terrain#treeDensityScaleAt.
+        const band = this.groundBandAt(x, y);
+        if ((band !== this.land.grassColor && band !== this.land.mossColor)
+          || this.isMountainSlope(x, y) || this.riverAt(x, y) > 0 || this.seaAt(x, y) > 0
+          || this.pondAt(x, y) > 0 || this.beachAt(x, y) > 0) {
           continue;
         }
         if (isCleared && isCleared(x, y)) {

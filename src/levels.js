@@ -1,4 +1,6 @@
-import { JAPAN_BUILDINGS, JAPAN_HOUSE } from './buildings/index.js';
+import {
+  CHINESE_PAGODA, CHINESE_TEMPLE_MINI, CHINESE_TEMPLE_SMALL, JAPAN_BUILDINGS, JAPAN_HOUSE, WAYSIDE_SHRINE,
+} from './buildings/index.js';
 
 /**
  * The campaigns, one short config apiece.
@@ -27,27 +29,60 @@ const DESERT = {
   detailHeight: 1.5,
   slopeRelief: 2.6,
   // Mesas: broader and blunter than the green land's peaks, with a
-  // steadier outline.
-  mountainMinRadius: 70,
-  mountainMaxRadius: 140,
-  mountainMinHeight: 40,
-  mountainMaxHeight: 70,
+  // steadier outline. Widened past the green land's own range too, so a
+  // squat outcrop and a mesa proper both turn up rather than one size of
+  // rock repeated.
+  mountainMinRadius: 55,
+  mountainMaxRadius: 170,
+  mountainMinHeight: 32,
+  mountainMaxHeight: 85,
   mountainShapeScale: 1.3,
   mountainSkirt: 55,
+  // Dune lines rather than an isotropic bump field -- angled off true
+  // north the way a prevailing wind would actually lay them, and taller
+  // than the green land's own ridge: dune relief is the dominant shape of
+  // a real desert, not a texture on top of a hill.
+  ridge: { angle: 35, scale: 100, alongScale: 500, height: 20 },
   // Nothing grows here, and nothing turns in autumn.
   forestThreshold: 1,
   turnsInAutumn: false,
+  // A tiny oasis a short way from the city: two ponds close enough together
+  // to read as one small cultivated patch rather than two separate dots,
+  // the only green this level has anywhere -- see Terrain#pondAt/oasisAt.
+  ponds: [
+    { x: 55, y: 25, radius: 6, fieldRadius: 22 },
+    { x: 40, y: 40, radius: 4, fieldRadius: 16 },
+  ],
 };
 
 export const LEVELS = [
   {
     id: 'northern-march',
     name: 'The Northern March',
-    blurb: 'They ride down out of the north. The river guards your back.',
+    blurb: 'Raiders from the north. A river guards your back.',
     // Lower hills than the default: this is river country, not high ground.
+    // A true wood surrounds the city -- tree spacing tight and the noise's
+    // own threshold loosened well past the default, so cover reads as
+    // forest rather than scattered stands, with the noise's low patches
+    // left as clearings in it rather than filled in. Ringed clear around
+    // the castle itself (see Terrain#forestAt): the city stands on open
+    // ground the player can actually see, with the treeline beginning
+    // just past it rather than crowding the walls from the first frame.
+    // A ridge runs parallel to the river (angle 0, the river's own line)
+    // rather than across it -- river valleys terrace along their length,
+    // not against it -- and the peaks widen past the default range for a
+    // skyline with real high ground on it, not just one size of foothill.
     land: {
-      mountainMinHeight: 34,
-      mountainMaxHeight: 56,
+      mountainMinHeight: 30,
+      mountainMaxHeight: 68,
+      mountainMinRadius: 38,
+      mountainMaxRadius: 115,
+      ridge: { angle: 0, scale: 130, alongScale: 700, height: 12 },
+      treeSpacing: 7,
+      forestScale: 280,
+      forestThreshold: 0.05,
+      cityClearRadius: 70,
+      cityClearFeather: 50,
     },
     // Raiders muster along the northern skyline only, so the south is a
     // flank you never have to hold -- see Game#spawnRaider.
@@ -63,44 +98,96 @@ export const LEVELS = [
       color: '#3d6e8e',
       bankColor: '#8d8460',
     },
+    // A slender pagoda and a couple of modest wayside shrines, scattered
+    // through the clear ground around the city -- far enough that none of
+    // them competes with the walls for the eye, standing apart from the
+    // raid the same way they would stand apart from any passing army.
+    landmarks: [
+      { structure: CHINESE_PAGODA, x: 100, y: 40 },
+      { structure: CHINESE_TEMPLE_MINI, x: -160, y: 60 },
+      { structure: CHINESE_TEMPLE_MINI, x: 200, y: 140 },
+    ],
   },
   {
     id: 'dust-sea',
     name: 'The Dust Sea',
-    blurb: 'The same war, fought over sand. They come from every horizon.',
+    blurb: 'A desert siege. Raiders from every side.',
     land: DESERT,
-    // Dust hanging in the air the year round: the season still says how
-    // thick the haze is, this says what colour it is and how much more of
-    // it there is than a temperate sky would hold.
-    mist: { color: '226, 194, 112', blend: 0.8, density: 1.9, start: 0.45 },
+    // A standing sandstorm rather than an ordinary dusty haze: thicker than
+    // any season alone gets, starting well short of the ordinary distance
+    // so it presses in past the middle ground, with the whole sky driven
+    // past overhead several times faster than an ordinary wind -- see
+    // Atmosphere#placeClouds. `floor` is what keeps it a sandstorm rather
+    // than aerial haze: without it the gradient still clears up close to
+    // the camera, and a player zoomed in to build a wall would see the
+    // storm vanish around them -- see Atmosphere#drawFog.
+    mist: {
+      color: '226, 194, 112', blend: 0.8, density: 2.6, start: 0.22, windSpeed: 4, floor: 0.55,
+    },
+    // A desert runs warmer than the calendar alone says -- see
+    // Season#snowCoverAt -- so even winter's own coldest night never
+    // actually reaches freezing here. No snow falls, and no patch of
+    // ground ever turns white, without either needing to know this is a
+    // desert specifically; they only ever read the temperature.
+    climate: { offset: 20 },
+    // A wayside temple off in the dunes, well clear of the oasis and the
+    // city both -- see Terrain#pondAt for where the oasis itself sits.
+    landmarks: [
+      { structure: CHINESE_TEMPLE_SMALL, x: -170, y: 90 },
+    ],
   },
   {
     id: 'shiro-island',
     name: 'The Island of the Keep',
-    blurb: 'An island with no landward side. They come ashore wherever they please.',
+    blurb: 'An island siege. No safe side at all.',
     // The same green country as the northern march, but only as much of it
     // as fits between the beaches -- so the hills are smaller in kind, not
     // just fewer.
     land: {
       hillScale: 300,
       hillHeight: 46,
-      mountainMinRadius: 34,
-      mountainMaxRadius: 60,
-      mountainMinHeight: 26,
-      mountainMaxHeight: 44,
+      // Widened past a single size of foothill, same as the mainland's own
+      // range, so a small island still shows some size variety rather than
+      // every peak reading the same.
+      mountainMinRadius: 28,
+      mountainMaxRadius: 72,
+      mountainMinHeight: 22,
+      mountainMaxHeight: 52,
       mountainSkirt: 26,
       // The rise the whole level is built around: the keep stands on its
       // summit and the walls climb it. `spurs` is how far its reach wanders
       // with the direction and `grain` how rough its surface is, which is
-      // what keeps it from reading as a dome.
+      // what keeps it from reading as a dome. Cut back to a real hill
+      // rather than the small mountain it had grown into -- the castle's
+      // own footprint is a fraction of this reach even now.
       hill: {
-        radius: 150,
-        height: 50,
-        spurs: 34,
+        radius: 115,
+        height: 36,
+        spurs: 26,
         spurScale: 2.4,
-        grain: 7.5,
-        grainScale: 70,
+        grain: 10,
+        grainScale: 55,
       },
+      // Cherry blossom rather than the mainland's wood: pink, and smaller,
+      // so a stand of them reads as an orchard rather than a green forest
+      // that happens to have changed colour. Grown far thicker too --
+      // measured over the island's playable radius, the mainland's own
+      // settings plant only about a tree, since the two gates that decide
+      // where woodland grows (a noise for how wooded a patch is, another
+      // for which ground counts as grass at all) compound to a sliver of
+      // the map. Loosening the first is what turns a sliver into a wood
+      // worth walking through.
+      //
+      // Pink only while the blossom is actually out, in spring; the same
+      // turn to yellow and then white as any other wood the rest of the
+      // year, and a plain green in summer once the blossom has dropped --
+      // the same green the mainland wears then, not a colour of its own.
+      canopySeasons: {
+        Autumn: '#d9b23a', Winter: '#eef2f5', Spring: '#eaacc7', Summer: '#4a603a',
+      },
+      treeSize: 3,
+      treeSpacing: 7,
+      forestThreshold: 0.24,
     },
     sea: {
       // Land out to roughly this radius, give or take the coves `coast`
@@ -110,8 +197,19 @@ export const LEVELS = [
       coast: 34,
       // How many times the coastline wanders on one walk round the island.
       coastScale: 2.4,
-      // Over what distance the water deepens past the beach, and by how much.
-      shelf: 140,
+      // A real strip of sand inland of the shore, the same bank colour as
+      // the wet side fading in from the waterline, so the two meet without
+      // a seam rather than the coast cutting straight from surf to turf --
+      // see Terrain#beachAt. Dipped below the grass above it too, so the
+      // two read as different shelves rather than sharing a level -- see
+      // wildHeightAt's own use of beachDip for how that stays a step
+      // rather than the scooped bowl an earlier attempt at this read as.
+      beachWidth: 55,
+      beachDip: 12,
+      // Over what distance the water deepens past the beach, and by how
+      // much -- narrow, so the open sea reads as a clear colour past the
+      // shallows rather than the two blurring into one long fade.
+      shelf: 50,
       depth: 26,
       color: '#2f5f86',
       bankColor: '#cbb98d',
@@ -171,6 +269,14 @@ export const LEVELS = [
     },
     // Sea air: thinner and cooler than the dust, and never quite absent.
     mist: { color: '196, 214, 226', blend: 0.45, density: 1.25, start: 0.8 },
+    // A few wayside shrines along the shore paths, clear of the hill and
+    // its walls -- see Terrain#hillAt for the rise the keep itself stands
+    // on -- so a raid from any quarter passes near one of them.
+    landmarks: [
+      { structure: WAYSIDE_SHRINE, x: 150, y: 120 },
+      { structure: WAYSIDE_SHRINE, x: -150, y: 80 },
+      { structure: WAYSIDE_SHRINE, x: 0, y: -170 },
+    ],
   },
 ];
 

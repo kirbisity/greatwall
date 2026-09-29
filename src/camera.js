@@ -26,6 +26,8 @@ export class Camera {
     this.dragDelta = { x: 0, y: 0 };
     this.drift = { x: 0, y: 0 };
     this.dragging = false;
+    this.directDrag = false;
+    this.directZoom = false;
     this.zoomAnchor = null;
     this.refreshView();
   }
@@ -66,22 +68,35 @@ export class Camera {
   // --- intent -------------------------------------------------------------
 
   /** Queue the ground movement needed to keep `from` under `to`. */
-  panFrom(from, to) {
+  /**
+   * `direct` is for a finger: the view follows it exactly instead of easing
+   * after it, because a finger is holding the ground where a cursor is only
+   * pointing at it. Measured on a phone, the eased view let the ground slide
+   * 88px out from under a finger at an ordinary swipe -- a quarter of the
+   * screen -- which a mouse never shows and a hand cannot miss.
+   */
+  panFrom(from, to, { direct = false } = {}) {
     const before = this.toWorld(from);
     const after = this.toWorld(to);
     this.dragDelta.x += before.x - after.x;
     this.dragDelta.y += before.y - after.y;
     this.dragging = true;
+    this.directDrag = direct;
   }
 
   /** Let go, so whatever speed the drag had becomes momentum. */
   release() {
     this.dragging = false;
+    this.directDrag = false;
+    this.directZoom = false;
   }
 
   /** Zoom by `factor`, holding the ground under `anchor` in place throughout. */
-  zoomAt(anchor, factor) {
+  zoomAt(anchor, factor, { direct = false } = {}) {
     this.zoomAnchor = { screen: { ...anchor }, world: this.toWorld(anchor) };
+    // A pinch zooms at once, for the same reason a finger pans at once: the
+    // fingers are holding the ground. The wheel keeps its easing.
+    this.directZoom = direct;
     this.targetDistance = clamp(
       this.targetDistance / factor,
       CAMERA.minDistance,
@@ -167,7 +182,12 @@ export class Camera {
 
   settleZoom(ease) {
     let moved = false;
-    if (Math.abs(this.targetDistance - this.distance) > 0.05) {
+    if (this.directZoom && this.distance !== this.targetDistance) {
+      // Arrive this frame, and keep the anchor so the ground under the
+      // fingers is held in place as it does.
+      this.distance = this.targetDistance;
+      moved = true;
+    } else if (Math.abs(this.targetDistance - this.distance) > 0.05) {
       this.distance += (this.targetDistance - this.distance) * ease;
       moved = true;
     } else {
@@ -218,6 +238,12 @@ export class Camera {
 
   /** Close the remaining gap between where the view is and where it is going. */
   settleFocus(ease) {
+    if (this.dragging && this.directDrag) {
+      const moved = this.focus.x !== this.target.x || this.focus.y !== this.target.y;
+      this.focus.x = this.target.x;
+      this.focus.y = this.target.y;
+      return moved;
+    }
     const gapX = this.target.x - this.focus.x;
     const gapY = this.target.y - this.focus.y;
     if (Math.hypot(gapX, gapY) < CAMERA.focusCutoff) {

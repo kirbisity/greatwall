@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
-import { WALL, WALL_HEIGHT_UNITS, WALL_TIERS } from '../src/config.js';
+import { TERRAIN, WALL, WALL_HEIGHT_UNITS, WALL_TIERS } from '../src/config.js';
 import { compileStructure } from '../src/structures.js';
 import { JAPAN_BUILDINGS, JAPAN_HOUSE } from '../src/buildings/index.js';
 
@@ -272,7 +272,7 @@ test('a keep on the hill hangs its bar far above sea level', () => {
   const game = island();
   const keep = game.castles[0];
   const ground = game.terrain.heightAt(keep.position.x, keep.position.y);
-  assert.ok(ground > 20, `the keep should stand well up the hill, it is at ${ground.toFixed(0)}`);
+  assert.ok(ground > 10, `the keep should stand well up the hill, it is at ${ground.toFixed(0)}`);
   // The anchor is ground plus roof, so it can never come out at zero the way
   // the old fixed z=0 anchor did wherever the city happened to stand.
   assert.ok(ground + JAPAN_BUILDINGS[keep.typeId].radius > 0);
@@ -388,7 +388,9 @@ test('a wall is laid where it was drawn, not downhill of it', async () => {
   });
 
   // Aim at a spot well up the hill, and check the cursor reads it back.
-  const target = { x: 40, y: 55 };
+  // Closer to the summit than this once stood, now that the hill itself
+  // is smaller -- see levels.js.
+  const target = { x: 22, y: 30 };
   const onScreen = projectPoint(camera.view, target.x, target.y, game.terrain.heightAt(target.x, target.y));
   assert.ok(onScreen, 'the target should be in shot');
   input.pointer = { x: onScreen.x, y: onScreen.y };
@@ -731,4 +733,59 @@ test('nothing overlaps a wall where walls stop a company dead', () => {
   assert.equal(game.wallClimb, null, 'this level has no climbing at all');
   const storming = stormTheCity(ringedGame(LEVELS[0]));
   assert.equal(storming.arrived, false, 'and a wall is still a barrier there');
+});
+
+// --- cherry blossom -------------------------------------------------------
+
+test("a wood's colour comes from the land, and the default is the mainland's green", () => {
+  const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river);
+  assert.deepEqual(mainland.land.canopySeasons, TERRAIN.canopySeasons);
+  assert.equal(mainland.land.trunkColor, TERRAIN.trunkColor);
+});
+
+test('the island plants cherry blossom: pink, and smaller than the mainland wood', () => {
+  const terrain = islandTerrain();
+  assert.notDeepEqual(terrain.land.canopySeasons, TERRAIN.canopySeasons, 'the island should not be the plain green');
+  // Pink reads as more red and more blue than green, against a fill that is
+  // the other way round -- a cheap check that this is not just A different
+  // green. Spring is when the blossom is actually out.
+  const [r, g, b] = terrain.land.canopySeasons.Spring.match(/[0-9a-f]{2}/gi).map((h) => parseInt(h, 16));
+  assert.ok(r > g && b > g, `expected a pink, got rgb(${r}, ${g}, ${b})`);
+  assert.ok(terrain.land.treeSize < TERRAIN.treeSize, 'a blossom tree should be smaller than the mainland wood');
+});
+
+test('the island is planted far thicker than a plain, unmodified wood', () => {
+  const reach = 220;
+  const island = islandTerrain().treesWithin(-reach, -reach, reach, reach).length;
+  // Against TERRAIN's own defaults rather than a specific level: every
+  // level is free to tune its own density (the mainland has since grown
+  // thicker too), so the stable claim is that the island is deliberately
+  // far past what a level asking for nothing at all would grow, not that
+  // it beats whichever number the mainland happens to carry today. Widening
+  // the beach (see Terrain#beachAt) rightly costs the wood some ground near
+  // the coast, so the margin is smaller than it once was without the claim
+  // itself becoming any less true.
+  const plain = new Terrain(1, {}, null).treesWithin(-reach, -reach, reach, reach).length;
+  assert.ok(island > plain * 5,
+    `expected the island to read as a wood, got ${island} trees against a plain wood's ${plain}`);
+});
+
+test("the mainland's own wood is thicker than a plain, unmodified one too", () => {
+  const reach = 220;
+  const mainland = new Terrain(1, LEVELS[0].land, LEVELS[0].river)
+    .treesWithin(-reach, -reach, reach, reach).length;
+  const plain = new Terrain(1, {}, LEVELS[0].river).treesWithin(-reach, -reach, reach, reach).length;
+  assert.ok(mainland > plain * 5,
+    `expected the mainland to be planted thicker than the default, got ${mainland} against ${plain}`);
+});
+
+test('the mainland and the desert are untouched by the island planting its own wood', () => {
+  for (const level of LEVELS) {
+    if (level === ISLAND) {
+      continue;
+    }
+    const terrain = new Terrain(1, level.land, level.river ?? null, level.sea ?? null);
+    assert.deepEqual(terrain.land.canopySeasons, TERRAIN.canopySeasons, `${level.id} should keep the plain wood`);
+    assert.equal(terrain.land.treeSize, TERRAIN.treeSize, `${level.id} should keep the plain tree size`);
+  }
 });

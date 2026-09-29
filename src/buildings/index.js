@@ -10,10 +10,13 @@ export const BUILDINGS = {
 };
 
 import { scalePlan } from './helpers.js';
+import chineseTemple from './chinese-temple.js';
 import japanHouse from './japan-house.js';
 import japanLarge from './japan-large.js';
 import japanMedium from './japan-medium.js';
 import japanSmall from './japan-small.js';
+import mogaoGrotto from './mogao-grotto.js';
+import waysideShrine from './shrine.js';
 
 // The island's keeps are drawn at the size their proportions read best and
 // stood down to this, so resizing them is one number rather than a pass over
@@ -29,3 +32,9 @@ export const JAPAN_BUILDINGS = {
 
 /** What an island settlement fills its platforms with. */
 export const JAPAN_HOUSE = japanHouse;
+
+// A small cultural landmark per level, standing apart from the city --
+// see LEVELS' own `landmark` field and Renderer#collectLandmark.
+export const CHINESE_TEMPLE = chineseTemple;
+export const MOGAO_GROTTO = mogaoGrotto;
+export const WAYSIDE_SHRINE = waysideShrine;

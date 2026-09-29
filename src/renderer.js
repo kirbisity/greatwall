@@ -565,6 +565,7 @@ export class Renderer {
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
     this.collectBoats(items, view, game.landings, game.terrain);
+    this.collectLandmark(items, paving, view, game, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
     const wallStyle = wallStyleOf(game.level);
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall, wallStyle);
@@ -1130,6 +1131,23 @@ export class Renderer {
    * it, part by part, centre first. `blacken` mixes every face towards
    * black, for the city burning down once the game is lost.
    */
+  /**
+   * A level's own small cultural landmark, standing apart from the city --
+   * see LEVELS' own `landmark` field. Purely decorative: no health, no
+   * growth, nothing raiders or the player can touch, so it is just a
+   * structure painted once at a fixed point, the same as a castle at rest.
+   */
+  collectLandmark(items, paving, view, game, terrain) {
+    const landmark = game.level.landmark;
+    if (!landmark || !this.onScreenFor(view, landmark, landmark.structure.radius)) {
+      return;
+    }
+    const ground = terrain.heightAt(landmark.x, landmark.y);
+    for (const face of this.structureFor(landmark.structure).faces) {
+      this.collectStructureFace(face.ground ? paving : items, view, face, landmark, ground);
+    }
+  }
+
   collectCastles(items, paving, view, game, terrain, blacken = 0) {
     for (const castle of game.castles) {
       const { x, y } = castle.position;

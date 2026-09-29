@@ -1,4 +1,6 @@
-import { JAPAN_BUILDINGS, JAPAN_HOUSE } from './buildings/index.js';
+import {
+  CHINESE_TEMPLE, JAPAN_BUILDINGS, JAPAN_HOUSE, MOGAO_GROTTO, WAYSIDE_SHRINE,
+} from './buildings/index.js';
 
 /**
  * The campaigns, one short config apiece.
@@ -96,6 +98,11 @@ export const LEVELS = [
       color: '#3d6e8e',
       bankColor: '#8d8460',
     },
+    // A wayside temple in the clear ground south of the city -- far
+    // enough that it never competes with the walls for the eye, standing
+    // apart from the raid the same way it would stand apart from any
+    // passing army.
+    landmark: { structure: CHINESE_TEMPLE, x: 100, y: 40 },
   },
   {
     id: 'dust-sea',
@@ -119,6 +126,9 @@ export const LEVELS = [
     // ground ever turns white, without either needing to know this is a
     // desert specifically; they only ever read the temperature.
     climate: { offset: 20 },
+    // A cliff shrine off in the dunes, well clear of the oasis and the
+    // city both -- see Terrain#pondAt for where the oasis itself sits.
+    landmark: { structure: MOGAO_GROTTO, x: -170, y: 90 },
   },
   {
     id: 'shiro-island',
@@ -253,6 +263,9 @@ export const LEVELS = [
     },
     // Sea air: thinner and cooler than the dust, and never quite absent.
     mist: { color: '196, 214, 226', blend: 0.45, density: 1.25, start: 0.8 },
+    // A wayside shrine along the shore path, clear of the hill and its
+    // walls -- see Terrain#hillAt for the rise the keep itself stands on.
+    landmark: { structure: WAYSIDE_SHRINE, x: 150, y: 120 },
   },
 ];
 

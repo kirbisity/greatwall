@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EARTHWORK, WALL } from '../src/config.js';
 
 const { Input } = await import('../src/input.js');
 
@@ -13,6 +14,10 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
     showMessage: () => {},
     showActionHint: () => {},
     clearActionHint: () => {},
+    showBattlePrep: () => {},
+    hideBattlePrep: () => {},
+    setBattleSelection: () => {},
+    updateBattleBudget: () => {},
   };
   const camera = {
     toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
@@ -643,4 +648,112 @@ test('with no Attack button to anchor to, the tier picker falls back to the midd
   input.hud.showDispatchMenu = (options, screen) => seen.push(screen);
   input.selectTool('attack');
   assert.deepEqual(seen[0], { x: input.camera.width / 2, y: input.camera.height / 2 });
+});
+
+// --- the open battleground mode ---------------------------------------------
+
+test('in the open battleground mode the Build tool lays earthworks, not walls, by a shorter yardstick', () => {
+  const built = [];
+  const span = 20;
+  assert.ok(span > EARTHWORK.minLength && span < EARTHWORK.maxLength, 'sanity: within the earthwork\'s own bound');
+  assert.ok(span <= WALL.minLength, 'sanity: too short a run to ever pass as a wall');
+  const { input } = gestureInput({
+    tool: 'build',
+    game: {
+      mode: 'battle',
+      buildEarthwork: (from, to) => { built.push({ from, to }); return { status: 'built', end: to }; },
+      buildWall: () => { throw new Error('should not lay stone in the open battleground mode'); },
+    },
+  });
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 110 + span, 100));
+  input.handlePointerUp(finger(1, 110 + span, 100));
+
+  assert.equal(built.length, 1, 'a span too short for a wall is long enough for an earthwork');
+  assert.deepEqual(built[0].to, { x: 110 + span, y: 100 });
+});
+
+test('tapping the field places whatever roster unit is pending', () => {
+  const placed = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      placeGuard: (typeId, point) => { placed.push({ typeId, point }); return { placed: true }; },
+    },
+  });
+  input.selectPendingUnit('IG_LIGHT');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].typeId, 'IG_LIGHT');
+  assert.deepEqual(placed[0].point, { x: 400, y: 300 });
+});
+
+test('a placement refused for want of points, or for landing off the deployment zone, tells the player why', () => {
+  for (const [status, expected] of [['poor', /points/], ['zone', /start line/]]) {
+    const messages = [];
+    const { input } = makeInput({
+      game: { mode: 'battle', placeGuard: () => ({ placed: false, status }) },
+    });
+    input.hud.showMessage = (text) => messages.push(text);
+    input.selectPendingUnit('IG_LIGHT');
+    input.handleClick({ clientX: 0, clientY: 0 });
+    assert.match(messages[0], expected, `status '${status}' should explain itself`);
+  }
+});
+
+test('picking the same roster unit twice deselects it', () => {
+  const { input } = makeInput({ game: { mode: 'battle' } });
+  const selections = [];
+  input.hud.setBattleSelection = (typeId) => selections.push(typeId);
+  input.selectPendingUnit('IG0');
+  input.selectPendingUnit('IG0');
+  assert.deepEqual(selections, ['IG0', null]);
+  assert.equal(input.pendingUnit, null);
+});
+
+test('a click while the Build tool is up never also places the pending unit', () => {
+  const placed = [];
+  const { input } = makeInput({
+    game: { mode: 'battle', placeGuard: (typeId, point) => { placed.push({ typeId, point }); return { placed: true }; } },
+  });
+  input.selectPendingUnit('IG_LIGHT');
+  input.selectTool('build');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(placed.length, 0, 'the drag handles the Build tool\'s own click; placement only fires with Move up');
+});
+
+test('undo in the open battleground mode hands back the last placement, not a wall section', () => {
+  let placementsUndone = 0;
+  let wallsUndone = 0;
+  const budgetUpdates = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      undoLastPlacement: () => { placementsUndone += 1; return true; },
+      undoLastWall: () => { wallsUndone += 1; return true; },
+    },
+  });
+  input.hud.updateBattleBudget = () => budgetUpdates.push(true);
+  input.undo();
+  assert.equal(placementsUndone, 1);
+  assert.equal(wallsUndone, 0, 'a siege undo should never fire alongside a battle one');
+  assert.equal(budgetUpdates.length, 1, 'the budget readout should catch up with what undo just gave back');
+});
+
+test('beginPlacement shows the roster dock; endPlacement puts it away and clears the pending pick', () => {
+  const shown = [];
+  const hidden = [];
+  const { input } = makeInput({ game: { mode: 'battle', battleBudget: 10 } });
+  input.hud.showBattlePrep = (game, onPick) => shown.push(onPick);
+  input.hud.hideBattlePrep = () => hidden.push(true);
+
+  input.beginPlacement();
+  assert.equal(shown.length, 1, 'the roster dock should appear as placement begins');
+  shown[0]('IG0');
+  assert.equal(input.pendingUnit, 'IG0', 'picking a roster button should be wired straight to selectPendingUnit');
+
+  input.endPlacement();
+  assert.equal(hidden.length, 1, 'Start Battle should put the dock away');
+  assert.equal(input.pendingUnit, null, 'and drop whatever was still pending');
 });

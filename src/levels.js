@@ -286,6 +286,30 @@ export const LEVELS = [
       { structure: WAYSIDE_SHRINE, x: 0, y: -170 },
     ],
   },
+  {
+    id: 'open-field',
+    name: 'The Open Field',
+    blurb: 'No walls, no castle. Draw up your line and fight.',
+    story: 'Two armies have found each other on open ground. There is no city to hide behind here -- only the line you draw up, and the one across the field drawing up against you.',
+    music: 'sounds/level_1.mp3',
+    // No castle stands here at all -- see Game#restart. `mode: 'battle'`
+    // is the one flag that turns the whole game from a siege into this.
+    mode: 'battle',
+    // Flat, open ground: a small ripple rather than real hills, no ridge or
+    // dunes to break sightlines, and no mountains at all (mountainChance 0)
+    // so nothing stands between the two lines. Trees held well back too --
+    // forestThreshold near 1 leaves the field itself essentially clear.
+    land: {
+      hillScale: 520,
+      hillHeight: 8,
+      detailScale: 260,
+      detailHeight: 1,
+      slopeRelief: 1.5,
+      mountainChance: 0,
+      forestThreshold: 0.92,
+    },
+    spawnArc: { centre: 90, spread: 40 },
+  },
 ];
 
 export function levelAt(index) {

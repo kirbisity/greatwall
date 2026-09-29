@@ -1,8 +1,10 @@
 import {
   AMBIENT_LIGHT,
   AVATAR,
+  BATTLE,
   CASTLE_REBUILD,
   DAMAGE_EFFECTS,
+  EARTHWORK,
   FLAG,
   HEALTH_COLORS,
   HOUSES,
@@ -160,6 +162,24 @@ const TRAIL_INVALID_LINE = '220, 60, 50';
 const TRAIL_FADE_SECONDS = 0.5;
 const TRAIL_WIDTH = 2;
 const TRAIL_MAX_ALPHA = 0.55;
+
+// An earthwork reads as a low ramp of turned soil: a darker brown base wider
+// than the paler top laid over it, rather than the single hairline a stone
+// wall's own preview gets -- see drawEarthworks. Drawn onto the ground layer
+// itself (see Renderer#render) so units painted afterwards, on the layer
+// above it, always stand over it rather than the other way round.
+const EARTHWORK_SIDE = '110, 78, 42';
+const EARTHWORK_TOP = '196, 158, 84';
+const EARTHWORK_OUTER_WIDTH = 8;
+const EARTHWORK_INNER_WIDTH = 4;
+
+// The open battleground mode's own start line, shown only during placement
+// (see Renderer#drawStartLine): a pale dashed rule the player deploys south
+// of, so "near the start line" reads as an actual line rather than a rule
+// only the message toasts explain.
+const START_LINE_COLOR = '236, 226, 196';
+const START_LINE_WIDTH = 2;
+const START_LINE_ALPHA = 0.55;
 
 // A ring under each selected company (see Game#selectGuardsNear), and the
 // brief outward ping marking where an Attack-tool tap just landed.
@@ -602,6 +622,7 @@ export class Renderer {
     this.scene.clearRect(0, 0, width, height);
     this.overlay.clearRect(0, 0, width, height);
     this.drawGround(game);
+    this.drawEarthworks(this.camera.view, game.terrain, game.earthworks);
 
     const view = this.camera.view;
     const items = [];
@@ -637,6 +658,7 @@ export class Renderer {
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
+    this.drawStartLine(view, game);
     this.drawBuildTrail(view, game.terrain);
     this.drawSelection(view, game.guards);
     this.drawMoveOrder(view);
@@ -1443,6 +1465,73 @@ export class Renderer {
         context.globalAlpha = 1;
       }
     }
+    context.restore();
+  }
+
+  /**
+   * The open battleground mode's earthworks: a low ramp of turned soil,
+   * drawn as a wider dark base stroke under a paler, narrower one -- enough
+   * to read as a raised mound without modelling one. Drawn onto the ground
+   * layer itself (see Renderer#render), so every unit painted afterwards,
+   * on the layer above it, stands over it rather than under it.
+   */
+  drawEarthworks(view, terrain, earthworks) {
+    if (!earthworks || earthworks.length === 0) {
+      return;
+    }
+    const context = this.ground;
+    context.save();
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    for (const earthwork of earthworks) {
+      const from = projectPoint(view, earthwork.start.x, earthwork.start.y,
+        terrain.heightAt(earthwork.start.x, earthwork.start.y));
+      const to = projectPoint(view, earthwork.end.x, earthwork.end.y,
+        terrain.heightAt(earthwork.end.x, earthwork.end.y));
+      if (!from || !to) {
+        continue;
+      }
+      context.strokeStyle = `rgb(${EARTHWORK_SIDE})`;
+      context.lineWidth = EARTHWORK_OUTER_WIDTH;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+      context.strokeStyle = `rgb(${EARTHWORK_TOP})`;
+      context.lineWidth = EARTHWORK_INNER_WIDTH;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  /**
+   * The open battleground mode's own start line, shown only while the
+   * placement phase is still open -- a reference the player deploys south
+   * of, not something that means anything once the fight has begun.
+   */
+  drawStartLine(view, game) {
+    if (game.mode !== 'battle' || game.started) {
+      return;
+    }
+    const from = { x: -BATTLE.fieldHalfWidth, y: BATTLE.baselineY };
+    const to = { x: BATTLE.fieldHalfWidth, y: BATTLE.baselineY };
+    const start = projectPoint(view, from.x, from.y, game.terrain.heightAt(from.x, from.y));
+    const end = projectPoint(view, to.x, to.y, game.terrain.heightAt(to.x, to.y));
+    if (!start || !end) {
+      return;
+    }
+    const context = this.overlay;
+    context.save();
+    context.lineWidth = START_LINE_WIDTH;
+    context.setLineDash([10, 8]);
+    context.strokeStyle = `rgba(${START_LINE_COLOR}, ${START_LINE_ALPHA})`;
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
     context.restore();
   }
 

@@ -35,7 +35,7 @@
 		</button>
 
 		<div class="readouts">
-			<div class="readout" title="Treasury">
+			<div class="readout readout-treasury" title="Treasury">
 				<span class="readout-label">Treasury</span>
 				<span id="token0" class="readout-value">$0</span>
 			</div>
@@ -52,15 +52,22 @@
 				<span class="readout-label">Season</span>
 				<span id="season0" class="readout-value">Autumn</span>
 			</div>
+			<div id="battleBudgetReadout" class="readout readout-battle" title="Points left to spend on your line">
+				<span class="readout-label">Budget</span>
+				<span id="battleBudgetValue" class="readout-value">0 / 0</span>
+			</div>
 		</div>
 
 		<div class="viewTools">
+			<button id="startBattleBtn" class="battleStartBtn" title="Close the placement phase and begin the fight">Start Battle</button>
 			<button id="move" class="iconButton" title="Pan the map"><img src="images/moveBtn.png" alt="Move"></button>
 			<button id="zoom" class="iconButton" title="Zoom the view"><img src="images/zoomBtn.png" alt="Zoom"></button>
 			<button id="help" class="iconButton" title="How to play"><img src="images/helpBtn.png" alt="Help"></button>
 			<button id="undo" class="iconButton touchOnly" title="Undo the last section"><img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2014L4%209l5-5'/%3E%3Cpath%20d='M4%209h10.5a5.5%205.5%200%200%201%200%2011H11'/%3E%3C/svg%3E" alt="Undo"></button>
 		</div>
 	</header>
+
+	<nav id="battleDock" class="toolDock battleDock"></nav>
 
 	<nav id="toolDock" class="toolDock">
 		<button id="buildTool" class="toolButton" title="Drag to raise a wall">

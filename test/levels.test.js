@@ -322,12 +322,14 @@ test('every guard a level can field is a real company with a portrait and a mode
   }
 });
 
-test('the Emperor has a real mounted model and a price of nothing, in every level alike', async () => {
+test('the Emperor has a real mounted model and a price of nothing, in every siege level alike', async () => {
   const { compileUnit } = await import('../src/units.js');
   const model = compileUnit('EMPEROR');
   assert.ok(model, 'EMPEROR has no formation to muster');
   assert.equal(model.figures.length, 1, 'a single rider, not a company');
-  for (const level of LEVELS) {
+  // The open battleground mode has no castle at all, so no Emperor to
+  // muster from one -- see Game#dispatchOptions.
+  for (const level of LEVELS.filter((one) => one.mode !== 'battle')) {
     const game = new Game({ random: fixedRandom(), level });
     const option = game.dispatchOptions().find((candidate) => candidate.id === 'EMPEROR');
     assert.ok(option, `${level.id} should offer the Emperor`);
@@ -361,4 +363,13 @@ test('a level with no water refuses nothing for being wet', () => {
   const game = new Game({ random: fixedRandom(), level: dry });
   game.tokens = 100000;
   assert.equal(game.entersWater({ x: -900, y: -900 }, { x: 900, y: 900 }), false);
+});
+
+test('the open battleground mode level is flagged as such, and carries no castle to fall back on', () => {
+  const level = LEVELS.find((one) => one.id === 'open-field');
+  assert.ok(level, 'expected an open battleground level in the catalog');
+  assert.equal(level.mode, 'battle');
+  const game = new Game({ random: fixedRandom(), level });
+  assert.equal(game.mode, 'battle');
+  assert.equal(game.castles.length, 0, 'no castle stands on an open field');
 });

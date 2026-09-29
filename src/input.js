@@ -1,4 +1,6 @@
-import { CAMERA, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
+import {
+  CAMERA, EARTHWORK, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP,
+} from './config.js';
 import { distance } from './geometry.js';
 
 const CURSORS = {
@@ -93,6 +95,10 @@ export class Input {
     // Every point along the Build tool's current drag, in world ground
     // coordinates -- see dragBuild/Renderer#setBuildTrail.
     this.trail = [];
+    // The open battleground mode's placement phase: which roster type a tap
+    // on the field will place next, picked from the battle dock -- see
+    // selectPendingUnit/handleClick. Null the rest of the time.
+    this.pendingUnit = null;
   }
 
   /**
@@ -240,6 +246,29 @@ export class Input {
     this.renderer.releaseBuildTrail();
   }
 
+  /**
+   * The open battleground mode's placement phase: shows the roster dock and
+   * wires each button to pick out what a tap on the field places next (see
+   * handleClick). The Build tool still works throughout, for earthworks.
+   */
+  beginPlacement() {
+    this.resetTool();
+    this.hud.showBattlePrep(this.game, (typeId) => this.selectPendingUnit(typeId));
+    this.hud.showActionHint('Tap a company below, then tap the field to place it');
+  }
+
+  selectPendingUnit(typeId) {
+    this.pendingUnit = this.pendingUnit === typeId ? null : typeId;
+    this.hud.setBattleSelection(this.pendingUnit);
+  }
+
+  /** Start Battle pressed: the roster dock comes down and no more placing happens. */
+  endPlacement() {
+    this.pendingUnit = null;
+    this.hud.hideBattlePrep();
+    this.resetTool();
+  }
+
   /** Show the tier picker above the castle, so an order carries a company. */
   openDispatchMenu() {
     if (this.game.dispatchOptions().length === 0) {
@@ -319,6 +348,12 @@ export class Input {
 
   handleClick(event) {
     if (!this.startsOnMap(event)) {
+      return;
+    }
+    if (this.pendingUnit && this.tool === 'move') {
+      this.trackPointer(event);
+      this.placePendingUnit();
+      this.onChange();
       return;
     }
     if (this.tool === 'upgrade') {
@@ -462,12 +497,33 @@ export class Input {
     this.camera.zoomAt(this.zoomAnchor, 1 + ZOOM_STEP * steps);
   }
 
+  /** Places whatever roster type is pending at the tapped point -- see selectPendingUnit. */
+  placePendingUnit() {
+    const result = this.game.placeGuard(this.pendingUnit, this.pointerOnGround());
+    if (result.placed) {
+      this.hud.updateBattleBudget(this.game);
+      return;
+    }
+    if (result.status === 'poor') {
+      this.hud.showMessage('Not enough points left');
+      return;
+    }
+    if (result.status === 'zone') {
+      this.hud.showMessage('Place your troops south of the start line');
+    }
+  }
+
   /**
    * Traces the drag itself, point by point, rather than reducing it to a
    * straight line -- gold while the latest attempt along it could actually
    * be built, red the moment one could not. See Renderer#setBuildTrail.
+   *
+   * In the open battleground mode this lays earthworks instead of stone --
+   * shorter ones, since a ramp of dirt is a far smaller undertaking than a
+   * wall -- see EARTHWORK.
    */
   dragBuild() {
+    const bounds = this.game.mode === 'battle' ? EARTHWORK : WALL;
     const target = this.pointerOnGround();
     if (!this.chainPoint) {
       this.chainPoint = target;
@@ -477,12 +533,14 @@ export class Input {
     }
     this.trail.push(target);
     const span = distance(this.chainPoint, target);
-    if (span <= WALL.minLength || span >= WALL.maxLength) {
+    if (span <= bounds.minLength || span >= bounds.maxLength) {
       this.renderer.setBuildTrail(this.trail, true);
       return;
     }
 
-    const result = this.game.buildWall(this.chainPoint, target);
+    const result = this.game.mode === 'battle'
+      ? this.game.buildEarthwork(this.chainPoint, target)
+      : this.game.buildWall(this.chainPoint, target);
     const valid = CHAIN_CONTINUES.has(result.status);
     this.renderer.setBuildTrail(this.trail, valid);
     if (valid) {
@@ -570,7 +628,12 @@ export class Input {
 
   /** Take back the last section laid -- Ctrl+Z, or the undo button on a touchscreen. */
   undo() {
-    this.game.undoLastWall();
+    if (this.game.mode === 'battle') {
+      this.game.undoLastPlacement();
+      this.hud.updateBattleBudget(this.game);
+    } else {
+      this.game.undoLastWall();
+    }
     this.onChange();
   }
 }

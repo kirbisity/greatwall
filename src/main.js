@@ -96,6 +96,7 @@ class App {
     bind('repairTool', () => this.input.selectTool('repair'));
     bind('fortifyTool', () => this.input.selectTool('fortify'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
+    bind('startBattleBtn', () => this.beginBattle());
     bind('attackTool', (event) => {
       // Without this, the same click bubbles to the map's own click handler,
       // which reads the tool as already 'attack' and fires an order at
@@ -158,7 +159,7 @@ class App {
       return;
     }
     this.hud.closeMenu();
-    this.resume();
+    this.enterField();
   }
 
   restart() {
@@ -166,6 +167,19 @@ class App {
     this.newGame();
     this.hud.markStarted();
     this.hud.closeMenu();
+    this.enterField();
+  }
+
+  /**
+   * Resumes play -- except the open battleground mode gets its placement
+   * phase first (see beginPlacement), the same whether this is a first
+   * Start, a Restart, or picking a fresh level straight off the menu.
+   */
+  enterField() {
+    if (this.game.mode === 'battle' && !this.game.started) {
+      this.input.beginPlacement();
+      return;
+    }
     this.resume();
   }
 
@@ -205,10 +219,17 @@ class App {
       this.needsDraw = false;
       this.draw();
     }
-    // The city keeps burning on screen for BREACH.collapseSeconds before the
-    // game actually ends — game.step() freezes the field the moment it falls,
-    // but drawing carries on so the fire and the blackening play out.
-    if (this.running && this.game.breachComplete) {
+    if (this.running && this.game.mode === 'battle') {
+      // No slow breach to wait out here -- the line breaks or it holds.
+      if (this.game.isDefeated) {
+        this.battleOver(false);
+      } else if (this.game.isVictorious) {
+        this.battleOver(true);
+      }
+    } else if (this.running && this.game.breachComplete) {
+      // The city keeps burning on screen for BREACH.collapseSeconds before
+      // the game actually ends — game.step() freezes the field the moment
+      // it falls, but drawing carries on so the fire and blackening play out.
       this.gameOver();
     }
     window.requestAnimationFrame(() => this.frame());
@@ -219,6 +240,21 @@ class App {
     this.needsNewGame = true;
     this.bestScore = Math.max(this.bestScore, this.game.seconds);
     this.hud.showGameOver(this.game.seconds, this.bestScore);
+  }
+
+  battleOver(won) {
+    this.pause();
+    this.needsNewGame = true;
+    this.hud.showBattleResult(won, this.game.seconds);
+  }
+
+  /** Start Battle: closes the placement phase and lets the line advance. */
+  beginBattle() {
+    if (!this.game.startBattle()) {
+      return;
+    }
+    this.input.endPlacement();
+    this.resume();
   }
 
   openMenu() {
@@ -236,7 +272,7 @@ class App {
 
   closeHelp() {
     this.hud.closeHelp();
-    this.resume();
+    this.enterField();
   }
 }
 

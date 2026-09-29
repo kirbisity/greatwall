@@ -5,6 +5,7 @@ import {
   closestPointOnSquare,
   distance,
   distanceSquared,
+  distanceToSegment,
   distanceToSquare,
   isWithinSegmentBand,
   pointToLineDistance,
@@ -19,9 +20,11 @@ import { LEVELS } from './levels.js';
 import { BUILDINGS } from './buildings/index.js';
 import {
   AVOIDANCE,
+  BATTLE,
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
   FEAR,
   FPS,
@@ -135,6 +138,10 @@ export class Game {
    */
   loadLevel(level) {
     this.level = level;
+    // The one flag that turns the whole game from a siege into the open
+    // battleground mode -- see restart, and every `this.mode === 'battle'`
+    // branch below it.
+    this.mode = level.mode === 'battle' ? 'battle' : 'siege';
     // A level may raise its own buildings and field its own companies; what
     // it leaves out it inherits (see levels.js).
     this.buildings = { ...BUILDINGS, ...level.buildings };
@@ -175,9 +182,17 @@ export class Game {
     this.emperor = null;
     this.emperorMustered = false;
     this.walls = [];
+    // The Build tool's own low ramps in the open battleground mode -- not
+    // walls at all, so they live apart from this.walls: see buildEarthwork.
+    this.earthworks = [];
     this.houses = [];
     this.houseSpawnCountdown = HOUSES.spawnIntervalSeconds;
-    this.castles = [new Castle(STARTING_CASTLE_TYPE, { x: 0, y: 0 }, { types: this.castleTypes })];
+    // No castle at all in the open battleground mode -- see spawnBattleLine
+    // for how the enemy is drawn up instead, and placeGuard for how the
+    // player fields companies without one.
+    this.castles = this.mode === 'battle'
+      ? []
+      : [new Castle(STARTING_CASTLE_TYPE, { x: 0, y: 0 }, { types: this.castleTypes })];
     this.levelUnderCities();
     this.raiders = [];
     this.tokens = STARTING_TOKENS;
@@ -187,6 +202,17 @@ export class Game {
     // Set once the last castle falls; counts up to BREACH.collapseSeconds
     // while the city burns, before the game actually ends.
     this.breachSeconds = null;
+    // Placement phase state for the open battleground mode: budget left to
+    // spend, and a log of what it went on so Undo can hand it back -- see
+    // placeGuard/buildEarthwork/undoLastPlacement. `started` marks the
+    // moment Start Battle is pressed: the field is drawn up before then,
+    // but nothing moves and nothing more may be placed after.
+    if (this.mode === 'battle') {
+      this.battleBudget = BATTLE.budget;
+      this.placementLog = [];
+      this.started = false;
+      this.spawnBattleLine();
+    }
   }
 
   /**
@@ -233,7 +259,15 @@ export class Game {
   paceOn(company) {
     const { x, y } = company.position;
     const throughWoods = 1 - this.terrain.forestAt(x, y) * TERRAIN.forestDrag;
-    return throughWoods * this.climbPace(company);
+    const throughEarthworks = this.onEarthwork(company.position) ? EARTHWORK.slowFactor : 1;
+    return throughWoods * throughEarthworks * this.climbPace(company);
+  }
+
+  /** Whether a point stands astride one of the open battleground's earthworks. */
+  onEarthwork(position) {
+    return this.earthworks.some((earthwork) => (
+      distanceToSegment(position, earthwork.start, earthwork.end) <= EARTHWORK.thickness
+    ));
   }
 
   /**
@@ -261,7 +295,18 @@ export class Game {
   }
 
   get isDefeated() {
+    if (this.mode === 'battle') {
+      // Instant, not a slow breach -- there is no city left burning to
+      // wait on. Only once the battle has actually started: an empty field
+      // before Start Battle is pressed is not a loss, it is an empty field.
+      return this.started && this.guards.length === 0;
+    }
     return this.castles.some((castle) => castle.health < 0) || (this.emperor !== null && !this.emperor.isAlive);
+  }
+
+  /** The open battleground mode's own win condition -- sieges never end. */
+  get isVictorious() {
+    return this.mode === 'battle' && this.started && this.raiders.length === 0;
   }
 
   /** How far through its burning the city is, 0 to 1. */
@@ -392,6 +437,11 @@ export class Game {
   }
 
   onSecondElapsed() {
+    // No economy, no seasons, no trickle of fresh raiders -- the whole
+    // enemy line was drawn up once, at Start Battle, by spawnBattleLine.
+    if (this.mode === 'battle') {
+      return;
+    }
     if (this.seconds % INCOME_INTERVAL_SECONDS === 1) {
       this.showHints();
       this.collectIncome();
@@ -538,6 +588,46 @@ export class Game {
   }
 
   /**
+   * Draw up the enemy line for the open battleground mode: infantry across
+   * the centre, up front, cavalry held behind on both flanks. Randomised a
+   * little every game -- how many of each, and a jitter on every position --
+   * so the line is recognisable but never quite the same shape twice.
+   */
+  spawnBattleLine() {
+    const [infantryMin, infantryMax] = BATTLE.infantryCountRange;
+    const infantryCount = infantryMin + Math.floor(this.random() * (infantryMax - infantryMin + 1));
+    for (let index = 0; index < infantryCount; index += 1) {
+      const spread = (index - (infantryCount - 1) / 2) * BATTLE.infantrySpacing;
+      this.spawnBattleCompany(
+        BATTLE.infantryTypes[Math.floor(this.random() * BATTLE.infantryTypes.length)],
+        spread,
+        BATTLE.enemyBaselineY,
+      );
+    }
+    const [cavalryMin, cavalryMax] = BATTLE.cavalryPerSideRange;
+    const cavalryPerSide = cavalryMin + Math.floor(this.random() * (cavalryMax - cavalryMin + 1));
+    for (const side of [-1, 1]) {
+      for (let index = 0; index < cavalryPerSide; index += 1) {
+        const flankX = side * (BATTLE.cavalryFlankOffset + index * BATTLE.cavalrySpacing);
+        this.spawnBattleCompany(
+          BATTLE.cavalryTypes[Math.floor(this.random() * BATTLE.cavalryTypes.length)],
+          flankX,
+          BATTLE.enemyBaselineY + BATTLE.cavalryDepthOffset,
+        );
+      }
+    }
+  }
+
+  /** One company of the enemy line, jittered off its formation slot and aimed south. */
+  spawnBattleCompany(typeId, x, y) {
+    const jitter = () => (this.random() - 0.5) * BATTLE.formationJitter;
+    const position = { x: Math.trunc(x + jitter()), y: Math.trunc(y + jitter()) };
+    const raider = new Raider(typeId, position);
+    raider.aimAt({ x: position.x, y: -BATTLE.fieldHalfDepth });
+    this.raiders.push(raider);
+  }
+
+  /**
    * Wall layout drives the route graph. Sections are solid until destroyed, so
    * the only thing that opens a new way through is one of them falling.
    */
@@ -618,6 +708,12 @@ export class Game {
    * see. A negative FEAR.weight draws them in instead.
    */
   raiderDestination(raider, castle) {
+    // No city to make for, and no reason to shy off from a company it can
+    // see either -- the open battleground mode is a fight both sides came
+    // looking for, so the whole line simply charges its own lane south.
+    if (this.mode === 'battle') {
+      return { x: raider.position.x, y: -BATTLE.fieldHalfDepth };
+    }
     const city = castle ? castle.position : { x: 0, y: 0 };
     if (FEAR.weight === 0 || this.guards.length === 0) {
       return city;
@@ -733,6 +829,95 @@ export class Game {
     this.emperorMustered = true;
     this.onEffect('attack', home.position);
     return { sent: true, guard: emperor };
+  }
+
+  /** This mode's roster entry for a type id, or null if it is not on offer. */
+  battleRosterEntry(typeId) {
+    return BATTLE.roster.find((entry) => entry.id === typeId) ?? null;
+  }
+
+  /** Whether a point falls inside the player's own deployment band, south of the start line. */
+  withinDeploymentZone(point) {
+    return Math.abs(point.x) <= BATTLE.fieldHalfWidth
+      && point.y <= BATTLE.baselineY
+      && point.y >= BATTLE.baselineY - BATTLE.placementDepth;
+  }
+
+  /**
+   * Field a company of the open battleground mode's own roster, spending
+   * from the placement budget rather than the treasury -- there is no
+   * income here to spend it out of. Stands exactly where placed and holds
+   * that ground on its own, the same autonomous "hunt anything that strays
+   * near" behaviour any mustered guard already has (see guardDestination) --
+   * only the Emperor opts out of it.
+   */
+  placeGuard(typeId, point) {
+    if (this.mode !== 'battle' || this.started) {
+      return { placed: false, status: 'blocked' };
+    }
+    const entry = this.battleRosterEntry(typeId);
+    if (!entry) {
+      return { placed: false, status: 'unknown' };
+    }
+    if (this.battleBudget < entry.cost) {
+      return { placed: false, status: 'poor' };
+    }
+    if (!this.withinDeploymentZone(point)) {
+      return { placed: false, status: 'zone' };
+    }
+    this.battleBudget -= entry.cost;
+    const guard = new Guard(typeId, point);
+    this.guards.push(guard);
+    this.placementLog.push({ type: 'guard', guard, cost: entry.cost });
+    this.onEffect('attack', point);
+    return { placed: true, guard };
+  }
+
+  /**
+   * Lay one of the open battleground mode's own low earthworks: a slow, not
+   * a barrier (see paceOn/onEarthwork), so it carries none of buildWall's
+   * cost, snapping or city/water checks -- there is neither a city nor a
+   * treasury here, and nothing routes around one regardless.
+   */
+  buildEarthwork(from, to) {
+    if (this.mode !== 'battle' || this.started) {
+      return { status: 'blocked' };
+    }
+    const start = { x: Math.trunc(from.x), y: Math.trunc(from.y) };
+    const end = { x: Math.trunc(to.x), y: Math.trunc(to.y) };
+    const length = distance(start, end);
+    if (length <= EARTHWORK.minLength || length >= EARTHWORK.maxLength) {
+      return { status: 'short', start, end };
+    }
+    const earthwork = { start, end };
+    this.earthworks.push(earthwork);
+    this.placementLog.push({ type: 'earthwork', earthwork });
+    this.onEffect('build', wallMidpoint(earthwork));
+    return { status: 'built', start, end };
+  }
+
+  /** Undo the last placement -- a company handed its points back, or an earthwork torn up. */
+  undoLastPlacement() {
+    const entry = this.placementLog.pop();
+    if (!entry) {
+      return false;
+    }
+    if (entry.type === 'guard') {
+      this.guards = this.guards.filter((guard) => guard !== entry.guard);
+      this.battleBudget += entry.cost;
+    } else {
+      this.earthworks = this.earthworks.filter((earthwork) => earthwork !== entry.earthwork);
+    }
+    return true;
+  }
+
+  /** Close the placement phase: the line drawn up so far is what fights. */
+  startBattle() {
+    if (this.mode !== 'battle' || this.started) {
+      return false;
+    }
+    this.started = true;
+    return true;
   }
 
   /**

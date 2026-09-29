@@ -1,4 +1,6 @@
-import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL, SEASONS } from './config.js';
+import {
+  AUDIO_VOLUME_STEP, BATTLE, GUARD_TYPES, INITIAL_SOUND_LEVEL, SEASONS,
+} from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
 import { Sfx } from './sfx.js';
 
@@ -101,6 +103,14 @@ export class Hud {
       element('dispatchOption1'),
       element('dispatchOption2'),
     ];
+    // The open battleground mode's own dock: a roster of companies to place,
+    // a budget readout, and the button that closes placement and starts the
+    // fight -- see showBattlePrep/hideBattlePrep.
+    this.battleDock = element('battleDock');
+    this.battleBudgetReadout = element('battleBudgetReadout');
+    this.battleBudgetValue = element('battleBudgetValue');
+    this.startBattleButton = element('startBattleBtn');
+    this.siegeOnlyToolIds = ['upgradeTool', 'fortifyTool', 'repairTool', 'destroyTool'];
 
     this.sfx = new Sfx();
     this.soundLevel = INITIAL_SOUND_LEVEL;
@@ -163,11 +173,43 @@ export class Hud {
       this.shownSeason = game.season;
       this.seasonLabel.innerText = SEASONS[game.season % SEASONS.length].name;
     }
-    // Greyed rather than hidden or blocked: a poor treasury is a reason to
-    // wait, not a reason the tool should stop working the moment it can.
-    this.buildToolButton.classList.toggle('is-disabled', !game.canAffordToBuild);
-    this.attackToolButton.classList.toggle('is-disabled', !game.canAffordToAttack);
-    this.upgradeToolButton.classList.toggle('is-disabled', !game.canAffordToUpgrade);
+    if (game.mode === 'battle') {
+      // Nothing here costs coin, so nothing here greys out for want of it.
+      this.buildToolButton.classList.remove('is-disabled');
+      this.attackToolButton.classList.remove('is-disabled');
+    } else {
+      // Greyed rather than hidden or blocked: a poor treasury is a reason to
+      // wait, not a reason the tool should stop working the moment it can.
+      this.buildToolButton.classList.toggle('is-disabled', !game.canAffordToBuild);
+      this.attackToolButton.classList.toggle('is-disabled', !game.canAffordToAttack);
+      this.upgradeToolButton.classList.toggle('is-disabled', !game.canAffordToUpgrade);
+    }
+    this.applyMode(game);
+  }
+
+  /**
+   * The open battleground mode swaps out a good part of the chrome: no
+   * treasury or income or season to show, no upgrade/fortify/repair/raze
+   * tools (there is no castle and no stone to work), the Build tool reads
+   * as earthworks instead of walls, and the Attack tool -- for commanding a
+   * placed line -- only makes sense once the placement phase is over.
+   */
+  applyMode(game) {
+    const isBattle = game.mode === 'battle';
+    document.body?.classList?.toggle('is-battleMode', isBattle);
+    for (const id of this.siegeOnlyToolIds) {
+      const button = document.getElementById(id);
+      if (button) {
+        button.style.display = isBattle ? 'none' : '';
+      }
+    }
+    if (!isBattle) {
+      this.buildToolButton.style.display = '';
+      this.attackToolButton.style.display = '';
+      return;
+    }
+    this.buildToolButton.style.display = game.started ? 'none' : '';
+    this.attackToolButton.style.display = game.started ? '' : 'none';
   }
 
   /** Light up the button for the active tool and dim the rest. */
@@ -402,6 +444,58 @@ export class Hud {
   showGameOver(score, best) {
     this.startButton.innerText = 'Start';
     this.menuInfo.innerText = `Score: ${score}\nBest: ${best}`;
+    this.openMenu();
+  }
+
+  /**
+   * The open battleground mode's own placement dock: one button per roster
+   * entry, each carrying its own point cost, plus the budget readout and
+   * the Start Battle button. `onPick` is Input's own selectPendingUnit, so
+   * a tap here only ever picks what the next tap on the field will place.
+   */
+  showBattlePrep(game, onPick) {
+    this.battleDock.replaceChildren();
+    for (const entry of BATTLE.roster) {
+      const type = GUARD_TYPES[entry.id];
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'toolButton battleUnitButton';
+      button.dataset.unit = entry.id;
+      const name = document.createElement('span');
+      name.className = 'toolName';
+      name.innerText = `${type?.name ?? entry.id}\n${entry.cost}pt`;
+      button.append(name);
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        onPick(entry.id);
+      });
+      this.battleDock.append(button);
+    }
+    this.battleDock.style.display = 'flex';
+    this.startBattleButton.style.display = 'inline-flex';
+    this.updateBattleBudget(game);
+  }
+
+  hideBattlePrep() {
+    this.battleDock.style.display = 'none';
+    this.startBattleButton.style.display = 'none';
+  }
+
+  setBattleSelection(typeId) {
+    this.battleDock.querySelectorAll('.battleUnitButton').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.unit === typeId);
+    });
+  }
+
+  updateBattleBudget(game) {
+    this.battleBudgetValue.innerText = `${Math.max(0, Math.trunc(game.battleBudget))} / ${BATTLE.budget}`;
+  }
+
+  showBattleResult(won, seconds) {
+    this.startButton.innerText = 'Start';
+    this.menuInfo.innerText = won
+      ? `Victory! The enemy line broke after ${seconds}s.`
+      : 'Defeat. Your line was overrun.';
     this.openMenu();
   }
 

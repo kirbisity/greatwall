@@ -390,6 +390,61 @@ export const CASTLE_GUARD_TIERS = {
 /** How much stronger the Emperor's own base stats grow at each castle tier. */
 export const EMPEROR_TIER_MULTIPLIER = { CC0: 1, CC1: 1.3, CC2: 1.6 };
 
+/**
+ * The open battleground mode: no castle, no economy. The player spends a
+ * fixed budget of points placing companies south of the start line before
+ * clicking Start, at which point the enemy line -- already drawn up to the
+ * north, freshly randomised every time -- advances. See Game#restart,
+ * Game#placeGuard and Game#spawnBattleLine.
+ */
+export const BATTLE = {
+  budget: 20,
+  // Reuses the imperial guard tiers rather than inventing a parallel unit
+  // list -- same stats, same avatar, same 3D model, just priced in points
+  // instead of coin, since there is no income to spend coin out of.
+  roster: [
+    { id: 'IG_LIGHT', cost: 3 },
+    { id: 'IG0', cost: 5 },
+    { id: 'IG_HEAVY', cost: 8 },
+  ],
+  // North is +y (see Game#spawnPoint's own bearing convention); the player
+  // deploys south of the start line, the enemy is drawn up north of it.
+  fieldHalfWidth: 220,
+  baselineY: -60,
+  placementDepth: 90,
+  enemyBaselineY: 90,
+  // How far past the enemy's own baseline the field runs -- also how deep
+  // into the player's own ground a raider's marching order aims, so it
+  // always has ground to charge across rather than stopping at y 0.
+  fieldHalfDepth: 260,
+  infantryCountRange: [6, 9],
+  infantryTypes: ['IR0', 'IR0', 'IR1'],
+  infantrySpacing: 24,
+  cavalryPerSideRange: [1, 3],
+  cavalryTypes: ['CR0', 'CR1'],
+  cavalrySpacing: 22,
+  cavalryFlankOffset: 90,
+  cavalryDepthOffset: 40,
+  // Random jitter applied to every spawn point, so the line never lines up
+  // in a perfect row -- see Game#spawnBattleLine.
+  formationJitter: 18,
+};
+
+/**
+ * Earthworks: the low ramps the Build tool throws up in the open battleground
+ * mode instead of stone. They are not barriers at all -- nothing routes
+ * around one, and nothing may batter it -- they only slow whatever crosses
+ * them (see Game#paceOn), which is what keeps them a tactic rather than a
+ * wall by another name.
+ */
+export const EARTHWORK = {
+  minLength: 12,
+  maxLength: 70,
+  // How close a company must stand to a run's own line to be slowed by it.
+  thickness: 8,
+  slowFactor: 0.5,
+};
+
 // One row per season; the last row repeats once the seasons run past it.
 export const SEASON_RAIDER_MIX = [
   ['CR0', 'CR0', 'IR0', 'IR0', 'IR0'],

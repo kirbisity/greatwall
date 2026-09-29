@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Castle, Raider, Wall } from '../src/entities.js';
+import { LEVELS } from '../src/levels.js';
 import {
+  BATTLE,
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
   FPS,
   GUARD_TYPES,
@@ -14,6 +17,8 @@ import {
   STARTING_TOKENS,
   WALL,
 } from '../src/config.js';
+
+const BATTLE_LEVEL = LEVELS.find((level) => level.mode === 'battle');
 
 function fixedRandom(value = 0) {
   return () => value;
@@ -600,4 +605,140 @@ test('advanceRebuild moves through demolish then build, then clears itself', () 
   stepSeconds(game, buildSeconds);
   assert.equal(castle.rebuild, null, 'construction finished');
   assert.equal(castle.effectiveType.maxHealth, castle.type.maxHealth, 'now on the new stats');
+});
+
+// --- the open battleground mode --------------------------------------------
+
+test('the open battleground mode starts with no castle, a placement budget, and the enemy line already drawn up', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.equal(game.mode, 'battle');
+  assert.equal(game.castles.length, 0, 'no castle stands on an open field');
+  assert.equal(game.started, false);
+  assert.equal(game.battleBudget, BATTLE.budget);
+  assert.ok(game.raiders.length > 0, 'the enemy line is drawn up before Start Battle, not spawned into it');
+  assert.equal(game.guards.length, 0, 'the player has placed nothing yet');
+});
+
+test('the enemy line fields infantry across the centre, up front, and cavalry behind on the flanks', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const infantry = game.raiders.filter((raider) => raider.typeId.startsWith('IR'));
+  const cavalry = game.raiders.filter((raider) => raider.typeId.startsWith('CR'));
+  assert.ok(infantry.length >= BATTLE.infantryCountRange[0], 'a real line, not a token few');
+  assert.equal(cavalry.length, 2 * BATTLE.cavalryPerSideRange[0], 'one cluster per flank');
+  const infantryMaxAbsX = Math.max(...infantry.map((raider) => Math.abs(raider.position.x)));
+  const infantryMaxY = Math.max(...infantry.map((raider) => raider.position.y));
+  for (const raider of cavalry) {
+    assert.ok(Math.abs(raider.position.x) > infantryMaxAbsX, 'cavalry stands wider than the infantry line');
+    assert.ok(raider.position.y > infantryMaxY, 'cavalry stands behind the infantry line');
+  }
+});
+
+test('placing a company spends its cost from the budget and stands it exactly where tapped', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const point = { x: 20, y: BATTLE.baselineY - 10 };
+  const result = game.placeGuard('IG_LIGHT', point);
+  assert.equal(result.placed, true);
+  assert.equal(game.guards.length, 1);
+  assert.deepEqual(game.guards[0].position, point);
+  const entry = BATTLE.roster.find((one) => one.id === 'IG_LIGHT');
+  assert.equal(game.battleBudget, BATTLE.budget - entry.cost);
+});
+
+test('a company too dear for what is left is refused, and the budget is untouched', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.battleBudget = 1;
+  const result = game.placeGuard('IG_HEAVY', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, false);
+  assert.equal(result.status, 'poor');
+  assert.equal(game.guards.length, 0);
+  assert.equal(game.battleBudget, 1);
+});
+
+test('a company placed north of the start line, or off the sides of the field, is refused', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const north = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY + 10 });
+  assert.equal(north.status, 'zone', 'past the start line is the enemy\'s ground, not a deployment zone');
+  const wide = game.placeGuard('IG_LIGHT', { x: BATTLE.fieldHalfWidth + 50, y: BATTLE.baselineY - 10 });
+  assert.equal(wide.status, 'zone', 'off the side of the field is not a deployment zone either');
+  assert.equal(game.guards.length, 0);
+  assert.equal(game.battleBudget, BATTLE.budget, 'a refused placement never spends anything');
+});
+
+test('nothing may be placed once the battle has started', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.startBattle();
+  const result = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, false);
+  assert.equal(result.status, 'blocked');
+});
+
+test('an earthwork costs nothing, but only stands within its own length band', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const start = { x: -30, y: BATTLE.baselineY - 20 };
+  const tooShort = game.buildEarthwork(start, { x: start.x + 2, y: start.y });
+  assert.equal(tooShort.status, 'short');
+  assert.equal(game.earthworks.length, 0);
+  const end = { x: start.x + 30, y: start.y };
+  const built = game.buildEarthwork(start, end);
+  assert.equal(built.status, 'built');
+  assert.equal(game.earthworks.length, 1);
+  assert.equal(game.battleBudget, BATTLE.budget, 'earthworks are free -- there is no treasury to spend');
+});
+
+test('undo hands a placed company\'s points back, and tears up an earthwork the same way', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('IG0', { x: 0, y: BATTLE.baselineY - 10 });
+  const afterPlacing = game.battleBudget;
+  assert.equal(game.undoLastPlacement(), true);
+  assert.equal(game.guards.length, 0);
+  assert.equal(game.battleBudget, BATTLE.budget);
+  assert.ok(game.battleBudget > afterPlacing);
+
+  game.buildEarthwork({ x: -30, y: BATTLE.baselineY - 20 }, { x: 0, y: BATTLE.baselineY - 20 });
+  assert.equal(game.undoLastPlacement(), true);
+  assert.equal(game.earthworks.length, 0);
+
+  assert.equal(game.undoLastPlacement(), false, 'nothing left to take back');
+});
+
+test('an earthwork slows whatever crosses it, but is never a barrier to route around', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.buildEarthwork({ x: -25, y: 0 }, { x: 25, y: 0 });
+  const onIt = { position: { x: 0, y: 0 }, velocity: { x: 0, y: 1 } };
+  const clearOfIt = { position: { x: 0, y: 200 }, velocity: { x: 0, y: 1 } };
+  assert.ok(game.paceOn(onIt) < game.paceOn(clearOfIt), 'standing astride it is slower than clear ground');
+  assert.equal(game.onEarthwork(onIt.position), true);
+  assert.equal(game.onEarthwork(clearOfIt.position), false);
+  // Not a wall: it never enters the wall list the route graph is built from.
+  assert.equal(game.navigation().barriers.length, 0);
+});
+
+test('isDefeated waits for the battle to start, then falls the moment the last company does', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.equal(game.isDefeated, false, 'an empty field before Start Battle is not a loss');
+  game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  assert.equal(game.isDefeated, false, 'the one company placed is still standing');
+  game.guards[0].health = -1;
+  game.guards = game.guards.filter((guard) => guard.isAlive);
+  assert.equal(game.isDefeated, true, 'the last company fell');
+});
+
+test('isVictorious fires once every raider on the field is down, and never before the battle starts', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.raiders = [];
+  assert.equal(game.isVictorious, false, 'a field with nothing on it yet is not a win');
+  game.startBattle();
+  assert.equal(game.isVictorious, true, 'nothing left standing against an already-started battle');
+});
+
+test('the open battleground mode never touches the treasury, seasons or the raider spawn timer', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.startBattle();
+  const tokensBefore = game.tokens;
+  const raidersBefore = game.raiders.length;
+  stepSeconds(game, RAIDER_SPAWN_INTERVAL_SECONDS * 3);
+  assert.equal(game.tokens, tokensBefore, 'no income to collect');
+  assert.equal(game.season, 0, 'no season to turn');
+  assert.equal(game.raiders.length, raidersBefore, 'the line was drawn up once, not trickled in');
 });

@@ -60,6 +60,7 @@ export const LEVELS = [
     id: 'northern-march',
     name: 'The Northern March',
     blurb: 'Raiders from the north. A river guards your back.',
+    music: 'sounds/level_1.mp3',
     // Lower hills than the default: this is river country, not high ground.
     // A true wood surrounds the city -- tree spacing tight and the noise's
     // own threshold loosened well past the default, so cover reads as
@@ -112,6 +113,7 @@ export const LEVELS = [
     id: 'dust-sea',
     name: 'The Dust Sea',
     blurb: 'A desert siege. Raiders from every side.',
+    music: 'sounds/level_2.mp3',
     land: DESERT,
     // A standing sandstorm rather than an ordinary dusty haze: thicker than
     // any season alone gets, starting well short of the ordinary distance
@@ -140,6 +142,9 @@ export const LEVELS = [
     id: 'shiro-island',
     name: 'The Island of the Keep',
     blurb: 'An island siege. No safe side at all.',
+    // Flies over the keep in place of FLAG's own default banner.
+    flag: 'images/flags/flag_japan.png',
+    music: 'sounds/level_3.mp3',
     // The same green country as the northern march, but only as much of it
     // as fits between the beaches -- so the hills are smaller in kind, not
     // just fewer.

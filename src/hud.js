@@ -144,8 +144,15 @@ export class Hud {
 
   // --- overlays -----------------------------------------------------------
 
+  /**
+   * The single choke point for landing back on the menu -- a deliberate
+   * Menu click, and Game Over's own call to it (see showGameOver) both
+   * come through here, so stopping the level's music here rather than at
+   * each call site can't be forgotten by a future one.
+   */
   openMenu() {
     this.menu.style.height = '100%';
+    this.stopMusic();
   }
 
   closeMenu() {
@@ -277,9 +284,31 @@ export class Hud {
 
   // --- audio --------------------------------------------------------------
 
+  /**
+   * Swap in a level's own track and start it from the top -- called on
+   * every entry into a level (a fresh start or a restart), never left to
+   * an opt-in button, so music is on by default rather than something a
+   * player has to go find in Settings.
+   */
+  playLevelMusic(src) {
+    if (!src) {
+      this.stopMusic();
+      return;
+    }
+    this.music.src = src;
+    this.music.currentTime = 0;
+    this.playMusic();
+  }
+
+  /** Leaves the level: the music leaves with it. */
+  stopMusic() {
+    this.music.pause();
+    this.music.currentTime = 0;
+  }
+
   playMusic() {
     this.music.play().catch((error) => {
-      console.warn('Background music blocked until the page is clicked:', error.message);
+      console.warn('Music blocked until the page is clicked:', error.message);
     });
   }
 

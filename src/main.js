@@ -154,6 +154,7 @@ class App {
     this.game.loadLevel(LEVELS[this.chosenLevel]);
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
+    this.hud.playLevelMusic(this.game.level.music);
     this.draw();
   }
 

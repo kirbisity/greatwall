@@ -245,7 +245,7 @@ class App {
   battleOver(won) {
     this.pause();
     this.needsNewGame = true;
-    this.hud.showBattleResult(won, this.game.seconds);
+    this.hud.showBattleResult(won, this.game.seconds, this.game.battleStats);
   }
 
   /** Start Battle: closes the placement phase and lets the line advance. */

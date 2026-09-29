@@ -164,12 +164,14 @@ export const AVOIDANCE = {
 /** Melee: what happens when the two sides meet. */
 export const MELEE = {
   // Companies lock together once their centres are this close.
-  engageDistance: 32,
+  engageDistance: 26,
   // Once locked they close right up and interleave, rather than trading blows
   // at arm's length. This is the separation they settle at.
   lockedGap: 4,
-  // How fast they close that last distance, in world units a second.
-  closeRate: 26,
+  // How fast they close that last distance, in world units a second -- a
+  // little brisker than a marching pace (most companies march at 5-10, the
+  // fastest cavalry nearer 20), not a lurch that outpaces even a horse.
+  closeRate: 12,
   // Damage is scaled so a typical pairing resolves in about five seconds.
   damageRate: 1.7,
   // A fight that has not resolved by now breaks off, so nothing locks forever.
@@ -398,7 +400,7 @@ export const EMPEROR_TIER_MULTIPLIER = { CC0: 1, CC1: 1.3, CC2: 1.6 };
  * Game#placeGuard and Game#spawnBattleLine.
  */
 export const BATTLE = {
-  budget: 20,
+  budget: 32,
   // Reuses the imperial guard tiers rather than inventing a parallel unit
   // list -- same stats, same avatar, same 3D model, just priced in points
   // instead of coin, since there is no income to spend coin out of.

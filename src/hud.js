@@ -61,6 +61,22 @@ export function clampIntoView(box, view, margin) {
 // How far the tier picker keeps from the edges of the screen.
 const MENU_MARGIN = 8;
 
+/**
+ * Kills, losses, and each side's strength actually cut down, for the open
+ * battleground mode's own end-of-round screen -- see Game#trackBattleLosses
+ * for how "strength" weighs a company's own size into the number, so
+ * felling a company of eight outweighs a lone rider losing the same
+ * fraction of its own health.
+ */
+export function formatBattleStats(stats) {
+  const kd = stats.deaths === 0
+    ? (stats.kills > 0 ? '∞' : '0.00')
+    : (stats.kills / stats.deaths).toFixed(2);
+  return `Kills ${stats.kills} · Losses ${stats.deaths} · K/D ${kd}\n`
+    + `Enemy strength cut down: ${Math.round(stats.enemyLoss)}\n`
+    + `Your strength lost: ${Math.round(stats.playerLoss)}`;
+}
+
 function element(id) {
   const node = document.getElementById(id);
   if (!node) {
@@ -491,11 +507,12 @@ export class Hud {
     this.battleBudgetValue.innerText = `${Math.max(0, Math.trunc(game.battleBudget))} / ${BATTLE.budget}`;
   }
 
-  showBattleResult(won, seconds) {
+  showBattleResult(won, seconds, stats) {
     this.startButton.innerText = 'Start';
-    this.menuInfo.innerText = won
+    const headline = won
       ? `Victory! The enemy line broke after ${seconds}s.`
       : 'Defeat. Your line was overrun.';
+    this.menuInfo.innerText = `${headline}\n${formatBattleStats(stats)}`;
     this.openMenu();
   }
 

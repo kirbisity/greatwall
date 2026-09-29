@@ -374,3 +374,20 @@ export function compileUnit(typeId) {
   });
   return { figures, geometry: figure, radius: radius + 1.5 };
 }
+
+// How many individual figures a type's own formation musters, cached per
+// type id rather than recomputed -- see unitSize. compileUnit builds the
+// full figure geometry, which is more than a headcount needs every frame.
+const sizeCache = new Map();
+
+/** How many figures muster in one company of this type -- see Game's battle stats. */
+export function unitSize(typeId) {
+  const cached = sizeCache.get(typeId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const build = FORMATIONS[typeId];
+  const size = build ? build().places.length : 1;
+  sizeCache.set(typeId, size);
+  return size;
+}

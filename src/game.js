@@ -16,6 +16,7 @@ import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
 import { lockEngagements, resolveMelee } from './melee.js';
 import { Terrain } from './terrain.js';
+import { unitSize } from './units.js';
 import { LEVELS } from './levels.js';
 import { BUILDINGS } from './buildings/index.js';
 import {
@@ -212,6 +213,14 @@ export class Game {
       this.placementLog = [];
       this.started = false;
       this.spawnBattleLine();
+      // Tallied live as the fight goes, since a company's own health is
+      // gone the instant it dies -- see trackBattleLosses. `loss` on each
+      // side is health actually lost weighted by how many figures muster in
+      // that company, so cutting down a company of eight reads as a bigger
+      // blow than felling a lone rider.
+      this.battleStats = {
+        kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0,
+      };
     }
   }
 
@@ -405,6 +414,11 @@ export class Game {
     for (const house of this.houses) {
       house.advance(1 / FPS);
     }
+    // A snapshot from just before the blows land, so trackBattleLosses can
+    // see what each company actually lost this frame -- health taken by a
+    // company that goes on to die is gone from it by the time the filter
+    // below removes it.
+    const preBattleHealth = this.mode === 'battle' ? this.snapshotHealth() : null;
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     for (const guard of this.guards) {
@@ -421,6 +435,9 @@ export class Game {
     this.moveRaiders();
     this.moveGuards();
     this.resolveHouseContact();
+    if (preBattleHealth) {
+      this.trackBattleLosses(preBattleHealth);
+    }
     this.raiders = this.raiders.filter((raider) => raider.isAlive);
     this.guards = this.guards.filter((guard) => guard.isAlive);
     for (const wall of this.walls) {
@@ -630,6 +647,46 @@ export class Game {
     const raider = new Raider(typeId, position);
     raider.aimAt({ x: position.x, y: -BATTLE.fieldHalfDepth });
     this.raiders.push(raider);
+  }
+
+  /** Every company's health right now, keyed by the company itself -- see trackBattleLosses. */
+  snapshotHealth() {
+    const health = new Map();
+    for (const raider of this.raiders) {
+      health.set(raider, raider.health);
+    }
+    for (const guard of this.guards) {
+      health.set(guard, guard.health);
+    }
+    return health;
+  }
+
+  /**
+   * Folds this frame's fighting into the open battleground mode's running
+   * stats: a kill or death for every company that died since `before`, and
+   * on each side the health actually lost, weighted by how many figures
+   * muster in that company -- so a company of eight cut down counts for
+   * more than a lone rider losing the same fraction of its own health.
+   */
+  trackBattleLosses(before) {
+    for (const raider of this.raiders) {
+      const lost = (before.get(raider) ?? raider.health) - raider.health;
+      if (lost > 0) {
+        this.battleStats.enemyLoss += lost * unitSize(raider.typeId);
+      }
+      if (!raider.isAlive) {
+        this.battleStats.kills += 1;
+      }
+    }
+    for (const guard of this.guards) {
+      const lost = (before.get(guard) ?? guard.health) - guard.health;
+      if (lost > 0) {
+        this.battleStats.playerLoss += lost * unitSize(guard.typeId);
+      }
+      if (!guard.isAlive) {
+        this.battleStats.deaths += 1;
+      }
+    }
   }
 
   /**

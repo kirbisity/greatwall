@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Castle, Emperor, Raider, Wall } from '../src/entities.js';
 import { LEVELS } from '../src/levels.js';
+import { unitSize } from '../src/units.js';
 import {
   BATTLE,
   BREACH,
@@ -870,3 +871,67 @@ test('with no Emperor fielded and nothing nearby, a raider falls back to chargin
 function distanceBetween(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
+
+// --- battle stats -----------------------------------------------------------
+
+test('unitSize counts the figures a type\'s own formation actually musters', () => {
+  assert.equal(unitSize('EMPEROR'), 1, 'the Emperor rides alone');
+  assert.equal(unitSize('IG_LIGHT'), 20);
+  assert.equal(unitSize('IR0'), 14);
+});
+
+test('a fresh battle starts with every stat at zero', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.deepEqual(game.battleStats, {
+    kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0,
+  });
+});
+
+test('trackBattleLosses tallies kills, deaths, and each side\'s strength cut down, weighted by company size', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = new Raider('IR0', { x: 0, y: 100 });
+  const guard = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }).guard;
+  game.raiders = [raider];
+
+  const before = new Map([[raider, raider.health], [guard, guard.health]]);
+  raider.health -= 4; // wounded, still standing
+  guard.health = -1; // this one falls
+
+  game.trackBattleLosses(before);
+
+  assert.equal(game.battleStats.kills, 0, 'the raider is only wounded');
+  assert.equal(game.battleStats.deaths, 1, 'the guard fell');
+  assert.equal(game.battleStats.enemyLoss, 4 * unitSize('IR0'));
+  const guardHealthLost = before.get(guard) - guard.health;
+  assert.equal(game.battleStats.playerLoss, guardHealthLost * unitSize('IG_LIGHT'));
+});
+
+test('trackBattleLosses counts a kill once a company\'s health actually crosses zero', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = new Raider('CR0', { x: 0, y: 100 });
+  game.raiders = [raider];
+  const before = new Map([[raider, raider.health]]);
+  raider.health = -3;
+
+  game.trackBattleLosses(before);
+
+  assert.equal(game.battleStats.kills, 1);
+  assert.equal(game.battleStats.enemyLoss, (before.get(raider) - raider.health) * unitSize('CR0'));
+});
+
+test('losses accumulate across several frames rather than only counting the last one', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = new Raider('IR0', { x: 0, y: 100 });
+  game.raiders = [raider];
+
+  let before = game.snapshotHealth();
+  raider.health -= 3;
+  game.trackBattleLosses(before);
+
+  before = game.snapshotHealth();
+  raider.health -= 5;
+  game.trackBattleLosses(before);
+
+  assert.equal(game.battleStats.enemyLoss, (3 + 5) * unitSize('IR0'));
+  assert.equal(game.battleStats.kills, 0);
+});

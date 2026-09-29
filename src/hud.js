@@ -73,7 +73,7 @@ export function formatBattleStats(stats) {
   const kd = stats.deaths === 0
     ? (stats.kills > 0 ? '∞' : '0.00')
     : (stats.kills / stats.deaths).toFixed(2);
-  return `Companies destroyed ${stats.kills} · Companies lost ${stats.deaths} · K/D ${kd}\n`
+  return `Enemy companies destroyed ${stats.kills} · Your companies lost ${stats.deaths} · K/D ${kd}\n`
     + `Enemy soldiers lost: ${Math.round(stats.enemyLoss)}\n`
     + `Your soldiers lost: ${Math.round(stats.playerLoss)}`;
 }

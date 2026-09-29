@@ -35,7 +35,7 @@ test('formatBattleStats shows companies destroyed/lost and K/D, rounding each si
   });
   assert.equal(
     text,
-    'Companies destroyed 9 · Companies lost 2 · K/D 4.50\nEnemy soldiers lost: 132\nYour soldiers lost: 27',
+    'Enemy companies destroyed 9 · Your companies lost 2 · K/D 4.50\nEnemy soldiers lost: 132\nYour soldiers lost: 27',
   );
 });
 

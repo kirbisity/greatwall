@@ -107,14 +107,14 @@ export const WALL = {
  * ========================================================================== */
 
 /** Most a company may turn in one frame. Higher turns tighter. */
-export const RAIDER_STEERING_RADIANS = 0.032;
+export const RAIDER_STEERING_RADIANS = 0.045;
 
 /**
  * How much of the remaining turn is taken each frame, before the cap above.
  * Low values ease into a new heading instead of snapping onto it, which is
  * what keeps a company from sawing back and forth around its aim.
  */
-export const TURN_EASE = 0.1;
+export const TURN_EASE = 0.14;
 
 /** How companies treat walls. */
 export const AVOIDANCE = {
@@ -164,7 +164,7 @@ export const AVOIDANCE = {
 /** Melee: what happens when the two sides meet. */
 export const MELEE = {
   // Companies lock together once their centres are this close.
-  engageDistance: 26,
+  engageDistance: 20,
   // Once locked they close right up and interleave, rather than trading blows
   // at arm's length. This is the separation they settle at.
   lockedGap: 4,
@@ -201,7 +201,7 @@ export const IMPERIAL = {
   // see Game#selectGuardsNear. Shared with the renderer, which draws the
   // tap's own ping at the same radius, so what the player sees searched is
   // exactly what was searched.
-  selectRadius: 40,
+  selectRadius: 28,
   // How far apart a selected group spreads around a shared destination --
   // see Game#orderGuards.
   groupSpreadRadius: 18,

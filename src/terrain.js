@@ -113,6 +113,15 @@ const ZONE_SCAN_LIMIT = 8;
 const ZONE_BUCKET = 120;
 const EMPTY_ZONES = [];
 
+// How much of a beach's own width (nearest its inland edge) it takes to
+// settle at the full dip below the grass above it -- see wildHeightAt's own
+// use of beachAt. Short on purpose: reaching bottom quickly and then
+// holding level the rest of the way to the shore is what reads as a
+// stepped-down shelf. Spreading the same drop evenly across the whole
+// width instead -- beachAt's own raw curve -- eases in and out at both
+// ends, which is exactly what read as a scooped bowl rather than a step.
+const BEACH_STEP_FRACTION = 0.35;
+
 /**
  * Every mountain whose cell could possibly reach this point. Bounded to the
  * cell's own neighbours because mountainMaxRadius is kept well under
@@ -489,28 +498,40 @@ export class Terrain {
     if (channel > 0) {
       height -= this.river.depth * ease(channel);
     }
-    const offshore = this.seaAt(x, y);
-    if (offshore > 0) {
-      height -= this.sea.depth * ease(offshore);
-    }
     // A step down onto the beach, so the grass above it reads as a low
     // bluff rather than the sand sharing its own level -- see beachAt.
     // Grass itself is untouched (beachAt is 0 past the beach's own inland
-    // edge); only the beach dips, deepest right at the waterline, where it
-    // then meets the sea's own depth falling away past the shore.
+    // edge); the beach drops quickly to its own full depth (see
+    // BEACH_STEP_FRACTION) and holds level the rest of the way to the
+    // shore, reading as a stepped-down shelf rather than a bowl scooped
+    // out of the coastline. The sea's own depth then continues from
+    // exactly that same depth rather than its own separate zero -- without
+    // this the two met at a step right at the waterline (the beach already
+    // sunk by a full beachDip, the sea only just starting from nothing),
+    // which is what actually read as a trench dug along the coast rather
+    // than a shelf.
     //
     // Kept modest deliberately: the cursor's own terrain march (see
     // projection.js's terrainPointAt) steps in fixed strides, and a deep
     // enough dip lets a ray at the camera's shallowest legal angle climb
-    // straight past it rather than crossing it -- measured, a dip past
-    // about 10 units starts drifting the cursor there by tens of pixels,
-    // where the same ground with none at all reads back to sub-pixel
-    // accuracy. A level asking for a dramatic bluff would need the march
+    // straight past it rather than crossing it. That only bites once the
+    // grass-to-sea profile has an actual discontinuity in it, though --
+    // measured against this continuous composition, a dip up to 12-15
+    // units still lands the cursor to about a hundredth of a pixel, and it
+    // is 16 units and up where the march starts drifting off by tens of
+    // pixels. A level asking for a dip past that would need the march
     // itself taught to step finer near the coast, not just a bigger number
     // here.
-    const beach = this.beachAt(x, y);
-    if (beach > 0) {
-      height -= (this.sea?.beachDip ?? 0) * ease(beach);
+    const beachDip = this.sea?.beachDip ?? 0;
+    const offshore = this.seaAt(x, y);
+    if (offshore > 0) {
+      height -= beachDip + this.sea.depth * ease(offshore);
+    } else {
+      const beach = this.beachAt(x, y);
+      if (beach > 0) {
+        const settled = Math.min(1, beach / BEACH_STEP_FRACTION);
+        height -= beachDip * ease(settled);
+      }
     }
     const pond = this.pondAt(x, y);
     if (pond > 0) {

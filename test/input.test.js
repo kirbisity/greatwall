@@ -18,7 +18,11 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
     toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
   };
   const renderer = {
-    hoveredWall: null, flashInvalidWall: () => {}, pingSelection: () => {}, pingMoveOrder: () => {},
+    hoveredWall: null,
+    pingSelection: () => {},
+    pingMoveOrder: () => {},
+    setBuildTrail: () => {},
+    releaseBuildTrail: () => {},
   };
   const game = {
     wallAt,
@@ -377,35 +381,54 @@ test('one finger with the build tool lays wall along the drag', () => {
   assert.deepEqual(built[0].to, { x: 200, y: 100 });
 });
 
-test('a refused build attempt blinks the tried line red', () => {
-  const flashes = [];
+test('a refused build attempt turns the trail red, tracing the drag rather than just its ends', () => {
+  const trails = [];
   const { input } = gestureInput({
     tool: 'build',
     game: { buildWall: () => ({ status: 'poor', start: { x: 1, y: 1 }, end: { x: 2, y: 2 } }) },
   });
-  input.renderer.flashInvalidWall = (start, end) => flashes.push({ start, end });
+  input.renderer.setBuildTrail = (points, valid) => trails.push({ points: [...points], valid });
   input.handlePointerDown(finger(1, 100, 100));
   input.handlePointerMove(finger(1, 110, 100));
   input.handlePointerMove(finger(1, 200, 100));
 
-  assert.equal(flashes.length, 1);
-  assert.deepEqual(flashes[0], { start: { x: 1, y: 1 }, end: { x: 2, y: 2 } });
+  assert.equal(trails.at(-1).valid, false, 'the latest attempt failed, so the trail should read invalid');
+  assert.ok(trails.at(-1).points.length >= 2, 'the trail should carry every point along the drag, not just its ends');
 });
 
-test('a wall blocked by the city, in the water, or onto a crowded node all blink red the same way', () => {
+test('a wall blocked by the city, in the water, or onto a crowded node all turn the trail red the same way', () => {
   for (const status of ['blocked', 'water', 'crowded']) {
-    const flashes = [];
+    const trails = [];
     const { input } = gestureInput({
       tool: 'build',
       game: { buildWall: () => ({ status, start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
     });
-    input.renderer.flashInvalidWall = (start, end) => flashes.push({ start, end });
+    input.renderer.setBuildTrail = (points, valid) => trails.push({ points: [...points], valid });
     input.handlePointerDown(finger(1, 100, 100));
     input.handlePointerMove(finger(1, 110, 100));
     input.handlePointerMove(finger(1, 200, 100));
 
-    assert.equal(flashes.length, 1, status);
+    assert.equal(trails.at(-1).valid, false, status);
   }
+});
+
+test('a successful segment keeps the trail gold, and lifting the finger releases it to fade', () => {
+  const trails = [];
+  const released = [];
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: (from, to) => ({ status: 'built', end: to }) },
+  });
+  input.renderer.setBuildTrail = (points, valid) => trails.push({ points: [...points], valid });
+  input.renderer.releaseBuildTrail = () => released.push(true);
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.equal(trails.at(-1).valid, true);
+
+  input.handlePointerUp(finger(1, 200, 100));
+  assert.equal(released.length, 1, 'lifting the finger should hand the trail off to fade rather than just vanish');
 });
 
 test('a wall refused for being blocked or wet keeps the chain -- the phantom wall snaps the same way a real one would', () => {

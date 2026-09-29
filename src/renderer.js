@@ -152,11 +152,11 @@ const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 
-// How long a refused wall attempt blinks for, and how fast -- see
-// flashInvalidWall/drawInvalidAttempt.
-const INVALID_ATTEMPT_SECONDS = 2;
-const INVALID_BLINK_RATE = 9;
-const INVALID_LINE = '220, 60, 50';
+// The live trail behind the Build tool's own drag, and how long it lingers
+// once the finger lifts -- see setBuildTrail/releaseBuildTrail/drawBuildTrail.
+const TRAIL_VALID_LINE = '232, 196, 68';
+const TRAIL_INVALID_LINE = '220, 60, 50';
+const TRAIL_FADE_SECONDS = 0.5;
 
 // A ring under each selected company (see Game#selectGuardsNear), and the
 // brief outward ping marking where an Attack-tool tap just landed.
@@ -459,11 +459,12 @@ export class Renderer {
     // the cursor moves. Null whenever neither tool is selected, or nothing
     // is under the cursor.
     this.hoveredWall = null;
-    // A section the Build tool just tried and failed to lay -- too poor, in
-    // the water, crossing the city, or piling onto a crowded node -- shown
-    // as a brief red blink rather than just a toast, so the drag itself
-    // reads as refused. See flashInvalidWall/drawInvalidAttempt.
-    this.invalidAttempt = null;
+    // The Build tool's own drag, traced exactly rather than reduced to a
+    // straight line -- gold while every point along it could actually be
+    // built, red the moment the latest attempt could not (too poor, in the
+    // water, crossing the city, or a crowded node). See setBuildTrail/
+    // releaseBuildTrail/drawBuildTrail.
+    this.buildTrail = null;
     // Where an Attack-tool tap last landed, a brief ring fading outward to
     // show what got searched -- see pingSelection/drawSelection. Selected
     // companies themselves are read straight off game.guards (guard.selected).
@@ -633,7 +634,7 @@ export class Renderer {
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
-    this.drawInvalidAttempt(view);
+    this.drawBuildTrail(view);
     this.drawSelection(view, game.guards);
     this.drawMoveOrder(view);
     this.drawWorkingWalls(view, game);
@@ -1442,42 +1443,65 @@ export class Renderer {
     context.restore();
   }
 
-  /** Mark a just-refused build attempt to blink briefly -- see Input#dragBuild. */
-  flashInvalidWall(start, end) {
-    this.invalidAttempt = { start: { ...start }, end: { ...end }, until: this.clock + INVALID_ATTEMPT_SECONDS };
+  /**
+   * The Build tool's own drag, live -- called on every point along it (see
+   * Input#dragBuild) rather than just its snapped ends, so the trail traces
+   * the swipe itself. `valid` reflects only the most recent attempt, so the
+   * colour answers "if I let go right now, would this work" rather than
+   * summing the whole drag's history.
+   */
+  setBuildTrail(points, valid) {
+    this.buildTrail = {
+      points: points.map((point) => ({ ...point })),
+      valid,
+      fadingSince: null,
+    };
   }
 
-  /**
-   * The line the Build tool just tried and failed to lay, blinking red for
-   * a couple of seconds -- too poor, in the water, crossing the city, or a
-   * crowded node -- so the drag itself reads as refused rather than the
-   * toast message being the only sign anything happened.
-   */
-  drawInvalidAttempt(view) {
-    const attempt = this.invalidAttempt;
-    if (!attempt) {
+  /** The finger has lifted (or the drag was abandoned) -- fade the trail out rather than cutting it. */
+  releaseBuildTrail() {
+    if (this.buildTrail && this.buildTrail.fadingSince === null) {
+      this.buildTrail.fadingSince = this.clock;
+    }
+  }
+
+  drawBuildTrail(view) {
+    const trail = this.buildTrail;
+    if (!trail || trail.points.length < 2) {
       return;
     }
-    if (this.clock >= attempt.until) {
-      this.invalidAttempt = null;
-      return;
+    let alpha = 1;
+    if (trail.fadingSince !== null) {
+      const elapsed = this.clock - trail.fadingSince;
+      if (elapsed >= TRAIL_FADE_SECONDS) {
+        this.buildTrail = null;
+        return;
+      }
+      alpha = clamp(1 - elapsed / TRAIL_FADE_SECONDS, 0, 1);
     }
-    const from = projectPoint(view, attempt.start.x, attempt.start.y, 0);
-    const to = projectPoint(view, attempt.end.x, attempt.end.y, 0);
-    if (!from || !to) {
-      return;
-    }
-    // Genuinely on-off, not a smooth pulse -- a blink reads as urgent where
-    // a glow reads as decorative, the way the hover and flash tints above do.
-    const blink = Math.max(0, Math.sin(this.clock * INVALID_BLINK_RATE));
     const context = this.overlay;
     context.save();
     context.lineWidth = 4;
-    context.strokeStyle = `rgba(${INVALID_LINE}, ${blink})`;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.strokeStyle = `rgba(${trail.valid ? TRAIL_VALID_LINE : TRAIL_INVALID_LINE}, ${alpha})`;
     context.beginPath();
-    context.moveTo(from.x, from.y);
-    context.lineTo(to.x, to.y);
-    context.stroke();
+    let started = false;
+    for (const point of trail.points) {
+      const projected = projectPoint(view, point.x, point.y, 0);
+      if (!projected) {
+        continue;
+      }
+      if (!started) {
+        context.moveTo(projected.x, projected.y);
+        started = true;
+      } else {
+        context.lineTo(projected.x, projected.y);
+      }
+    }
+    if (started) {
+      context.stroke();
+    }
     context.restore();
   }
 

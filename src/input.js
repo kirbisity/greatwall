@@ -79,6 +79,9 @@ export class Input {
     this.smoothedTouch = null;
     this.zoomAnchor = null;
     this.chainPoint = null;
+    // Every point along the Build tool's current drag, in world ground
+    // coordinates -- see dragBuild/Renderer#setBuildTrail.
+    this.trail = [];
   }
 
   /**
@@ -159,6 +162,7 @@ export class Input {
     this.zoomAnchor = null;
     this.chainPoint = null;
     this.smoothedTouch = null;
+    this.renderer.releaseBuildTrail();
     this.camera.release();
   }
 
@@ -170,6 +174,7 @@ export class Input {
   beginPinch() {
     this.pointerDown = false;
     this.chainPoint = null;
+    this.renderer.releaseBuildTrail();
     this.zoomAnchor = null;
     this.pinch = this.measurePinch();
   }
@@ -221,6 +226,7 @@ export class Input {
     this.hud.hideDispatchMenu();
     this.hud.clearActionHint();
     this.game.deselectGuards();
+    this.renderer.releaseBuildTrail();
   }
 
   /** Show the tier picker above the castle, so an order carries a company. */
@@ -424,35 +430,44 @@ export class Input {
     this.camera.zoomAt(this.zoomAnchor, 1 + ZOOM_STEP * steps);
   }
 
+  /**
+   * Traces the drag itself, point by point, rather than reducing it to a
+   * straight line -- gold while the latest attempt along it could actually
+   * be built, red the moment one could not. See Renderer#setBuildTrail.
+   */
   dragBuild() {
     const target = this.pointerOnGround();
     if (!this.chainPoint) {
       this.chainPoint = target;
+      this.trail = [target];
+      this.renderer.setBuildTrail(this.trail, true);
       return;
     }
+    this.trail.push(target);
     const span = distance(this.chainPoint, target);
     if (span <= WALL.minLength || span >= WALL.maxLength) {
+      this.renderer.setBuildTrail(this.trail, true);
       return;
     }
 
     const result = this.game.buildWall(this.chainPoint, target);
-    if (CHAIN_CONTINUES.has(result.status)) {
+    const valid = CHAIN_CONTINUES.has(result.status);
+    this.renderer.setBuildTrail(this.trail, valid);
+    if (valid) {
       // Carry on from the snapped end so chains follow walls and city edges.
       this.chainPoint = result.end ?? target;
       return;
     }
-    // Blocked, wet or too poor: the attempt itself is shown as a blinking
-    // "phantom" wall (see flashInvalidWall) at the same snapped ends a real
-    // one would use, but chainPoint is deliberately left alone -- a refused
-    // segment does not throw away the chain, so the very next drag can
-    // still snap on and try a different end without starting over.
+    // Blocked, wet or too poor: the trail itself has already turned red at
+    // the point the drag actually reached, but chainPoint is deliberately
+    // left alone -- a refused segment does not throw away the chain, so the
+    // very next drag can still snap on and try a different end without
+    // starting over.
     if (result.status === 'blocked') {
-      this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Walls cannot cross the city');
       return;
     }
     if (result.status === 'water') {
-      this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Walls cannot be laid in water');
       return;
     }
@@ -460,12 +475,10 @@ export class Input {
       // A junction already at its limit — no message, just let go of the
       // tool the way it would if the player had simply let up on it.
       this.chainPoint = null;
-      this.renderer.flashInvalidWall(result.start, result.end);
       this.resetTool();
       return;
     }
     if (result.status === 'poor') {
-      this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Not enough money');
     }
   }

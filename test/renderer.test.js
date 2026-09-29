@@ -402,3 +402,71 @@ test('both pings run clean across their entire natural lifetime, not just at the
     assert.doesNotThrow(() => renderer.drawMoveOrder(renderer.camera.view), `move order at clock=${clock}`);
   }
 });
+
+// --- the Build tool's own live trail ---------------------------------------
+
+/** A renderer with just enough of itself to draw the build trail: a real
+ *  camera view to project through, and an overlay whose stroke() is
+ *  recorded so a test can tell whether anything was actually drawn. */
+function trailRenderer() {
+  const strokes = [];
+  const context = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() { strokes.push(context.strokeStyle); },
+    set strokeStyle(value) { context._strokeStyle = value; },
+    get strokeStyle() { return context._strokeStyle; },
+    set lineWidth(value) {},
+    set lineJoin(value) {},
+    set lineCap(value) {},
+  };
+  const renderer = Object.create(Renderer.prototype);
+  renderer.overlay = context;
+  renderer.camera = { view: createView({ focus: { x: 0, y: 0 }, distance: 150, elevation: 45, width: 1200, height: 800 }) };
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  return { renderer, strokes };
+}
+
+test('a single point draws nothing -- there is no line until the drag has actually moved', () => {
+  const { renderer, strokes } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }], true);
+  renderer.drawBuildTrail(renderer.camera.view);
+  assert.equal(strokes.length, 0);
+});
+
+test('a real drag draws a stroke, gold while valid and red once it is not', () => {
+  const { renderer, strokes } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
+  renderer.drawBuildTrail(renderer.camera.view);
+  assert.match(strokes.at(-1), /232, 196, 68/, 'valid should read as the same gold a wall itself uses');
+
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], false);
+  renderer.drawBuildTrail(renderer.camera.view);
+  assert.match(strokes.at(-1), /220, 60, 50/, 'invalid should read as red');
+});
+
+test('releasing the trail fades it out over its own duration, then drops it for good', () => {
+  const { renderer, strokes } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
+  renderer.releaseBuildTrail();
+
+  Object.defineProperty(renderer, 'clock', { value: 0.1, configurable: true });
+  renderer.drawBuildTrail(renderer.camera.view);
+  assert.equal(strokes.length, 1, 'still fading -- should still draw');
+
+  Object.defineProperty(renderer, 'clock', { value: 10, configurable: true });
+  renderer.drawBuildTrail(renderer.camera.view);
+  assert.equal(strokes.length, 1, 'long past its fade -- should draw nothing more');
+  assert.equal(renderer.buildTrail, null, 'and should have let go of itself');
+});
+
+test('starting a fresh trail while one is already fading replaces it outright', () => {
+  const { renderer } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
+  renderer.releaseBuildTrail();
+  renderer.setBuildTrail([{ x: 5, y: 5 }, { x: 6, y: 6 }], true);
+  assert.equal(renderer.buildTrail.fadingSince, null, 'a fresh drag is live, not fading');
+});

@@ -4,6 +4,10 @@ import { paintLevelThumbnail } from './levelThumbnail.js';
 const SOUND_LEVEL_STEP = 20;
 const MAX_SOUND_LEVEL = 100;
 const TOAST_DURATION_MS = 5200;
+// Long enough to read the longest of the level stories at a relaxed pace,
+// on top of the 3 seconds (see greatwall.css's own .storyBanner) it takes
+// just to fade all the way in.
+const STORY_DURATION_MS = 15000;
 
 /** Which button lights up for each tool. */
 const TOOL_BUTTONS = {
@@ -65,6 +69,8 @@ export class Hud {
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
     this.messageText = element('infoP');
+    this.storyBanner = element('storyBanner');
+    this.storyText = element('storyText');
     this.soundButton = element('soundBtn');
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
@@ -83,6 +89,7 @@ export class Hud {
     this.shownSeconds = null;
     this.shownSeason = null;
     this.toastTimer = null;
+    this.storyTimer = null;
 
     this.music.loop = true;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
@@ -147,12 +154,14 @@ export class Hud {
   /**
    * The single choke point for landing back on the menu -- a deliberate
    * Menu click, and Game Over's own call to it (see showGameOver) both
-   * come through here, so stopping the level's music here rather than at
-   * each call site can't be forgotten by a future one.
+   * come through here, so leaving the level -- its music, its own opening
+   * line if it is still up -- is handled once here rather than at each
+   * call site, where a future one could forget it.
    */
   openMenu() {
     this.menu.style.height = '100%';
     this.stopMusic();
+    this.closeStory();
   }
 
   closeMenu() {
@@ -221,6 +230,27 @@ export class Hud {
   closeMessage() {
     clearTimeout(this.toastTimer);
     this.messageModal.style.display = 'none';
+  }
+
+  /**
+   * A level's own opening line -- see LEVELS' own `story` field. Left in
+   * the DOM throughout rather than toggled with display, so the opacity
+   * change it starts is a transition (see greatwall.css's own
+   * .storyBanner) rather than a cut.
+   */
+  showStory(text) {
+    if (!text) {
+      return;
+    }
+    this.storyText.innerText = text;
+    this.storyBanner.classList.toggle('is-shown', true);
+    clearTimeout(this.storyTimer);
+    this.storyTimer = setTimeout(() => this.closeStory(), STORY_DURATION_MS);
+  }
+
+  closeStory() {
+    clearTimeout(this.storyTimer);
+    this.storyBanner.classList.toggle('is-shown', false);
   }
 
   /**

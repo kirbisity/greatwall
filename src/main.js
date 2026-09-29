@@ -74,6 +74,7 @@ class App {
     bind('help', () => this.openHelp());
     bind('helpClose', () => this.closeHelp());
     bind('infoClose', () => this.hud.closeMessage());
+    bind('storyClose', () => this.hud.closeStory());
     bind('move', () => this.input.resetTool());
     bind('zoom', () => this.input.selectTool('zoom'));
     bind('undo', () => this.input.undo());
@@ -155,6 +156,7 @@ class App {
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
     this.hud.playLevelMusic(this.game.level.music);
+    this.hud.showStory(this.game.level.story);
     this.draw();
   }
 

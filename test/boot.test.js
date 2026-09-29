@@ -29,14 +29,21 @@ function stubContext() {
 }
 
 function stubElement(id) {
+  const classes = new Set();
   return {
     id,
     style: {},
     className: '',
-    classList: { toggle: () => {} },
+    classList: {
+      toggle: (name, on) => { if (on) { classes.add(name); } else { classes.delete(name); } },
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
     children: [],
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren() { this.children = []; },
+    querySelectorAll: () => [],
     innerText: '',
     loop: false,
     volume: 0,

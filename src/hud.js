@@ -11,6 +11,13 @@ const TOAST_DURATION_MS = 900;
 // on top of the fade-in (see greatwall.css's own .storyBanner) it takes to
 // appear -- but any game action (see main.js's own onEffect) clears it early.
 const STORY_DURATION_MS = 15000;
+// A beat solid before the threat markers start fading, then the fade itself
+// (see greatwall.css's own .threatMarker) -- a flash, not a fixture.
+const THREAT_HOLD_MS = 400;
+const THREAT_FADE_MS = 700;
+// Long enough to act on, short enough to get out of the way on its own if
+// the player does not -- see Input's own selectTool/openDispatchMenu.
+const ACTION_HINT_DURATION_MS = 5000;
 
 /** Which button lights up for each tool. */
 const TOOL_BUTTONS = {
@@ -74,6 +81,9 @@ export class Hud {
     this.messageText = element('infoP');
     this.storyBanner = element('storyBanner');
     this.storyText = element('storyText');
+    this.threatLayer = element('threatMarkers');
+    this.actionHint = element('actionHint');
+    this.actionHintText = element('actionHintText');
     this.soundButton = element('soundBtn');
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
@@ -95,6 +105,9 @@ export class Hud {
     this.shownSeason = null;
     this.toastTimer = null;
     this.storyTimer = null;
+    this.threatTimer = null;
+    this.threatFadeTimer = null;
+    this.actionHintTimer = null;
 
     this.music.loop = true;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
@@ -167,6 +180,8 @@ export class Hud {
     this.menu.style.height = '100%';
     this.stopMusic();
     this.closeStory();
+    this.clearThreats();
+    this.clearActionHint();
   }
 
   closeMenu() {
@@ -256,6 +271,64 @@ export class Hud {
   closeStory() {
     clearTimeout(this.storyTimer);
     this.storyBanner.classList.toggle('is-shown', false);
+  }
+
+  /**
+   * A dark red marker at the edge of the view for each bearing raiders are
+   * expected from (see Game#threatBearings) -- a flash at the start of a
+   * level, not a fixture, so the field reads clear again well before the
+   * first one arrives.
+   */
+  showThreats(bearings) {
+    this.threatLayer.replaceChildren();
+    for (const bearing of bearings) {
+      this.threatLayer.append(this.buildThreatMarker(bearing));
+    }
+    clearTimeout(this.threatTimer);
+    this.threatTimer = setTimeout(() => {
+      this.threatLayer.querySelectorAll('.threatMarker').forEach((marker) => {
+        marker.classList.add('is-fading');
+      });
+    }, THREAT_HOLD_MS);
+    this.threatFadeTimer = setTimeout(() => this.clearThreats(), THREAT_HOLD_MS + THREAT_FADE_MS);
+  }
+
+  /**
+   * Placed by direction from the centre of the view rather than on the
+   * ground itself -- the camera never turns, so a bearing (see
+   * projection.js: x east, y north) maps straight onto a fixed screen
+   * angle without needing the camera's own perspective math at all.
+   */
+  buildThreatMarker(bearingDegrees) {
+    const radians = (bearingDegrees * Math.PI) / 180;
+    // North (+y, world) is up the screen (-y, screen), not down it.
+    const outward = { x: Math.cos(radians), y: -Math.sin(radians) };
+    const rotation = (Math.atan2(-outward.x, outward.y) * 180) / Math.PI;
+    const marker = document.createElement('div');
+    marker.className = 'threatMarker';
+    marker.style.left = `${50 + outward.x * 42}%`;
+    marker.style.top = `${50 + outward.y * 42}%`;
+    marker.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
+    return marker;
+  }
+
+  clearThreats() {
+    clearTimeout(this.threatTimer);
+    clearTimeout(this.threatFadeTimer);
+    this.threatLayer.replaceChildren();
+  }
+
+  /** A one-line nudge toward what a freshly picked tool wants next. */
+  showActionHint(text) {
+    this.actionHintText.innerText = text;
+    this.actionHint.classList.add('is-shown');
+    clearTimeout(this.actionHintTimer);
+    this.actionHintTimer = setTimeout(() => this.clearActionHint(), ACTION_HINT_DURATION_MS);
+  }
+
+  clearActionHint() {
+    clearTimeout(this.actionHintTimer);
+    this.actionHint.classList.remove('is-shown');
   }
 
   /**

@@ -175,6 +175,7 @@ class App {
     this.needsNewGame = false;
     this.hud.playLevelMusic(this.game.level.music);
     this.hud.showStory(this.game.level.story);
+    this.hud.showThreats(this.game.threatBearings);
     this.draw();
   }
 

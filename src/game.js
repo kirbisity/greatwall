@@ -458,6 +458,25 @@ export class Game {
     };
   }
 
+  /**
+   * Compass bearings (degrees, 0 east / 90 north -- see spawnPoint) raiders
+   * are expected from this level, for a warning shown once at the start --
+   * see Hud#showThreats. Landing points and a spawn arc already say exactly
+   * where; a level with neither spawns from anywhere, so the warning covers
+   * the whole compass instead of pointing anywhere in particular.
+   */
+  get threatBearings() {
+    if (this.landings.length > 0) {
+      const rounded = this.landings.map((landing) => Math.round((landing.bearing * 180) / Math.PI / 15) * 15);
+      return [...new Set(rounded)];
+    }
+    const arc = this.level.spawnArc;
+    if (arc) {
+      return [arc.centre];
+    }
+    return [0, 45, 90, 135, 180, 225, 270, 315];
+  }
+
   spawnRaider() {
     const target = this.castles[0];
     if (!target) {

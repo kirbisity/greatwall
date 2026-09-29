@@ -455,6 +455,65 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .storyBanner p { margin: 0; }
 
+/*
+ * Where the raid is coming from, at a glance, before it arrives -- placed
+ * around the edge of the view rather than the map itself, since the camera
+ * never turns and north is always the same way up. A flash, not a fixture:
+ * full strength the moment the level starts, then gone within a couple of
+ * seconds, so it reads as a warning rather than clutter on the field.
+ */
+.threatMarkers {
+	position: fixed;
+	inset: 0;
+	z-index: 13;
+	pointer-events: none;
+}
+
+.threatMarker {
+	position: absolute;
+	width: 0;
+	height: 0;
+	border-left: 15px solid transparent;
+	border-right: 15px solid transparent;
+	border-bottom: 26px solid #7a1414;
+	filter: drop-shadow(0 0 8px rgba(122, 20, 20, .75));
+	opacity: 1;
+	transition: opacity .7s ease-in;
+}
+
+.threatMarker.is-fading { opacity: 0; }
+
+/*
+ * What a freshly picked tool wants next, above the dock it belongs to
+ * rather than the top of the screen -- the eye is already down there.
+ * Advisory, not a prompt: it steps aside for a click on the map rather
+ * than waiting on one, and fades on its own besides.
+ */
+.actionHint {
+	position: fixed;
+	left: 50%;
+	bottom: calc(112px + env(safe-area-inset-bottom));
+	transform: translateX(-50%);
+	z-index: 6;
+	margin: 0;
+	padding: 8px 16px;
+	font-size: 13px;
+	letter-spacing: .02em;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 4px;
+	box-shadow: var(--lift);
+	opacity: 0;
+	pointer-events: none;
+	white-space: nowrap;
+	transition: opacity .3s ease;
+}
+
+.actionHint.is-shown { opacity: 1; }
+
+.actionHint p { margin: 0; }
+
 .close {
 	position: absolute;
 	top: 8px;
@@ -551,6 +610,8 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	}
 	.toolButton { flex: 1 1 0; width: auto; min-width: 0; padding: 8px 0 6px; }
 	.toolName { font-size: 9px; letter-spacing: .06em; }
+
+	.actionHint { bottom: calc(90px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); white-space: normal; text-align: center; }
 
 	.overlay-content { padding-top: 7vh; }
 }

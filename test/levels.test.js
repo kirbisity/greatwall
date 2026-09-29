@@ -49,6 +49,11 @@ test('the first level musters raiders along the northern skyline only', () => {
   }
 });
 
+test('the first level warns of a single threat, from the north', () => {
+  const game = new Game({ level: LEVELS[0] });
+  assert.deepEqual(game.threatBearings, [LEVELS[0].spawnArc.centre]);
+});
+
 test('the first level lays a river across the south', () => {
   const level = LEVELS[0];
   assert.ok(level.river, 'expected a river');
@@ -92,6 +97,11 @@ test('the second level comes at the city from every side, as the game always has
   const north = bearings.filter((b) => b > 20 && b < 160).length;
   const south = bearings.filter((b) => b < -20 && b > -160).length;
   assert.ok(north > 30 && south > 30, `expected raiders all round, saw ${north} north and ${south} south`);
+});
+
+test('the second level warns of a threat from every compass point, having no arc of its own', () => {
+  const game = new Game({ level: LEVELS[1] });
+  assert.deepEqual(game.threatBearings, [0, 45, 90, 135, 180, 225, 270, 315]);
 });
 
 test('the desert has its own ground, and nothing grows on it', () => {
@@ -271,6 +281,14 @@ test('the third level puts its raiders ashore at the landings, from every side',
     const shore = terrain.shoreAt(radians);
     assert.ok(shore > 100, 'the island should have a coast at every bearing');
   }
+});
+
+test('the third level warns at each of its own landing points, and nowhere else', () => {
+  const level = LEVELS[2];
+  const game = new Game({ level });
+  const quadrants = new Set(game.threatBearings.map((bearing) => Math.floor(((bearing + 360) % 360) / 90)));
+  assert.equal(quadrants.size, 4, 'the warnings should ring the whole island, matching its landings');
+  assert.equal(game.threatBearings.length, new Set(game.threatBearings).size, 'no duplicate warning at the same bearing');
 });
 
 test('the island raises its own castle and fields its own companies', () => {

@@ -10,8 +10,12 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
     setActiveTool: () => {},
     hideDispatchMenu: () => {},
     showMessage: () => {},
+    showActionHint: () => {},
+    clearActionHint: () => {},
   };
-  const camera = { toWorld: (point) => point, width: 1200, height: 800 };
+  const camera = {
+    toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
+  };
   const renderer = { hoveredWall: null };
   const game = {
     wallAt, castles: [], dispatchOptions: () => [], terrain: { heightAt: () => 0 }, ...gameOverrides,
@@ -104,6 +108,40 @@ function attackReady({ options = [{ id: 'IG0', name: 'Guardsman', cost: 260 }], 
   });
   return { input, orders };
 }
+
+test('the attack tool asks for a company first, then to tap the map once one is picked', () => {
+  const options = [{ id: 'IG0', name: 'Guardsman', cost: 260 }];
+  const hints = [];
+  const { input } = makeInput({
+    game: { dispatchOptions: () => options, castles: [{ position: { x: 0, y: 0 }, typeId: 'CC0' }] },
+  });
+  input.hud.showActionHint = (text) => hints.push(text);
+  input.hud.showDispatchMenu = (opts, screen, onPick) => onPick(options[0].id);
+
+  input.selectTool('attack');
+
+  assert.deepEqual(hints, ['Choose a company above the castle', 'Tap the map to send them']);
+});
+
+test('a tool with nothing of its own to say clears whatever hint was showing', () => {
+  const cleared = [];
+  const { input } = makeInput();
+  input.hud.clearActionHint = () => cleared.push(true);
+  input.selectTool('zoom');
+  assert.equal(cleared.length, 1);
+});
+
+test('every other tool names what to do with it', () => {
+  const { input } = makeInput();
+  const hints = [];
+  input.hud.showActionHint = (text) => hints.push(text);
+  for (const tool of ['build', 'destroy', 'repair', 'fortify', 'upgrade']) {
+    input.selectTool(tool);
+    input.selectTool(tool); // back to move, so the next iteration is a fresh pick
+  }
+  assert.equal(hints.length, 5, 'one hint per tool picked');
+  assert.ok(hints.every((text) => text.length > 0));
+});
 
 test('clicking the map with the attack tool musters a company', () => {
   const { input, orders } = attackReady();

@@ -12,6 +12,17 @@ const CURSORS = {
   attack: 'url(images/attackBtn.png), crosshair',
 };
 
+// What a freshly picked tool wants next -- see Hud#showActionHint. Attack
+// has two stages of its own (see openDispatchMenu/showDispatchMenu below),
+// so it is left out here and set explicitly at each stage instead.
+const TOOL_HINTS = {
+  build: 'Drag on the ground to raise a wall',
+  destroy: 'Drag over a wall to tear it down',
+  repair: 'Drag over a damaged wall to mend it',
+  fortify: 'Drag over a wall to reinforce it',
+  upgrade: 'Tap the castle to grow it',
+};
+
 // Outcomes that leave a usable end to keep drawing from. Drawing over a
 // section that already stands does nothing, but the chain carries on from
 // it, so a new run can branch off a wall that is already up.
@@ -178,12 +189,19 @@ export class Input {
     } else {
       this.hud.hideDispatchMenu();
     }
+    const hint = TOOL_HINTS[this.tool];
+    if (hint) {
+      this.hud.showActionHint(hint);
+    } else if (this.tool !== 'attack') {
+      this.hud.clearActionHint();
+    }
   }
 
   resetTool() {
     this.tool = 'move';
     this.applyTool();
     this.hud.hideDispatchMenu();
+    this.hud.clearActionHint();
   }
 
   /** Show the tier picker above the castle, so an order carries a company. */
@@ -202,9 +220,11 @@ export class Input {
       : 0;
     const screen = this.camera.toScreen({ x, y, z: this.groundHeight(x, y) + roof })
       ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
+    this.hud.showActionHint('Choose a company above the castle');
     this.hud.showDispatchMenu(options, screen, (typeId) => {
       this.selectedGuardType = typeId;
       this.hud.hideDispatchMenu();
+      this.hud.showActionHint('Tap the map to send them');
     });
   }
 

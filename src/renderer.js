@@ -1592,7 +1592,7 @@ export class Renderer {
 
   /** One banner over each castle, planted above roughly where its hall stands tallest. */
   drawCityFlags(view, game) {
-    const image = this.imageFor(FLAG.sprite);
+    const image = this.imageFor(game.level.flag ?? FLAG.sprite);
     if (!image) {
       return;
     }

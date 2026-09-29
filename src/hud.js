@@ -1,9 +1,16 @@
 import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL, SEASONS } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
+import { Sfx } from './sfx.js';
 
 const SOUND_LEVEL_STEP = 20;
 const MAX_SOUND_LEVEL = 100;
-const TOAST_DURATION_MS = 5200;
+// The hint toast carries no close button -- it is meant to be glanced at,
+// not read, so it clears itself almost immediately.
+const TOAST_DURATION_MS = 900;
+// Long enough to read the longest of the level stories at a relaxed pace,
+// on top of the fade-in (see greatwall.css's own .storyBanner) it takes to
+// appear -- but any game action (see main.js's own onEffect) clears it early.
+const STORY_DURATION_MS = 15000;
 
 /** Which button lights up for each tool. */
 const TOOL_BUTTONS = {
@@ -65,6 +72,8 @@ export class Hud {
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
     this.messageText = element('infoP');
+    this.storyBanner = element('storyBanner');
+    this.storyText = element('storyText');
     this.soundButton = element('soundBtn');
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
@@ -76,13 +85,16 @@ export class Hud {
       element('dispatchOption2'),
     ];
 
+    this.sfx = new Sfx();
     this.soundLevel = INITIAL_SOUND_LEVEL;
+    this.sfx.setVolume(this.soundLevel / MAX_SOUND_LEVEL);
     this.shownTokens = null;
     this.shownIncome = null;
     this.shownIncomeFormula = null;
     this.shownSeconds = null;
     this.shownSeason = null;
     this.toastTimer = null;
+    this.storyTimer = null;
 
     this.music.loop = true;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
@@ -144,8 +156,17 @@ export class Hud {
 
   // --- overlays -----------------------------------------------------------
 
+  /**
+   * The single choke point for landing back on the menu -- a deliberate
+   * Menu click, and Game Over's own call to it (see showGameOver) both
+   * come through here, so leaving the level -- its music, its own opening
+   * line if it is still up -- is handled once here rather than at each
+   * call site, where a future one could forget it.
+   */
   openMenu() {
     this.menu.style.height = '100%';
+    this.stopMusic();
+    this.closeStory();
   }
 
   closeMenu() {
@@ -217,6 +238,27 @@ export class Hud {
   }
 
   /**
+   * A level's own opening line -- see LEVELS' own `story` field. Left in
+   * the DOM throughout rather than toggled with display, so the opacity
+   * change it starts is a transition (see greatwall.css's own
+   * .storyBanner) rather than a cut.
+   */
+  showStory(text) {
+    if (!text) {
+      return;
+    }
+    this.storyText.innerText = text;
+    this.storyBanner.classList.toggle('is-shown', true);
+    clearTimeout(this.storyTimer);
+    this.storyTimer = setTimeout(() => this.closeStory(), STORY_DURATION_MS);
+  }
+
+  closeStory() {
+    clearTimeout(this.storyTimer);
+    this.storyBanner.classList.toggle('is-shown', false);
+  }
+
+  /**
    * The tier picker, pinned above the castle. Each button carries its own
    * click handler and stops the event there, or it would also bubble up to
    * the map's click listener and dispatch a company to wherever the button
@@ -277,9 +319,31 @@ export class Hud {
 
   // --- audio --------------------------------------------------------------
 
+  /**
+   * Swap in a level's own track and start it from the top -- called on
+   * every entry into a level (a fresh start or a restart), never left to
+   * an opt-in button, so music is on by default rather than something a
+   * player has to go find in Settings.
+   */
+  playLevelMusic(src) {
+    if (!src) {
+      this.stopMusic();
+      return;
+    }
+    this.music.src = src;
+    this.music.currentTime = 0;
+    this.playMusic();
+  }
+
+  /** Leaves the level: the music leaves with it. */
+  stopMusic() {
+    this.music.pause();
+    this.music.currentTime = 0;
+  }
+
   playMusic() {
     this.music.play().catch((error) => {
-      console.warn('Background music blocked until the page is clicked:', error.message);
+      console.warn('Music blocked until the page is clicked:', error.message);
     });
   }
 
@@ -294,6 +358,16 @@ export class Hud {
   cycleSoundLevel() {
     this.soundLevel = this.soundLevel > 0 ? this.soundLevel - SOUND_LEVEL_STEP : MAX_SOUND_LEVEL;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
+    this.sfx.setVolume(this.soundLevel / MAX_SOUND_LEVEL);
     this.soundButton.innerText = this.soundLevel === 0 ? 'Sound Off' : `Sound: ${this.soundLevel}`;
+  }
+
+  /**
+   * Sound effects for game actions -- see sfx.js for the clips and main.js's
+   * own onEffect for how `proximity` (0 to 1) is worked out from the event's
+   * world position.
+   */
+  playEffect(name, proximity) {
+    this.sfx.play(name, proximity);
   }
 }

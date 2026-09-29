@@ -400,13 +400,13 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .modal.infomodal { background: transparent; padding: 0; pointer-events: none; }
 
 .infomodal-content {
-	pointer-events: auto;
+	pointer-events: none;
 	position: fixed;
 	top: 84px;
 	right: 22px;
 	width: min(330px, 76vw);
 	margin: 0;
-	padding: 16px 44px 16px 18px;
+	padding: 16px 18px;
 	font-size: 16px;
 	line-height: 1.45;
 	color: var(--parchment);
@@ -423,6 +423,37 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	from { opacity: 0; transform: translateX(24px); }
 	to { opacity: 1; transform: translateX(0); }
 }
+
+/*
+ * The level's own opening line: a scene-setter, not a prompt, so it fades
+ * in slowly rather than snapping on the way the toast above does, and
+ * never gets a backdrop of its own -- the map underneath stays in view
+ * and in reach the entire time it is up.
+ */
+.storyBanner {
+	position: fixed;
+	top: 84px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 14;
+	width: min(520px, 86vw);
+	margin: 0;
+	padding: 20px 44px 20px 24px;
+	font-size: 16px;
+	line-height: 1.6;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-left: 3px solid var(--bronze);
+	box-shadow: var(--lift);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity .6s ease-in;
+}
+
+.storyBanner.is-shown { opacity: 1; pointer-events: auto; }
+
+.storyBanner p { margin: 0; }
 
 .close {
 	position: absolute;

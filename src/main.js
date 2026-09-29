@@ -5,9 +5,14 @@ import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { LEVELS } from './levels.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
+import { clamp, distance } from './geometry.js';
 
 // A long stall must not teleport the camera or fast-forward the game.
 const MAX_FRAME_SECONDS = 0.05;
+
+// How far a sound effect's own world position can sit from the camera's
+// focus before it fades out entirely, in the same ground units as the map.
+const EFFECT_HEARING_RADIUS = 600;
 
 function bind(id, handler) {
   const node = document.getElementById(id);
@@ -21,7 +26,13 @@ class App {
     loadSettings();
     this.hud = new Hud();
     this.camera = new Camera(window.innerWidth, window.innerHeight);
-    this.game = new Game({ onMessage: (text) => this.hud.showMessage(text) });
+    this.game = new Game({
+      onMessage: (text) => this.hud.showMessage(text),
+      onEffect: (name, position) => {
+        this.hud.playEffect(name, this.effectProximity(position));
+        this.hud.closeStory();
+      },
+    });
     this.renderer = new Renderer(
       {
         terrain: document.getElementById('background'),
@@ -73,7 +84,7 @@ class App {
     bind('menuBtn', () => this.openMenu());
     bind('help', () => this.openHelp());
     bind('helpClose', () => this.closeHelp());
-    bind('infoClose', () => this.hud.closeMessage());
+    bind('storyClose', () => this.hud.closeStory());
     bind('move', () => this.input.resetTool());
     bind('zoom', () => this.input.selectTool('zoom'));
     bind('undo', () => this.input.undo());
@@ -102,6 +113,14 @@ class App {
       this.showLevels();
       this.restart();
     });
+  }
+
+  /** 1 at the camera's own focus point, fading to 0 by EFFECT_HEARING_RADIUS out. */
+  effectProximity(position) {
+    if (!position) {
+      return 1;
+    }
+    return clamp(1 - distance(position, this.camera.focus) / EFFECT_HEARING_RADIUS, 0, 1);
   }
 
   toggleAtmosphere() {
@@ -154,6 +173,8 @@ class App {
     this.game.loadLevel(LEVELS[this.chosenLevel]);
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
+    this.hud.playLevelMusic(this.game.level.music);
+    this.hud.showStory(this.game.level.story);
     this.draw();
   }
 

@@ -40,9 +40,13 @@ function stubElement(id) {
     innerText: '',
     loop: false,
     volume: 0,
+    src: '',
+    currentTime: 0,
+    paused: true,
     listeners: new Map(),
     getContext: () => stubContext(),
-    play: () => Promise.resolve(),
+    play() { this.paused = false; return Promise.resolve(); },
+    pause() { this.paused = true; },
     addEventListener(type, handler) {
       this.listeners.set(type, handler);
     },
@@ -102,6 +106,9 @@ test('the app boots, plays frames and reacts to input without touching a missing
   // Start the game, then run the frames the loop queues up.
   dom.elements.get('startBtn2').listeners.get('click')();
   dom.elements.get('helpClose').listeners.get('click')();
+  const music = dom.elements.get('backgroundmusic');
+  assert.match(music.src, /sounds\/level_1\.mp3$/, 'starting a level cues that level\'s own track');
+  assert.equal(music.paused, false, 'music plays once a level has started');
   for (let frame = 0; frame < 200 && dom.frames.length > 0; frame += 1) {
     dom.frames.shift()();
   }
@@ -122,6 +129,7 @@ test('the app boots, plays frames and reacts to input without touching a missing
   for (const id of ['buildTool', 'destroyTool', 'upgradeTool', 'zoom', 'move', 'menuBtn']) {
     dom.elements.get(id).listeners.get('click')();
   }
+  assert.equal(music.paused, true, 'leaving to the menu stops the level\'s music');
   dom.elements.get('buildTool').listeners.get('click')();
   // Clear of the city footprint the whole way, so the drag lays a section
   // instead of being rejected as crossing the castle.

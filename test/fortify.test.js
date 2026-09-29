@@ -39,6 +39,22 @@ test('fortifying grows the section already there rather than adding one', () => 
   assert.equal(wall.tier, 1);
 });
 
+test('fortifying and repairing both blink the section to confirm the order landed', () => {
+  const game = gameWith();
+  const wall = standing(game);
+  assert.equal(wall.isFlashing, false);
+
+  game.upgradeWallAt(AT);
+  assert.equal(wall.isFlashing, true);
+
+  stepSeconds(game, WALL.flashSeconds);
+  assert.equal(wall.isFlashing, false, 'the blink runs down on its own');
+
+  wall.health -= 10;
+  game.repairWallAt(AT);
+  assert.equal(wall.isFlashing, true);
+});
+
 test('a plain section stands one wide and one tall', () => {
   const wall = new Wall({ x: 0, y: 0 }, { x: 100, y: 0 });
   assert.equal(wall.heightScale, 1);

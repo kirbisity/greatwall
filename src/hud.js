@@ -88,6 +88,8 @@ export class Hud {
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
     this.music = element('backgroundmusic');
+    this.buildToolButton = element('buildTool');
+    this.attackToolButton = element('attackTool');
     this.dispatchMenu = element('dispatchMenu');
     this.dispatchButtons = [
       element('dispatchOption0'),
@@ -155,6 +157,10 @@ export class Hud {
       this.shownSeason = game.season;
       this.seasonLabel.innerText = SEASONS[game.season % SEASONS.length].name;
     }
+    // Greyed rather than hidden or blocked: a poor treasury is a reason to
+    // wait, not a reason the tool should stop working the moment it can.
+    this.buildToolButton.classList.toggle('is-disabled', !game.canAffordToBuild);
+    this.attackToolButton.classList.toggle('is-disabled', !game.canAffordToAttack);
   }
 
   /** Light up the button for the active tool and dim the rest. */

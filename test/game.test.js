@@ -321,6 +321,37 @@ test('sendGuard refuses a company the treasury cannot afford', () => {
   assert.equal(game.guards.length, 0);
 });
 
+// --- affordability, for Hud's own greying of the Build and Attack tools ---
+
+test('canAffordToBuild wants coin for a few sections, not just one', () => {
+  const game = new Game({ random: fixedRandom() });
+  const oneSection = game.wallCost(WALL.minLength);
+
+  game.tokens = oneSection;
+  assert.equal(game.canAffordToBuild, false, 'one section worth is not enough to read as affordable');
+
+  game.tokens = oneSection * 3;
+  assert.equal(game.canAffordToBuild, true);
+});
+
+test('canAffordToAttack looks at the cheapest company this castle can field', () => {
+  const game = new Game({ random: fixedRandom() });
+  const cheapest = Math.min(...game.dispatchOptions().map((option) => option.cost));
+
+  game.tokens = cheapest - 1;
+  assert.equal(game.canAffordToAttack, false);
+
+  game.tokens = cheapest;
+  assert.equal(game.canAffordToAttack, true);
+});
+
+test('canAffordToAttack is false with no castle left to field a company', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  game.castles = [];
+  assert.equal(game.canAffordToAttack, false);
+});
+
 // --- upgrading rebuilds gradually, keeping the old stats meanwhile ---------
 
 test('the wall planning phase now takes twice as long as it used to', () => {

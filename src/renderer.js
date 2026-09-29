@@ -11,6 +11,7 @@ import {
   TERRAIN,
   TOWER_HEIGHT_UNITS,
   TOWER_RADIUS_UNITS,
+  WALL,
   WALL_HEIGHT_UNITS,
   WALL_THICKNESS_UNITS,
 } from './config.js';
@@ -281,6 +282,11 @@ const HOVER_TINT = [255, 214, 64];
 const HOVER_PULSE_RATE = 5;
 const HOVER_MIN = 0.25;
 const HOVER_MAX = 0.85;
+
+// Confirms an order landed -- see Wall#flash -- with a brighter, quicker
+// blink than the hover highlight above, so the two read as different things.
+const FLASH_TINT = [255, 255, 255];
+const FLASH_PULSE_RATE = 16;
 
 /** Blend a tint towards another by `amount`, 0 leaving it alone. */
 function blended(tint, towards, amount) {
@@ -1052,9 +1058,17 @@ export class Renderer {
         ? taperedWallQuads(wall.start, wall.end, halfWidth, halfWidth * WALL_TAPER, height, ground)
         : wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
-      const tint = wall === hoveredWall
+      let tint = wall === hoveredWall
         ? blended(wallTint(condition), HOVER_TINT, pulse)
         : wallTint(condition);
+      if (wall.isFlashing) {
+        // Fades out as flashSeconds runs down, and blinks quickly rather
+        // than glowing steadily, so it reads as a confirmation rather than
+        // another hover highlight.
+        const strength = wall.flashSeconds / WALL.flashSeconds;
+        const blink = strength * (0.5 + 0.5 * Math.sin(this.clock * FLASH_PULSE_RATE));
+        tint = blended(tint, FLASH_TINT, blink);
+      }
       this.collectPrism(items, view, flat ? [quads[0]] : quads, tint);
     }
   }

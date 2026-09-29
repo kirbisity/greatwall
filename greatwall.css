@@ -185,7 +185,7 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .toolButton.is-active img { filter: invert(78%) sepia(64%) saturate(520%) hue-rotate(2deg); }
 .toolButton.is-active .toolName { color: var(--bronze); }
 
-.toolButton.is-disabled { opacity: .35; cursor: not-allowed; }
+.toolButton.is-disabled { opacity: .4; filter: grayscale(.7); cursor: not-allowed; }
 .toolButton.is-disabled:hover { border-color: transparent; transform: none; }
 
 /* --- dispatch menu ------------------------------------------------------ */

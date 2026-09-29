@@ -29,12 +29,24 @@ export class Wall {
     // entity to the scene -- only scale to the one already there.
     this.tier = 0;
     this.upgrade = null;
+    // >0 for a moment after an order lands -- see flash. Purely cosmetic:
+    // the renderer reads it, nothing else does.
+    this.flashSeconds = 0;
     // Last, because maxHealth reads the tier this section is standing at.
     this.health = this.maxHealth * built;
   }
 
   get isPlanned() {
     return this.planSeconds > 0;
+  }
+
+  get isFlashing() {
+    return this.flashSeconds > 0;
+  }
+
+  /** A brief blink to confirm an order actually landed on this section. */
+  flash() {
+    this.flashSeconds = WALL.flashSeconds;
   }
 
   get isRepairing() {
@@ -90,6 +102,7 @@ export class Wall {
 
   /** Raise the section, making good any damage taken while it went up. */
   raise(seconds) {
+    this.flashSeconds = Math.max(0, this.flashSeconds - seconds);
     if (this.planSeconds > 0) {
       this.planSeconds = Math.max(0, this.planSeconds - seconds);
       return;

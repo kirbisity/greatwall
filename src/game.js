@@ -48,6 +48,9 @@ const SEASONS_PER_YEAR = 4;
 const AUTUMN = 2;
 const WINTER = 3;
 const WALL_HINT_SECONDS = 20;
+// How many of the cheapest possible section the treasury must cover before
+// the Build button stops reading as affordable -- see canAffordToBuild.
+const MIN_AFFORDABLE_WALLS = 3;
 const UPGRADE_HINT_SECONDS = 40;
 
 /** Random offset that lands outside the safe radius around the castle. */
@@ -280,6 +283,17 @@ export class Game {
 
   wallCost(length) {
     return Math.trunc(length * WALL.costPerUnit * this.buildMultiplier);
+  }
+
+  /** Whether there is coin for at least a few of the cheapest possible section -- see Hud's own greying of the Build button. */
+  get canAffordToBuild() {
+    return this.tokens >= this.wallCost(WALL.minLength) * MIN_AFFORDABLE_WALLS;
+  }
+
+  /** Whether there is coin for the cheapest company this castle can field right now. */
+  get canAffordToAttack() {
+    const options = this.dispatchOptions();
+    return options.length > 0 && this.tokens >= Math.min(...options.map((option) => option.cost));
   }
 
   // --- simulation ---------------------------------------------------------
@@ -1116,6 +1130,7 @@ export class Game {
     }
     this.tokens -= cost;
     wall.beginRepair();
+    wall.flash();
     this.onEffect('repair', wallMidpoint(wall));
     return { status: 'repairing', wall, cost };
   }
@@ -1160,21 +1175,44 @@ export class Game {
     return { status: 'built', wall, start, end };
   }
 
-  /** Demolish anything standing where a structure now does, refunding it. */
-  clearWallsUnder(castle) {
+  /**
+   * A section the castle's larger footprint would now stand on is not
+   * demolished -- it is pushed straight back to the new edge, the same
+   * offset carrying both ends so the section keeps its own length and
+   * orientation, just moved. Only one a plain push cannot clear -- a corner
+   * clipped rather than crossed square-on, or one so short afterwards it
+   * would collapse to nothing -- falls back to being razed and refunded,
+   * the way every section here used to be.
+   */
+  pushWallsToNewBrim(castle) {
     const standing = [];
-    let cleared = 0;
+    let moved = 0;
+    let razed = 0;
     for (const wall of this.walls) {
-      if (!wall.isPlanned
-        && segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
-        this.tokens += wall.refundValue;
-        cleared += 1;
-      } else {
+      if (wall.isPlanned || !segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
         standing.push(wall);
+        continue;
       }
+      const midpoint = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+      const brim = closestPointOnSquare(midpoint, castle.position, castle.type.footprint);
+      const offset = { x: brim.x - midpoint.x, y: brim.y - midpoint.y };
+      const start = { x: wall.start.x + offset.x, y: wall.start.y + offset.y };
+      const end = { x: wall.end.x + offset.x, y: wall.end.y + offset.y };
+      const stillCrosses = segmentEntersSquare(start, end, castle.position, castle.type.footprint);
+      if (stillCrosses || distance(start, end) < WALL.minLength) {
+        this.tokens += wall.refundValue;
+        razed += 1;
+        continue;
+      }
+      wall.start = start;
+      wall.end = end;
+      wall.length = distance(start, end);
+      wall.flash();
+      standing.push(wall);
+      moved += 1;
     }
     this.walls = standing;
-    return cleared;
+    return { moved, razed };
   }
 
   /**
@@ -1246,6 +1284,7 @@ export class Game {
     }
     this.tokens -= cost;
     wall.beginUpgrade();
+    wall.flash();
     this.onEffect('fortify', wallMidpoint(wall));
     return { status: 'working', wall, cost, name: next.name };
   }
@@ -1296,11 +1335,15 @@ export class Game {
     this.castles[index] = upgraded;
     this.levelUnderCities();
     this.clearHousesUnder(upgraded);
-    const cleared = this.clearWallsUnder(upgraded);
-    const razed = cleared > 0
-      ? ` ${cleared} wall section${cleared === 1 ? '' : 's'} cleared for it.`
-      : '';
-    this.onMessage(`Upgraded to ${upgraded.type.name}.${razed}`);
+    const { moved, razed } = this.pushWallsToNewBrim(upgraded);
+    const parts = [];
+    if (moved > 0) {
+      parts.push(` ${moved} wall section${moved === 1 ? '' : 's'} pushed back to the new wall line.`);
+    }
+    if (razed > 0) {
+      parts.push(` ${razed} wall section${razed === 1 ? '' : 's'} could not be saved and ${razed === 1 ? 'was' : 'were'} cleared.`);
+    }
+    this.onMessage(`Upgraded to ${upgraded.type.name}.${parts.join('')}`);
     return true;
   }
 }

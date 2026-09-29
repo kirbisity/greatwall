@@ -86,6 +86,9 @@ export const WALL = {
   // to count it as the one being pointed at.
   pickRadius: 20,
   reachMargin: 2,
+  // How long a section blinks for after a repair or fortify order lands, or
+  // after it is pushed back to a newly grown city's edge -- see Wall#flash.
+  flashSeconds: 0.6,
   // Coin per standing section, charged with the rest of the income each
   // payout — a wall is upkeep, not just a one-off purchase.
   upkeepPerSection: 1,

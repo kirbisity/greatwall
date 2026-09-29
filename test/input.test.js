@@ -92,6 +92,39 @@ test('moving off a section to open ground clears the highlight', () => {
   assert.equal(renderer.hoveredWall, null);
 });
 
+// --- tapping repair or fortify, without a swipe across the section --------
+
+test('a single tap with the repair tool mends whatever is under it', () => {
+  const repaired = [];
+  const { input } = makeInput({
+    game: {
+      repairWallAt: (point) => { repaired.push(point); return { status: 'repairing' }; },
+    },
+  });
+  input.selectTool('repair');
+  input.handleClick({ clientX: 300, clientY: 200 });
+  assert.equal(repaired.length, 1, 'a plain tap should act, not just a drag');
+  assert.deepEqual(repaired[0], { x: 300, y: 200 });
+});
+
+test('a single tap with the fortify tool works the same way', () => {
+  const fortified = [];
+  const { input } = makeInput({
+    game: {
+      upgradeWallAt: (point) => { fortified.push(point); return { status: 'working' }; },
+    },
+  });
+  input.selectTool('fortify');
+  input.handleClick({ clientX: 250, clientY: 180 });
+  assert.equal(fortified.length, 1);
+});
+
+test('tapping repair on open ground with nothing to mend is a quiet no-op', () => {
+  const { input } = makeInput({ game: { repairWallAt: () => ({ status: 'none' }) } });
+  input.selectTool('repair');
+  assert.doesNotThrow(() => input.handleClick({ clientX: 100, clientY: 100 }));
+});
+
 // --- ordering an attack -------------------------------------------------
 
 /** An Input wired to a game that records the companies it is asked to send. */
@@ -228,6 +261,22 @@ function gestureInput({ tool = 'move', game = {} } = {}) {
 }
 
 const finger = (pointerId, clientX, clientY) => ({ pointerId, pointerType: 'touch', clientX, clientY });
+
+test('a finger landing on the map captures the pointer, so a drag cannot be lost to a button it crosses', () => {
+  const { input } = gestureInput();
+  const captured = [];
+  const target = { setPointerCapture: (id) => captured.push(id) };
+  input.handlePointerDown({ ...finger(7, 300, 300), target });
+  assert.deepEqual(captured, [7]);
+});
+
+test('a mouse click does not bother capturing the pointer', () => {
+  const { input } = gestureInput();
+  const captured = [];
+  const target = { setPointerCapture: (id) => captured.push(id) };
+  input.handlePointerDown({ pointerId: 1, pointerType: 'mouse', clientX: 300, clientY: 300, target });
+  assert.equal(captured.length, 0);
+});
 
 test('one finger dragging the map pans it, the way the mouse does', () => {
   const { input, calls } = gestureInput();

@@ -100,6 +100,12 @@ export class Input {
     if (!this.startsOnMap(event)) {
       return;
     }
+    // Without this, a finger that drifts over a button mid-drag can lose the
+    // gesture to it instead -- captured, every later event for this pointer
+    // keeps coming here regardless of what it is currently over.
+    if (event.pointerType !== 'mouse' && event.target?.setPointerCapture) {
+      event.target.setPointerCapture(event.pointerId);
+    }
     this.contacts.set(event.pointerId ?? 0, { x: event.clientX, y: event.clientY });
     if (this.contacts.size === 1) {
       // Sync first so the initial drag delta is zero instead of a jump from (0, 0).
@@ -273,6 +279,22 @@ export class Input {
     if (this.tool === 'attack') {
       this.trackPointer(event);
       this.orderAttack(this.pointerOnGround());
+      this.onChange();
+      return;
+    }
+    // Repair and Fortify no longer need a drag across the section -- a
+    // single tap in its vicinity (see WALL.pickRadius) is enough, which
+    // matters far more on a touchscreen than a mouse: sweeping precisely
+    // along a thin wall with a fingertip is genuinely hard.
+    if (this.tool === 'repair') {
+      this.trackPointer(event);
+      this.dragRepair();
+      this.onChange();
+      return;
+    }
+    if (this.tool === 'fortify') {
+      this.trackPointer(event);
+      this.dragFortify();
       this.onChange();
     }
   }

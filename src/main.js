@@ -76,6 +76,7 @@ class App {
     bind('infoClose', () => this.hud.closeMessage());
     bind('move', () => this.input.resetTool());
     bind('zoom', () => this.input.selectTool('zoom'));
+    bind('undo', () => this.input.undo());
     bind('buildTool', () => {
       this.game.wallHintShown = true;
       this.input.selectTool('build');

@@ -1,0 +1,42 @@
+# Publishes the game to GitHub Pages. There is no build: the game is plain
+# ES modules, so the site is the game's own files, copied as they are.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    # feat/mobile-play publishes too while master still predates the game it
+    # would publish (PR #19). Remove it once that chain has landed on master.
+    branches: [master, feat/mobile-play]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never abandon one half way through.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only what the page loads. Tests and tooling stay out of the site.
+      - name: Assemble the site
+        run: |
+          mkdir _site
+          cp -R index.html greatwall.html greatwall.css manifest.webmanifest src images sounds _site/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

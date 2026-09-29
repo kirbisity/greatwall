@@ -24,6 +24,11 @@ const HOVER_TOOLS = new Set(['repair', 'fortify']);
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
 
+// Anything a gesture can start on that is interface rather than map. A drag
+// that begins on a button, the dock or a menu must not move the camera or
+// lay stone, and a tap on one must not also land on the ground beneath it.
+const INTERFACE = 'button, a, input, #topMenu, #toolDock, #dispatchMenu, .overlay, .modal';
+
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {
   constructor({ game, camera, renderer, hud, onChange, onMenu }) {
@@ -41,6 +46,14 @@ export class Input {
     this.tool = 'move';
     this.pointerDown = false;
     this.pointer = { x: 0, y: 0 };
+    // Every finger or pointer currently down on the map, by pointer id. Two
+    // at once is a pinch: see beginPinch.
+    this.contacts = new Map();
+    this.pinch = null;
+    // Whether the drag in hand is a finger or stylus, which holds the ground
+    // it grabbed, rather than a mouse, which eases after it -- see
+    // Camera#panFrom.
+    this.holdsGround = false;
     this.zoomAnchor = null;
     this.chainPoint = null;
     // Which guard tier the dispatch menu last picked. Sticky across sends,
@@ -48,22 +61,113 @@ export class Input {
     this.selectedGuardType = null;
   }
 
+  /**
+   * Pointer events rather than mouse events, so a finger and a mouse arrive
+   * through the same handlers: one contact behaves exactly as the mouse
+   * always has, and a second one turns the gesture into a pinch.
+   */
   listen() {
-    document.addEventListener('mousedown', (event) => {
+    document.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
+    document.addEventListener('pointermove', (event) => this.handlePointerMove(event));
+    document.addEventListener('pointerup', (event) => this.handlePointerUp(event));
+    document.addEventListener('pointercancel', (event) => this.handlePointerUp(event));
+    document.addEventListener('click', (event) => this.handleClick(event));
+    document.addEventListener('wheel', (event) => this.handleWheel(event));
+    document.addEventListener('keydown', (event) => this.handleKey(event));
+  }
+
+  /** Whether a gesture begins on the map rather than on the interface over it. */
+  startsOnMap(event) {
+    const target = event.target;
+    if (target && typeof target.closest === 'function' && target.closest(INTERFACE)) {
+      return false;
+    }
+    return this.isOverMap(event);
+  }
+
+  handlePointerDown(event) {
+    if (!this.startsOnMap(event)) {
+      return;
+    }
+    this.contacts.set(event.pointerId ?? 0, { x: event.clientX, y: event.clientY });
+    if (this.contacts.size === 1) {
       // Sync first so the initial drag delta is zero instead of a jump from (0, 0).
       this.trackPointer(event);
       this.pointerDown = true;
-    });
-    document.addEventListener('mouseup', () => {
-      this.pointerDown = false;
-      this.zoomAnchor = null;
-      this.chainPoint = null;
-      this.camera.release();
-    });
-    document.addEventListener('click', (event) => this.handleClick(event));
-    document.addEventListener('mousemove', (event) => this.handleMove(event));
-    document.addEventListener('wheel', (event) => this.handleWheel(event));
-    document.addEventListener('keydown', (event) => this.handleKey(event));
+      this.holdsGround = event.pointerType === 'touch' || event.pointerType === 'pen';
+      return;
+    }
+    this.beginPinch();
+  }
+
+  handlePointerMove(event) {
+    const id = event.pointerId ?? 0;
+    if (this.contacts.has(id)) {
+      this.contacts.set(id, { x: event.clientX, y: event.clientY });
+    }
+    if (this.pinch) {
+      if (this.contacts.size >= 2) {
+        this.updatePinch();
+      }
+      return;
+    }
+    this.handleMove(event);
+  }
+
+  handlePointerUp(event) {
+    this.contacts.delete(event.pointerId ?? 0);
+    if (this.pinch) {
+      // The finger left behind does nothing until it too is lifted: picking
+      // a wall back up mid-gesture would lay stone the player never drew.
+      if (this.contacts.size < 2) {
+        this.pinch = null;
+        this.camera.release();
+      }
+      return;
+    }
+    if (this.contacts.size > 0) {
+      return;
+    }
+    this.pointerDown = false;
+    this.zoomAnchor = null;
+    this.chainPoint = null;
+    this.camera.release();
+  }
+
+  /**
+   * A second finger turns whatever the first was doing into a camera move.
+   * A wall half drawn by the first finger is dropped rather than finished,
+   * since the player has plainly stopped drawing it.
+   */
+  beginPinch() {
+    this.pointerDown = false;
+    this.chainPoint = null;
+    this.zoomAnchor = null;
+    this.pinch = this.measurePinch();
+  }
+
+  /** The gap between the first two contacts, and the point halfway between them. */
+  measurePinch() {
+    const [first, second] = this.contacts.values();
+    return {
+      gap: Math.hypot(second.x - first.x, second.y - first.y),
+      midpoint: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+    };
+  }
+
+  /**
+   * Zoom by how far the fingers have spread since the last move, about the
+   * point between them, and pan by how far that point has travelled -- the
+   * ground under the fingers stays under the fingers.
+   */
+  updatePinch() {
+    const now = this.measurePinch();
+    if (this.pinch.gap > 0 && now.gap > 0) {
+      this.camera.zoomAt(now.midpoint, now.gap / this.pinch.gap, { direct: true });
+    }
+    this.camera.panFrom(this.pinch.midpoint, now.midpoint, { direct: true });
+    this.pinch = now;
+    this.onChange();
   }
 
   selectTool(tool) {
@@ -89,7 +193,14 @@ export class Input {
     if (!castle || options.length === 0) {
       return;
     }
-    const screen = this.camera.toScreen({ ...castle.position, z: 0 })
+    // Over the roof, where the castle actually stands. At sea level the
+    // picker landed on top of a keep standing up a hill.
+    const { x, y } = castle.position;
+    const definition = this.game.buildings?.[castle.typeId];
+    const roof = definition && this.renderer.structureFor
+      ? this.renderer.structureFor(definition).height
+      : 0;
+    const screen = this.camera.toScreen({ x, y, z: this.groundHeight(x, y) + roof })
       ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
     this.hud.showDispatchMenu(options, screen, (typeId) => {
       this.selectedGuardType = typeId;
@@ -128,7 +239,7 @@ export class Input {
   }
 
   handleClick(event) {
-    if (!this.isOverMap(event)) {
+    if (!this.startsOnMap(event)) {
       return;
     }
     if (this.tool === 'upgrade') {
@@ -185,7 +296,7 @@ export class Input {
         this.dragFortify();
         break;
       default:
-        this.camera.panFrom(previous, this.pointer);
+        this.camera.panFrom(previous, this.pointer, { direct: this.holdsGround });
     }
     this.onChange();
   }
@@ -305,8 +416,13 @@ export class Input {
       return;
     }
     if (event.ctrlKey && event.code === 'KeyZ') {
-      this.game.undoLastWall();
-      this.onChange();
+      this.undo();
     }
+  }
+
+  /** Take back the last section laid -- Ctrl+Z, or the undo button on a touchscreen. */
+  undo() {
+    this.game.undoLastWall();
+    this.onChange();
   }
 }

@@ -25,7 +25,7 @@ import {
   projectPoint,
 } from './projection.js';
 import { Atmosphere } from './atmosphere.js';
-import { seasonBlend } from './season.js';
+import { seasonBlend, seasonalColorMix, snowCoverAt } from './season.js';
 import { settings } from './settings.js';
 import { compileStructure } from './structures.js';
 import { compileUnit } from './units.js';
@@ -110,11 +110,45 @@ const GOLD_STEPS = 24;
 // cover an 18-unit drop in a single 9-unit cell.
 const MIN_GROUND_LIGHT = 0.55;
 const TRUNK_DISTANCE = 420;
+// The canopy's two tiers, as a fraction of tree.size for the tier boundary
+// and of the full spread for the narrower cap -- and how much brighter or
+// darker than the plain colour each tier reads, a cheap stand-in for the
+// cap catching open sky and the skirt sitting in its shadow.
+const CANOPY_WAIST_HEIGHT = 1.6;
+const CANOPY_CAP_SPREAD = 0.6;
+const CANOPY_CAP_LIGHT = 1.22;
+const CANOPY_SKIRT_LIGHT = 0.8;
+// Wind: a canopy leans on the clock rather than standing rigid, the cap
+// leaning further than the waist beneath it for a bend rather than a tilt.
+// The trunk and the ground it stands on never move, only what is above them.
+const TREE_SWAY_RATE = 0.9;
+const TREE_SWAY_AMOUNT = 0.16;
+const TREE_SWAY_WAIST_SHARE = 0.5;
+// A flat shadow under a standing object, offset toward one screen corner
+// rather than derived from SUN's own direction -- cheap, and a stylised
+// shadow reads fine without tracking the light exactly. Shared between
+// trees and buildings so every shadow in the scene leans the same way.
+const SHADOW_SIDES = 10;
+const SHADOW_OFFSET_X = 0.25;
+const SHADOW_OFFSET_Y = 0.12;
+const SHADOW_RADIUS_X = 0.75;
+const SHADOW_RADIUS_Y = 0.32;
+const SHADOW_FILL = 'rgba(20, 16, 12, 0.28)';
+// A glint on standing water, sampled once per ground repaint and animated
+// on the clock rather than resampled every frame -- see
+// Renderer#sampleShimmerPoints/drawShimmer.
+const SHIMMER_STRIDE = 40;
+const SHIMMER_MAX_POINTS = 40;
+const SHIMMER_MIN_CHANNEL = 0.2;
+const SHIMMER_RATE = 1.6;
+const SHIMMER_RADIUS = 1.1;
+const SHIMMER_MAX_ALPHA = 0.55;
+// Below this, a glint is too dim to bother filling a path for -- most
+// points most frames, which is what keeps a few dozen of them cheap.
+const SHIMMER_VISIBLE_ABOVE = 0.45;
 const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
-const TRUNK_FILL = 'rgb(84,62,42)';
-const CANOPY_FILL = 'rgb(74,96,58)';
 
 // A beached raiding hull: how long, how wide at the stern and at the bow,
 // and how tall the freeboard, deckhouse and mast stand above the keel.
@@ -151,6 +185,41 @@ function shade(tint, light) {
 function hash(seed) {
   const s = Math.sin(seed * 12.9898) * 43758.5453;
   return s - Math.floor(s);
+}
+
+/**
+ * A flat ellipse under a standing object, as a cheap polygon rather than a
+ * separate drawing path -- it goes through the same points-and-fill item
+ * every other flat thing in the scene already does (see Renderer#paint).
+ * `spread` is whatever screen-space size the object's own base already
+ * reads as, so the shadow scales with it for free.
+ */
+function shadowPoints(foot, spread) {
+  const cx = foot.x + spread * SHADOW_OFFSET_X;
+  const cy = foot.y + spread * SHADOW_OFFSET_Y;
+  const rx = spread * SHADOW_RADIUS_X;
+  const ry = spread * SHADOW_RADIUS_Y;
+  const points = [];
+  for (let i = 0; i < SHADOW_SIDES; i += 1) {
+    const angle = (i / SHADOW_SIDES) * Math.PI * 2;
+    points.push({ x: cx + Math.cos(angle) * rx, y: cy + Math.sin(angle) * ry });
+  }
+  return points;
+}
+
+/**
+ * One kite-shaped tier of a canopy: an apex, two shoulders, and a bottom
+ * point pulled down past the shoulders for a slight belly rather than a
+ * straight-sided cone. The same shape serves both of a tree's tiers,
+ * parameterised by height and width.
+ */
+function canopyTierPoints(apex, footX, baseY, spread) {
+  return [
+    apex,
+    { x: footX + spread * 0.8, y: baseY },
+    { x: footX, y: baseY + spread * 0.35 },
+    { x: footX - spread * 0.8, y: baseY },
+  ];
 }
 
 const FILL_PATTERN = /rgb\((\d+),(\d+),(\d+)\)/;
@@ -358,6 +427,7 @@ export class Renderer {
     this.overlay = structures.getContext('2d');
     this.camera = camera;
     this.paintedGround = null;
+    this.shimmerPoints = [];
     // The section the repair or fortify tool would act on, set by Input as
     // the cursor moves. Null whenever neither tool is selected, or nothing
     // is under the cursor.
@@ -495,6 +565,7 @@ export class Renderer {
     // before the game actually ends.
     const blacken = game.isDefeated ? clamp(game.breachFraction, 0, 1) : 0;
     this.collectBoats(items, view, game.landings, game.terrain);
+    this.collectLandmarks(items, paving, view, game, game.terrain);
     this.collectCastles(items, paving, view, game, game.terrain, blacken);
     const wallStyle = wallStyleOf(game.level);
     this.collectWalls(items, view, game.walls, game.terrain, this.hoveredWall, wallStyle);
@@ -502,16 +573,22 @@ export class Renderer {
       this.collectTowers(items, view, game.walls, game.terrain);
     }
     this.collectHouses(items, view, game.houses, game.terrain, game.houseDefinition ?? HOUSE_DEFINITION);
+    this.collectWoods(items, view, game, this.groundBounds(GROUND_SPAN));
     this.collectRaiders(items, view, game.raiders, game.terrain);
     this.collectRaiders(items, view, game.guards, game.terrain);
     items.sort((a, b) => b.depth - a.depth);
     this.paint(paving);
     this.paint(items);
 
-    // Haze and cloud sit above the world but below the readouts.
+    // Atmosphere: haze, cloud, snow and the water's own glint, all under the
+    // one setting a player can turn off for a clearer view or a slower
+    // machine. The glint sits beneath the rest, so distant shimmer dims
+    // with the same haze that dims everything else out there.
     if (settings.atmosphere) {
+      this.drawShimmer(view, game);
       this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawClouds(this.overlay, game.seasonPhase);
+      this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.level.mist);
+      this.atmosphere.drawSnow(this.overlay, game.seasonPhase, game.level.climate);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
@@ -529,11 +606,10 @@ export class Renderer {
    * The ground: a shaded mesh of the landscape with its woodland standing on
    * it, painted onto its own layer.
    *
-   * None of it moves, so it is only repainted when the view does. While the
-   * camera is still — which is most of a fight — the whole landscape costs
-   * nothing at all. Ground colour is fixed by position, not by season, so
-   * this never needs repainting for the year turning either — only the fog
-   * over it does that.
+   * None of it moves, so it is only repainted when the view does, or when
+   * the year has turned enough to matter — the grass gilding in autumn, or
+   * a wood's own canopy turning through the seasons — tracked as a coarse,
+   * quantised step in the cache key below rather than every frame.
    *
    * The key is the camera's exact numbers, not a rounded fingerprint of
    * them: settling the camera snaps focus, distance and elevation to their
@@ -552,9 +628,18 @@ export class Renderer {
     // the eye catches over the minute it takes.
     const gold = seasonBlend(game.seasonPhase).groundGold;
     const turned = Math.round(gold * GOLD_STEPS) / GOLD_STEPS;
+    // A winter's own settling, quantised the same coarse way autumn's turn
+    // already is -- see Season#snowCoverAt for how a level's own climate
+    // can hold this at zero the whole year round.
+    const snowCover = snowCoverAt(game.seasonPhase, game.level.climate);
+    const settled = Math.round(snowCover * GOLD_STEPS) / GOLD_STEPS;
     // Reshaped ground is part of what the mesh draws, so a platform climbing
-    // has to count as a change the same way the camera moving does.
-    const key = `${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${game.terrainRevision}`;
+    // has to count as a change the same way the camera moving does. The
+    // level's own id is part of the key too: switching levels swaps in a
+    // whole new Terrain, and without the id here that swap can go
+    // unnoticed if the camera happens to end up back where it started,
+    // leaving the previous level's ground painted under the new one.
+    const key = `${game.level.id}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${settled}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -571,12 +656,16 @@ export class Renderer {
     this.ground.fillStyle = wash;
     this.ground.fillRect(0, 0, width, height);
 
-    // The coarse backdrop first, so the fine mesh -- and the woods, which
-    // only ever stand on it -- paint over it wherever it actually matters.
-    this.drawLandscape(game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE, turned);
+    // The coarse backdrop first, so the fine mesh paints over it wherever
+    // it actually matters.
+    this.drawLandscape(
+      game.terrain, this.groundBounds(FAR_GROUND_SPAN), TERRAIN.cellSize * FAR_CELL_SCALE, turned, snowCover,
+    );
     const bounds = this.groundBounds(GROUND_SPAN);
-    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize, turned);
-    this.drawWoods(game, bounds);
+    this.drawLandscape(game.terrain, bounds, TERRAIN.cellSize, turned, snowCover);
+    // Where the water's own glint can stand, sampled once here rather than
+    // searched for every frame -- see sampleShimmerPoints/drawShimmer.
+    this.shimmerPoints = this.sampleShimmerPoints(game.terrain, bounds);
   }
 
   /** Mesh scratch big enough for `count` corners, kept between repaints. */
@@ -612,6 +701,58 @@ export class Renderer {
   }
 
   /**
+   * Where a glint can stand on open water within `bounds`, on a coarse
+   * lattice rather than the fine mesh's own -- a shimmer is a few dozen
+   * points animated on the clock, not a texture, so it does not need one
+   * per tile. Capped besides, so a sea's whole reach costs the same as a
+   * single pond's.
+   */
+  sampleShimmerPoints(terrain, bounds) {
+    const points = [];
+    for (let x = bounds.minX; x <= bounds.maxX; x += SHIMMER_STRIDE) {
+      for (let y = bounds.minY; y <= bounds.maxY; y += SHIMMER_STRIDE) {
+        const channel = Math.max(terrain.riverAt(x, y), terrain.seaAt(x, y), terrain.pondAt(x, y));
+        if (channel > SHIMMER_MIN_CHANNEL) {
+          points.push({ x, y, phase: hash(x * 12.9 + y * 7.7) * Math.PI * 2 });
+          if (points.length >= SHIMMER_MAX_POINTS) {
+            return points;
+          }
+        }
+      }
+    }
+    return points;
+  }
+
+  /**
+   * The glints themselves, re-projected fresh every frame since the points
+   * were only ever cached in world space -- but there are never more than
+   * SHIMMER_MAX_POINTS of them, and most sit below SHIMMER_VISIBLE_ABOVE on
+   * any given frame and are skipped before a path is even opened.
+   */
+  drawShimmer(view, game) {
+    if (this.shimmerPoints.length === 0) {
+      return;
+    }
+    const context = this.overlay;
+    const clock = this.clock;
+    for (const point of this.shimmerPoints) {
+      const twinkle = 0.5 + 0.5 * Math.sin(clock * SHIMMER_RATE + point.phase);
+      if (twinkle < SHIMMER_VISIBLE_ABOVE) {
+        continue;
+      }
+      const ground = game.terrain.heightAt(point.x, point.y);
+      const screen = projectPoint(view, point.x, point.y, ground);
+      if (!screen) {
+        continue;
+      }
+      context.fillStyle = `rgba(255,255,255,${(twinkle * SHIMMER_MAX_ALPHA).toFixed(3)})`;
+      context.beginPath();
+      context.arc(screen.x, screen.y, SHIMMER_RADIUS, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+
+  /**
    * The mesh, one flat-filled tile per cell.
    *
    * Every corner is shared by up to four tiles, and each tile also leans on
@@ -620,7 +761,7 @@ export class Renderer {
    * times. The corners are walked once here instead and the tiles read back
    * from that, which is where nearly all of this pass's cost went.
    */
-  drawLandscape(terrain, bounds, cell, gold = 0) {
+  drawLandscape(terrain, bounds, cell, gold = 0, snowCover = 0) {
     const context = this.ground;
     const view = this.camera.view;
     const { width, height } = this.camera;
@@ -696,7 +837,7 @@ export class Renderer {
           MIN_GROUND_LIGHT,
           lightingForVector(normalX / length, normalY / length, 1 / length),
         );
-        terrain.groundTintAt(xs[i], ys[j], tint, gold);
+        terrain.groundTintAt(xs[i], ys[j], tint, gold, snowCover);
         const red = Math.round(tint[0] * light);
         const green = Math.round(tint[1] * light);
         const blue = Math.round(tint[2] * light);
@@ -718,12 +859,38 @@ export class Renderer {
     }
   }
 
-  /** Woodland, drawn with the ground because it never moves either. */
-  drawWoods(game, bounds) {
-    const context = this.ground;
-    const view = this.camera.view;
+  /**
+   * Woodland, collected as items rather than painted straight onto the
+   * ground: a canopy leans on the wind now (see TREE_SWAY_RATE), which
+   * means it has to be redrawn every frame like anything else that moves,
+   * not once per repaint the way the ground mesh beneath it is.
+   *
+   * Colour comes from the land rather than a fixed constant, so a level can
+   * plant a wood of its own kind -- the island's cherry blossoms are the
+   * same shape, only pink and smaller -- without a second drawing path. And
+   * from the season along with the land: a canopy turns gradually across
+   * the year the same way the sky's own haze does, held at each season's
+   * colour through its midpoint rather than cutting to it on the first
+   * tick -- see Season#seasonalColorMix.
+   *
+   * Each canopy is two tiers rather than one solid cone, echoing the tiered
+   * roofs every building in the game already wears: a narrower, lighter cap
+   * catching the open sky, sitting on a wider, shaded skirt. One shape drawn
+   * twice, not two different trees, so the added cost is one more fill and
+   * one more projected point per tree -- the colours themselves, including
+   * the seasonal blend, are worked out once for the whole wood, not per
+   * tree. A tree now also drops a flat shadow and sways in the wind, the
+   * cap leaning further than the waist beneath it and the trunk not at all
+   * -- see shadowPoints and TREE_SWAY_RATE.
+   */
+  collectWoods(items, view, game, bounds) {
     const trees = game.treesWithin(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
     const trunks = this.camera.distance < TRUNK_DISTANCE;
+    const trunkFill = game.terrain.land.trunkColor;
+    const canopyChannels = seasonalColorMix(game.seasonPhase, game.terrain.land.canopySeasons);
+    const capFill = shade(canopyChannels, CANOPY_CAP_LIGHT);
+    const skirtFill = shade(canopyChannels, CANOPY_SKIRT_LIGHT);
+    const clock = this.clock;
 
     for (const tree of trees) {
       const top = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 2.2);
@@ -736,21 +903,45 @@ export class Renderer {
         || foot.y < -spread || foot.y > this.camera.height + spread) {
         continue;
       }
+      const depth = foot.depth;
+      items.push({ kind: 'shadow', points: shadowPoints(foot, spread), fill: SHADOW_FILL, depth });
       if (trunks) {
-        context.fillStyle = TRUNK_FILL;
-        context.fillRect(foot.x - spread * 0.12, top.y, spread * 0.24, foot.y - top.y);
+        items.push({
+          kind: 'trunk',
+          points: [
+            { x: foot.x - spread * 0.12, y: top.y }, { x: foot.x + spread * 0.12, y: top.y },
+            { x: foot.x + spread * 0.12, y: foot.y }, { x: foot.x - spread * 0.12, y: foot.y },
+          ],
+          fill: trunkFill,
+          depth,
+        });
       }
-      // A four-sided cone: cheap, and it still reads as a canopy from above.
       const skirt = projectPoint(view, tree.x, tree.y, tree.z + tree.size * 0.9);
-      const base = skirt ? skirt.y : foot.y;
-      context.beginPath();
-      context.moveTo(top.x, top.y);
-      context.lineTo(foot.x + spread * 0.8, base);
-      context.lineTo(foot.x, base + spread * 0.35);
-      context.lineTo(foot.x - spread * 0.8, base);
-      context.closePath();
-      context.fillStyle = CANOPY_FILL;
-      context.fill();
+      const waist = projectPoint(view, tree.x, tree.y, tree.z + tree.size * CANOPY_WAIST_HEIGHT);
+      const skirtY = skirt ? skirt.y : foot.y;
+      const waistY = waist ? waist.y : (top.y + skirtY) / 2;
+      // Each tree keeps its own phase, hashed from where it stands, so a
+      // whole wood does not lean in lockstep -- the same trick the fire's
+      // licks and the units' own march already use.
+      const phase = hash(tree.x * 12.9 + tree.y * 7.7) * Math.PI * 2;
+      const sway = Math.sin(clock * TREE_SWAY_RATE + phase) * spread * TREE_SWAY_AMOUNT;
+      const waistX = foot.x + sway * TREE_SWAY_WAIST_SHARE;
+      const topX = foot.x + sway;
+      // The skirt first, so the cap's own bulge -- the same rounded belly
+      // every tier gets, drawn dipping a little past its own edge -- shows
+      // on top of it rather than being painted over by the tier below.
+      items.push({
+        kind: 'canopy',
+        points: canopyTierPoints({ x: waistX, y: waistY }, foot.x, skirtY, spread),
+        fill: skirtFill,
+        depth,
+      });
+      items.push({
+        kind: 'canopy',
+        points: canopyTierPoints({ x: topX, y: top.y }, waistX, waistY, spread * CANOPY_CAP_SPREAD),
+        fill: capFill,
+        depth,
+      });
     }
   }
 
@@ -914,6 +1105,11 @@ export class Renderer {
         continue;
       }
       const ground = terrain.heightAt(house.position.x, house.position.y);
+      const foot = projectPoint(view, house.position.x, house.position.y, ground);
+      if (foot) {
+        const spread = view.focal / foot.depth * definition.radius;
+        items.push({ kind: 'shadow', points: shadowPoints(foot, spread), fill: SHADOW_FILL, depth: foot.depth });
+      }
       for (const face of faces) {
         this.collectStructureFace(items, view, face, house.position, ground, { grow: house.growth });
       }
@@ -927,6 +1123,24 @@ export class Renderer {
       { x: x - reach, y: y - reach }, { x: x + reach, y: y - reach },
       { x: x + reach, y: y + reach }, { x: x - reach, y: y + reach },
     ]);
+  }
+
+  /**
+   * A level's own small cultural landmarks, standing apart from the city --
+   * see LEVELS' own `landmarks` field. Purely decorative: no health, no
+   * growth, nothing raiders or the player can touch, so each is just a
+   * structure painted once at a fixed point, the same as a castle at rest.
+   */
+  collectLandmarks(items, paving, view, game, terrain) {
+    for (const landmark of game.level.landmarks ?? []) {
+      if (!this.onScreenFor(view, landmark, landmark.structure.radius)) {
+        continue;
+      }
+      const ground = terrain.heightAt(landmark.x, landmark.y);
+      for (const face of this.structureFor(landmark.structure).faces) {
+        this.collectStructureFace(face.ground ? paving : items, view, face, landmark, ground);
+      }
+    }
   }
 
   /**

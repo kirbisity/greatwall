@@ -39,13 +39,21 @@ test('the clock rolls over to a new second every FPS frames', () => {
   assert.equal(game.frame, 0);
 });
 
-test('income arrives on odd seconds and applies the autumn harvest bonus', () => {
+test('income arrives on odd seconds, with no harvest bonus in a level\'s opening spring', () => {
   const game = new Game({ random: fixedRandom() });
   const wealth = game.castles[0].type.wealth;
   stepSeconds(game, 1);
-  assert.equal(game.tokens, STARTING_TOKENS + wealth * 2);
+  assert.equal(game.tokens, STARTING_TOKENS + wealth, 'spring carries no harvest bonus');
   stepSeconds(game, 1);
-  assert.equal(game.tokens, STARTING_TOKENS + wealth * 2, 'no payout on even seconds');
+  assert.equal(game.tokens, STARTING_TOKENS + wealth, 'no payout on even seconds');
+});
+
+test('the autumn harvest doubles income once the year actually turns to it', () => {
+  const game = new Game({ random: fixedRandom() });
+  const wealth = game.castles[0].type.wealth;
+  game.season = 2; // Autumn, two seasons on from the spring a level opens in
+  stepSeconds(game, 1);
+  assert.equal(game.tokens, STARTING_TOKENS + wealth * 2);
 });
 
 test('a raider spawns every spawn interval, outside the safe radius', () => {
@@ -66,9 +74,11 @@ test('the season turns at 59 seconds even though spawning is on its own cadence'
 
 test('seasonPhase climbs smoothly, with no jump where the season itself turns', () => {
   const game = new Game({ random: fixedRandom() });
-  assert.equal(game.seasonPhase, 0);
+  // A level opens exactly on spring's own midpoint, the extra half-season
+  // seasonPhase carries for exactly that reason (see Game#seasonPhase).
+  assert.ok(Math.abs(game.seasonPhase - 0.5) < 1e-9, `expected 0.5 at the very start, got ${game.seasonPhase}`);
   stepSeconds(game, 30);
-  assert.ok(Math.abs(game.seasonPhase - 0.5) < 1e-9, `expected ~0.5, got ${game.seasonPhase}`);
+  assert.ok(Math.abs(game.seasonPhase - 1) < 1e-9, `expected ~1, got ${game.seasonPhase}`);
 
   // this.season turns a second early relative to this.seconds completing a
   // season (see onSecondElapsed), which is exactly the gap seasonPhase is
@@ -76,22 +86,26 @@ test('seasonPhase climbs smoothly, with no jump where the season itself turns', 
   // second rather than jumping to match this.season's own step.
   stepSeconds(game, 28);
   const before = game.seasonPhase;
-  assert.equal(game.season, 0, 'still autumn one second before the turn');
+  assert.equal(game.season, 0, 'still spring one second before the turn');
   stepSeconds(game, 1);
-  assert.equal(game.season, 1, 'winter now, by this.season');
+  assert.equal(game.season, 1, 'summer now, by this.season');
   const after = game.seasonPhase;
   assert.ok(after - before < 0.05, `expected a single second's step, got ${before} -> ${after}`);
-  assert.ok(Math.abs(game.seasonPhase - 59 / 60) < 1e-9, `expected ~0.983, got ${game.seasonPhase}`);
+  assert.ok(Math.abs(game.seasonPhase - (59 / 60 + 0.5)) < 1e-9, `expected ~1.483, got ${game.seasonPhase}`);
 
   stepSeconds(game, 1);
-  assert.ok(Math.abs(game.seasonPhase - 1) < 1e-9, `expected exactly 1 a full season in, got ${game.seasonPhase}`);
+  assert.ok(Math.abs(game.seasonPhase - 1.5) < 1e-9, `expected exactly 1.5 a full season in, got ${game.seasonPhase}`);
 });
 
 test('winter multiplies build cost and autumn multiplies income', () => {
   const game = new Game({ random: fixedRandom() });
+  // Spring, the season a level opens in, carries neither bonus.
+  assert.equal(game.harvestMultiplier, 1);
+  assert.equal(game.buildMultiplier, 1);
+  game.season = 2; // Autumn
   assert.equal(game.harvestMultiplier, 2);
   assert.equal(game.buildMultiplier, 1);
-  game.season = 1;
+  game.season = 3; // Winter
   assert.equal(game.harvestMultiplier, 1);
   assert.equal(game.buildMultiplier, 8);
 });

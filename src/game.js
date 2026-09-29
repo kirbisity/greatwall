@@ -296,6 +296,15 @@ export class Game {
     return options.length > 0 && this.tokens >= Math.min(...options.map((option) => option.cost));
   }
 
+  /** Whether there is coin for the castle's own next tier -- false once it is maxed out. */
+  get canAffordToUpgrade() {
+    const nextTypeId = this.castles[0]?.type.upgradesTo;
+    if (!nextTypeId) {
+      return false;
+    }
+    return this.tokens >= this.castleTypes[nextTypeId].cost;
+  }
+
   // --- simulation ---------------------------------------------------------
 
   /** Advance one frame. Returns true on the frame a whole second elapses. */
@@ -1166,7 +1175,10 @@ export class Game {
       return { status: 'short', start, end };
     }
     const cost = this.wallCost(wall.length);
-    if (this.tokens < cost) {
+    // Ties Build's own refusal to the same threshold that greys its button
+    // (see canAffordToBuild) -- a segment cheap enough to afford on its own
+    // still will not go up once the treasury reads as too poor to build at all.
+    if (this.tokens < cost || !this.canAffordToBuild) {
       return { status: 'poor', start, end };
     }
     this.tokens -= cost;

@@ -16,7 +16,7 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
   const camera = {
     toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
   };
-  const renderer = { hoveredWall: null };
+  const renderer = { hoveredWall: null, flashInvalidWall: () => {} };
   const game = {
     wallAt, castles: [], dispatchOptions: () => [], terrain: { heightAt: () => 0 }, ...gameOverrides,
   };
@@ -278,7 +278,7 @@ test('a mouse click does not bother capturing the pointer', () => {
   assert.equal(captured.length, 0);
 });
 
-test('one finger dragging the map pans it, the way the mouse does', () => {
+test('one finger dragging the map pans it, smoothed to iron out touch jitter', () => {
   const { input, calls } = gestureInput();
   input.handlePointerDown(finger(1, 300, 300));
   input.handlePointerMove(finger(1, 340, 310));
@@ -286,8 +286,43 @@ test('one finger dragging the map pans it, the way the mouse does', () => {
 
   assert.equal(calls.pan.length, 1);
   assert.deepEqual(calls.pan[0].from, { x: 300, y: 300 });
-  assert.deepEqual(calls.pan[0].to, { x: 340, y: 310 });
+  // Eased towards the new point rather than snapping straight onto it --
+  // see TOUCH_PAN_SMOOTHING -- but still most of the way there in one step.
+  assert.ok(calls.pan[0].to.x > 310 && calls.pan[0].to.x < 340, `x landed at ${calls.pan[0].to.x}`);
+  assert.ok(calls.pan[0].to.y > 302 && calls.pan[0].to.y < 310, `y landed at ${calls.pan[0].to.y}`);
   assert.equal(calls.release, 1, 'lifting the finger lets the camera coast');
+});
+
+test('a finger held still after a move settles onto it within a few samples', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  for (let sample = 0; sample < 8; sample += 1) {
+    input.handlePointerMove(finger(1, 100, 0));
+  }
+  const last = calls.pan.at(-1).to;
+  assert.ok(Math.abs(last.x - 100) < 1, `should have converged onto the finger, landed at ${last.x}`);
+});
+
+test('a new drag starts smoothing fresh from wherever the finger actually lands', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  input.handlePointerMove(finger(1, 100, 0));
+  input.handlePointerUp(finger(1, 100, 0));
+
+  calls.pan.length = 0;
+  input.handlePointerDown(finger(2, 500, 500));
+  input.handlePointerMove(finger(2, 540, 500));
+
+  assert.deepEqual(calls.pan[0].from, { x: 500, y: 500 }, 'not wherever the last drag left off');
+});
+
+test('a mouse drag is never smoothed -- it tracks exactly, the way it always has', () => {
+  const { input, calls } = gestureInput();
+  const mouse = (clientX, clientY) => ({ pointerId: 1, pointerType: 'mouse', clientX, clientY });
+  input.handlePointerDown(mouse(300, 300));
+  input.handlePointerMove(mouse(340, 310));
+
+  assert.deepEqual(calls.pan[0].to, { x: 340, y: 310 });
 });
 
 test('one finger with the build tool lays wall along the drag', () => {
@@ -303,6 +338,37 @@ test('one finger with the build tool lays wall along the drag', () => {
 
   assert.equal(built.length, 1, 'a drag long enough for one section should lay one');
   assert.deepEqual(built[0].to, { x: 200, y: 100 });
+});
+
+test('a refused build attempt blinks the tried line red', () => {
+  const flashes = [];
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: () => ({ status: 'poor', start: { x: 1, y: 1 }, end: { x: 2, y: 2 } }) },
+  });
+  input.renderer.flashInvalidWall = (start, end) => flashes.push({ start, end });
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.equal(flashes.length, 1);
+  assert.deepEqual(flashes[0], { start: { x: 1, y: 1 }, end: { x: 2, y: 2 } });
+});
+
+test('a wall blocked by the city, in the water, or onto a crowded node all blink red the same way', () => {
+  for (const status of ['blocked', 'water', 'crowded']) {
+    const flashes = [];
+    const { input } = gestureInput({
+      tool: 'build',
+      game: { buildWall: () => ({ status, start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
+    });
+    input.renderer.flashInvalidWall = (start, end) => flashes.push({ start, end });
+    input.handlePointerDown(finger(1, 100, 100));
+    input.handlePointerMove(finger(1, 110, 100));
+    input.handlePointerMove(finger(1, 200, 100));
+
+    assert.equal(flashes.length, 1, status);
+  }
 });
 
 test('two fingers pinching apart zoom in around the point between them', () => {

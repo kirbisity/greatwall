@@ -352,6 +352,34 @@ test('canAffordToAttack is false with no castle left to field a company', () => 
   assert.equal(game.canAffordToAttack, false);
 });
 
+test('canAffordToUpgrade looks at the castle\'s own next tier', () => {
+  const game = new Game({ random: fixedRandom() });
+  const nextCost = CASTLE_TYPES[game.castles[0].type.upgradesTo].cost;
+
+  game.tokens = nextCost - 1;
+  assert.equal(game.canAffordToUpgrade, false);
+
+  game.tokens = nextCost;
+  assert.equal(game.canAffordToUpgrade, true);
+});
+
+test('canAffordToUpgrade is false once the castle is already at its final tier', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.castles = [new Castle('CC2')];
+  game.tokens = 100000;
+  assert.equal(game.canAffordToUpgrade, false);
+});
+
+test('a section too cheap on its own to trip canAffordToBuild still will not go up', () => {
+  const game = new Game({ random: fixedRandom() });
+  // Enough for one short section, but not the three canAffordToBuild wants.
+  game.tokens = game.wallCost(WALL.minLength) + 5;
+  assert.equal(game.canAffordToBuild, false, 'the gate should already be closed');
+
+  const result = game.buildWall({ x: 200, y: 0 }, { x: 240, y: 0 });
+  assert.equal(result.status, 'poor', 'building is refused even though this one section was affordable');
+});
+
 // --- upgrading rebuilds gradually, keeping the old stats meanwhile ---------
 
 test('the wall planning phase now takes twice as long as it used to', () => {

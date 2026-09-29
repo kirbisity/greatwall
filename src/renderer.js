@@ -151,6 +151,12 @@ const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 
+// How long a refused wall attempt blinks for, and how fast -- see
+// flashInvalidWall/drawInvalidAttempt.
+const INVALID_ATTEMPT_SECONDS = 2;
+const INVALID_BLINK_RATE = 9;
+const INVALID_LINE = '220, 60, 50';
+
 // A beached raiding hull: how long, how wide at the stern and at the bow,
 // and how tall the freeboard, deckhouse and mast stand above the keel.
 const BOAT = {
@@ -438,6 +444,11 @@ export class Renderer {
     // the cursor moves. Null whenever neither tool is selected, or nothing
     // is under the cursor.
     this.hoveredWall = null;
+    // A section the Build tool just tried and failed to lay -- too poor, in
+    // the water, crossing the city, or piling onto a crowded node -- shown
+    // as a brief red blink rather than just a toast, so the drag itself
+    // reads as refused. See flashInvalidWall/drawInvalidAttempt.
+    this.invalidAttempt = null;
     this.units = new Map();
     this.images = new Map();
     // Scratch for the ground mesh, grown to fit and then reused: a repaint
@@ -598,6 +609,7 @@ export class Renderer {
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
+    this.drawInvalidAttempt(view);
     this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
@@ -1401,6 +1413,45 @@ export class Renderer {
         context.globalAlpha = 1;
       }
     }
+    context.restore();
+  }
+
+  /** Mark a just-refused build attempt to blink briefly -- see Input#dragBuild. */
+  flashInvalidWall(start, end) {
+    this.invalidAttempt = { start: { ...start }, end: { ...end }, until: this.clock + INVALID_ATTEMPT_SECONDS };
+  }
+
+  /**
+   * The line the Build tool just tried and failed to lay, blinking red for
+   * a couple of seconds -- too poor, in the water, crossing the city, or a
+   * crowded node -- so the drag itself reads as refused rather than the
+   * toast message being the only sign anything happened.
+   */
+  drawInvalidAttempt(view) {
+    const attempt = this.invalidAttempt;
+    if (!attempt) {
+      return;
+    }
+    if (this.clock >= attempt.until) {
+      this.invalidAttempt = null;
+      return;
+    }
+    const from = projectPoint(view, attempt.start.x, attempt.start.y, 0);
+    const to = projectPoint(view, attempt.end.x, attempt.end.y, 0);
+    if (!from || !to) {
+      return;
+    }
+    // Genuinely on-off, not a smooth pulse -- a blink reads as urgent where
+    // a glow reads as decorative, the way the hover and flash tints above do.
+    const blink = Math.max(0, Math.sin(this.clock * INVALID_BLINK_RATE));
+    const context = this.overlay;
+    context.save();
+    context.lineWidth = 4;
+    context.strokeStyle = `rgba(${INVALID_LINE}, ${blink})`;
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
     context.restore();
   }
 

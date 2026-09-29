@@ -42,7 +42,7 @@ body {
 }
 
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .layer { position: absolute; left: 0; top: 0; }
 /* The map takes every gesture itself -- drag, pinch, tap -- so the browser
@@ -265,13 +265,13 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .gameTagline,
 .panelTitle {
 	font-family: var(--display);
-	letter-spacing: .2em;
+	letter-spacing: .16em;
 	text-transform: uppercase;
 	color: var(--parchment-dim);
 }
 
 /* showGameOver writes "Score / Best" as two lines. */
-.gameTagline { margin: 10px 0 0; font-size: 13px; line-height: 1.9; white-space: pre-line; }
+.gameTagline { margin: 10px 0 0; font-size: 14px; line-height: 1.9; white-space: pre-line; }
 
 .panelTitle { margin: 0 0 18px; font-size: clamp(20px, 2.4vw, 30px); color: var(--bronze); }
 
@@ -290,16 +290,17 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .menuItem {
 	display: block;
 	width: min(320px, 70vw);
-	padding: 12px 18px;
+	padding: 13px 18px;
 	font-family: var(--display);
 	font-size: 17px;
 	font-weight: 500;
-	letter-spacing: .18em;
+	letter-spacing: .13em;
 	text-transform: uppercase;
 	text-decoration: none;
 	text-align: center;
 	color: var(--parchment-dim);
 	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 4px;
 	background: linear-gradient(180deg, rgba(44, 38, 29, .7), rgba(16, 13, 9, .8));
 	transition: var(--ease);
 }
@@ -309,6 +310,7 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	border-color: var(--bronze);
 	background: linear-gradient(180deg, #e2c866, var(--bronze-deep));
 	box-shadow: var(--glow);
+	transform: translateY(-1px);
 }
 
 .menuItem-primary { color: var(--bronze); border-color: var(--bronze-deep); }
@@ -326,17 +328,21 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	text-align: left;
 	background: none;
 	border: 1px solid transparent;
-	border-radius: 3px;
+	border-radius: 4px;
 	color: inherit;
 	font: inherit;
 	cursor: pointer;
-	opacity: .55;
+	opacity: .7;
 	transition: var(--ease);
 }
 
-.levelItem:hover { opacity: .85; }
+.levelItem:hover { opacity: .92; background: rgba(138, 109, 36, .12); }
 
-.levelItem.is-chosen { opacity: 1; border-color: var(--bronze-deep); }
+.levelItem.is-chosen {
+	opacity: 1;
+	border-color: var(--bronze-deep);
+	background: rgba(138, 109, 36, .18);
+}
 
 /*
  * Drawn at THUMBNAIL_COLUMNS x THUMBNAIL_ROWS (see levelThumbnail.js) and
@@ -355,9 +361,9 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .levelText { flex: 1; min-width: 0; }
 
-.levelName { display: block; font-size: 14px; letter-spacing: .09em; text-transform: uppercase; }
+.levelName { display: block; font-size: 15px; letter-spacing: .07em; text-transform: uppercase; }
 
-.levelBlurb { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; opacity: .7; }
+.levelBlurb { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; opacity: .8; }
 
 /* --- modals ------------------------------------------------------------ */
 
@@ -399,6 +405,13 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 /* The toast must not swallow clicks meant for the map behind it. */
 .modal.infomodal { background: transparent; padding: 0; pointer-events: none; }
 
+/*
+ * Plain text, not another panel -- a passing notice, not a document, so it
+ * should not read as one. It blinks hard a few times first, which is what
+ * actually catches a glance already on the map, then fades: the same job a
+ * banner's slide-in used to do, without the box that made a one-line aside
+ * look as weighty as a menu.
+ */
 .infomodal-content {
 	pointer-events: none;
 	position: fixed;
@@ -406,22 +419,29 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	right: 22px;
 	width: min(330px, 76vw);
 	margin: 0;
-	padding: 16px 18px;
-	font-size: 16px;
-	line-height: 1.45;
+	padding: 0;
+	border: none;
+	box-shadow: none;
+	font-family: var(--body);
+	font-size: 17px;
+	font-weight: 500;
+	line-height: 1.4;
+	text-align: right;
 	color: var(--parchment);
-	background: var(--panel);
-	border: 1px solid var(--bronze-deep);
-	border-left: 3px solid var(--bronze);
-	box-shadow: var(--lift);
-	animation: slideIn 260ms cubic-bezier(.2, .9, .3, 1);
+	text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 0 16px rgba(0, 0, 0, .7);
+	animation: notifyBlink 900ms ease-out both;
 }
 
 .infomodal-content p { margin: 0; }
 
-@keyframes slideIn {
-	from { opacity: 0; transform: translateX(24px); }
-	to { opacity: 1; transform: translateX(0); }
+@keyframes notifyBlink {
+	0% { opacity: 0; }
+	8% { opacity: 1; }
+	18% { opacity: .15; }
+	28% { opacity: 1; }
+	38% { opacity: .15; }
+	48% { opacity: 1; }
+	100% { opacity: 0; }
 }
 
 /*

@@ -11,6 +11,10 @@ const TOAST_DURATION_MS = 900;
 // on top of the fade-in (see greatwall.css's own .storyBanner) it takes to
 // appear -- but any game action (see main.js's own onEffect) clears it early.
 const STORY_DURATION_MS = 15000;
+// How long into a level before the threat markers appear at all -- the
+// player's own first few seconds to get their bearings, not another thing
+// competing with the story banner for their eye right at the start.
+const THREAT_DELAY_MS = 5000;
 // A beat solid before the threat markers start fading, then the fade itself
 // (see greatwall.css's own .threatMarker) -- a flash, not a fixture.
 const THREAT_HOLD_MS = 400;
@@ -90,6 +94,7 @@ export class Hud {
     this.music = element('backgroundmusic');
     this.buildToolButton = element('buildTool');
     this.attackToolButton = element('attackTool');
+    this.upgradeToolButton = element('upgradeTool');
     this.dispatchMenu = element('dispatchMenu');
     this.dispatchButtons = [
       element('dispatchOption0'),
@@ -107,6 +112,7 @@ export class Hud {
     this.shownSeason = null;
     this.toastTimer = null;
     this.storyTimer = null;
+    this.threatDelayTimer = null;
     this.threatTimer = null;
     this.threatFadeTimer = null;
     this.actionHintTimer = null;
@@ -161,6 +167,7 @@ export class Hud {
     // wait, not a reason the tool should stop working the moment it can.
     this.buildToolButton.classList.toggle('is-disabled', !game.canAffordToBuild);
     this.attackToolButton.classList.toggle('is-disabled', !game.canAffordToAttack);
+    this.upgradeToolButton.classList.toggle('is-disabled', !game.canAffordToUpgrade);
   }
 
   /** Light up the button for the active tool and dim the rest. */
@@ -281,11 +288,16 @@ export class Hud {
 
   /**
    * A dark red marker at the edge of the view for each bearing raiders are
-   * expected from (see Game#threatBearings) -- a flash at the start of a
-   * level, not a fixture, so the field reads clear again well before the
-   * first one arrives.
+   * expected from (see Game#threatBearings) -- not the moment a level opens,
+   * but THREAT_DELAY_MS into it, once the player has had a beat to get their
+   * bearings, and even then only as a flash rather than a fixture.
    */
   showThreats(bearings) {
+    clearTimeout(this.threatDelayTimer);
+    this.threatDelayTimer = setTimeout(() => this.revealThreats(bearings), THREAT_DELAY_MS);
+  }
+
+  revealThreats(bearings) {
     this.threatLayer.replaceChildren();
     for (const bearing of bearings) {
       this.threatLayer.append(this.buildThreatMarker(bearing));
@@ -319,6 +331,7 @@ export class Hud {
   }
 
   clearThreats() {
+    clearTimeout(this.threatDelayTimer);
     clearTimeout(this.threatTimer);
     clearTimeout(this.threatFadeTimer);
     this.threatLayer.replaceChildren();

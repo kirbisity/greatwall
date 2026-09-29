@@ -35,6 +35,12 @@ const HOVER_TOOLS = new Set(['repair', 'fortify']);
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
 
+// How much of a finger's newest reported position replaces the smoothed one
+// each sample -- 1 would be no smoothing at all, and this is deliberately
+// close to that: just enough to round off sample noise, not slow enough to
+// feel like the ground is trailing the finger. See Input#panMap.
+const TOUCH_PAN_SMOOTHING = 0.55;
+
 // Anything a gesture can start on that is interface rather than map. A drag
 // that begins on a button, the dock or a menu must not move the camera or
 // lay stone, and a tap on one must not also land on the ground beneath it.
@@ -65,6 +71,12 @@ export class Input {
     // it grabbed, rather than a mouse, which eases after it -- see
     // Camera#panFrom.
     this.holdsGround = false;
+    // A light low-pass filter on a finger's own reported position, so the
+    // small per-sample noise real touch digitizers report does not turn
+    // straight into visible micro-jerks in the pan -- see handleMove. Reset
+    // at the start of every drag so a new gesture starts from exactly where
+    // the finger landed, not wherever the last one left off.
+    this.smoothedTouch = null;
     this.zoomAnchor = null;
     this.chainPoint = null;
     // Which guard tier the dispatch menu last picked. Sticky across sends,
@@ -112,6 +124,7 @@ export class Input {
       this.trackPointer(event);
       this.pointerDown = true;
       this.holdsGround = event.pointerType === 'touch' || event.pointerType === 'pen';
+      this.smoothedTouch = null;
       return;
     }
     this.beginPinch();
@@ -148,6 +161,7 @@ export class Input {
     this.pointerDown = false;
     this.zoomAnchor = null;
     this.chainPoint = null;
+    this.smoothedTouch = null;
     this.camera.release();
   }
 
@@ -338,9 +352,31 @@ export class Input {
         this.dragFortify();
         break;
       default:
-        this.camera.panFrom(previous, this.pointer, { direct: this.holdsGround });
+        this.panMap(previous);
     }
     this.onChange();
+  }
+
+  /**
+   * A finger's own reported position is noisier, sample to sample, than a
+   * mouse's -- panned exactly as reported, that noise shows up as a visible
+   * jitter with every step. Smoothing it here, before it ever reaches the
+   * camera, takes the jitter out while staying tight enough that the
+   * ground still reads as held rather than trailing behind the finger --
+   * see Camera#panFrom's own note on why touch tracks directly at all.
+   */
+  panMap(previous) {
+    if (!this.holdsGround) {
+      this.camera.panFrom(previous, this.pointer, { direct: false });
+      return;
+    }
+    if (!this.smoothedTouch) {
+      this.smoothedTouch = { ...previous };
+    }
+    const from = { ...this.smoothedTouch };
+    this.smoothedTouch.x += (this.pointer.x - this.smoothedTouch.x) * TOUCH_PAN_SMOOTHING;
+    this.smoothedTouch.y += (this.pointer.y - this.smoothedTouch.y) * TOUCH_PAN_SMOOTHING;
+    this.camera.panFrom(from, this.smoothedTouch, { direct: true });
   }
 
   /**
@@ -389,11 +425,13 @@ export class Input {
     }
     if (result.status === 'blocked') {
       this.chainPoint = null;
+      this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Walls cannot cross the city');
       return;
     }
     if (result.status === 'water') {
       this.chainPoint = null;
+      this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Walls cannot be laid in water');
       return;
     }
@@ -401,10 +439,12 @@ export class Input {
       // A junction already at its limit — no message, just let go of the
       // tool the way it would if the player had simply let up on it.
       this.chainPoint = null;
+      this.renderer.flashInvalidWall(result.start, result.end);
       this.resetTool();
       return;
     }
     if (result.status === 'poor') {
+      this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Not enough money');
     }
   }

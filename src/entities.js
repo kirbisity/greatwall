@@ -296,6 +296,7 @@ class Company {
     // rout), and gone for good once clear of every enemy -- see
     // Game#fleeDestination.
     this.routed = false;
+    this.routedAt = null;
     this.fled = false;
     // Only raiders are stopped by walls: they batter them or find a way
     // round. Imperial companies file through their own stonework.

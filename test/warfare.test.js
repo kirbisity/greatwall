@@ -243,6 +243,7 @@ test('a routed company that gets clear of every enemy leaves the field', () => {
   guard.routed = true;
   game.guards.push(guard);
   game.raiders.push(new Raider('IR0', { x: ROUT.escapeDistance + 50, y: 0 }));
+  guard.routedAt = { x: ROUT.runDistance + 1, y: 0 };
   game.moveGuards();
   assert.equal(guard.fled, true);
   game.step();
@@ -323,4 +324,47 @@ test('heavier companies give less ground when two blocks close up', () => {
   light.foes.add(heavy);
   resolveMelee([heavy, light], FRAME);
   assert.ok(Math.abs(heavy.position.x) < Math.abs(light.position.x - 20));
+});
+
+test('a raider battering a wall can rout from the blows the wall gives back', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const wall = game.buildWall({ x: 120, y: -60 }, { x: 120, y: 60 }).wall;
+  wall.finish();
+  const raider = new Raider('IR0', { x: 121, y: 0 });
+  raider.health = raider.type.maxHealth * raider.type.breaksAt + 0.001;
+  game.raiders.push(raider);
+  game.resolveWallContact(game.navigation(), raider);
+  assert.equal(raider.routed, true);
+});
+
+test('a raider still well above its breaking point keeps battering', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const wall = game.buildWall({ x: 120, y: -60 }, { x: 120, y: 60 }).wall;
+  wall.finish();
+  const raider = new Raider('IR0', { x: 121, y: 0 });
+  game.raiders.push(raider);
+  game.resolveWallContact(game.navigation(), raider);
+  assert.equal(raider.routed, false);
+});
+
+test('a raider routed at the walls runs from the city, not on into it', () => {
+  const game = new Game({ random: fixedRandom() });
+  const raider = moving(new Raider('IR0', { x: 120, y: 0 }), 1, -1, 0);
+  raider.routed = true;
+  const away = game.fleeDestination(raider, game.raiderThreats());
+  assert.ok(away.x > raider.position.x, 'heads back out, away from the castle');
+});
+
+test('a routed company has to actually run for it before it leaves the field', () => {
+  const game = new Game({ random: fixedRandom() });
+  const guard = new Guard('IG0', { x: 0, y: 0 });
+  guard.routed = true;
+  guard.routedAt = { x: 0, y: 0 };
+  game.checkEscape(guard, []);
+  assert.equal(guard.fled, false, 'no enemies about, but it has not got anywhere yet');
+  guard.position = { x: ROUT.runDistance + 1, y: 0 };
+  game.checkEscape(guard, []);
+  assert.equal(guard.fled, true);
 });

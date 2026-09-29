@@ -14,7 +14,7 @@ import {
 } from './geometry.js';
 import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
-import { lockEngagements, resolveMelee } from './melee.js';
+import { lockEngagements, resolveMelee, testMorale } from './melee.js';
 import { Terrain } from './terrain.js';
 import { unitSize } from './units.js';
 import { LEVELS } from './levels.js';
@@ -763,7 +763,7 @@ export class Game {
         continue;
       }
       raider.destination = raider.routed
-        ? this.fleeDestination(raider, this.guards)
+        ? this.fleeDestination(raider, this.raiderThreats())
         : this.raiderDestination(raider, target);
       this.trackProgress(raider, 1 / FPS);
       // Runs down whatever siege it has sworn to; at zero it may think again.
@@ -778,7 +778,7 @@ export class Game {
       raider.touchedThisFrame = false;
       if (raider.routed) {
         // Running, not besieging: nothing gets battered on the way out.
-        this.checkEscape(raider, this.guards);
+        this.checkEscape(raider, this.raiderThreats());
       } else {
         this.resolveWallContact(navigation, raider);
         if (raider.isAlive && target) {
@@ -1123,10 +1123,22 @@ export class Game {
     };
   }
 
-  /** A routed company clear of every enemy by ROUT.escapeDistance has left the field. */
+  /**
+   * A routed company has left the field once it has run ROUT.runDistance
+   * from where it broke and is clear of every enemy by ROUT.escapeDistance.
+   */
   checkEscape(company, enemies) {
+    const from = company.routedAt ?? company.position;
+    if (distanceSquared(company.position, from) < ROUT.runDistance ** 2) {
+      return;
+    }
     const clear = ROUT.escapeDistance * ROUT.escapeDistance;
     company.fled = enemies.every((enemy) => distanceSquared(company.position, enemy.position) > clear);
+  }
+
+  /** What a routed raider runs from: every imperial company, and the city it was sent against. */
+  raiderThreats() {
+    return [...this.guards, ...this.castles];
   }
 
   /** The nearest live raider within `radius`, or null. */
@@ -1395,7 +1407,9 @@ export class Game {
         }
         if (!climb) {
           raider.takeHit(WALL.attack);
-          if (!raider.isAlive) {
+          // Battering stone that fights back breaks morale the same way melee
+          // does; a routed raider stops swinging and runs (see moveRaiders).
+          if (!raider.isAlive || testMorale(raider)) {
             return;
           }
         }

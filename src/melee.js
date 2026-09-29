@@ -224,6 +224,15 @@ function breaksNow(company) {
     && company.healthFraction <= company.type.breaksAt;
 }
 
+/** Rout a company whose health has just fallen past its breaking point; true if it did. */
+export function testMorale(company) {
+  if (!breaksNow(company)) {
+    return false;
+  }
+  rout(company);
+  return true;
+}
+
 /**
  * Morale breaks: the company drops out of every fight it is in and runs,
  * at a sprint -- panic needs no run-up. Whatever it was fighting is a beat
@@ -232,6 +241,7 @@ function breaksNow(company) {
  */
 export function rout(company) {
   company.routed = true;
+  company.routedAt = { ...company.position };
   company.holding = false;
   company.selected = false;
   for (const foe of company.foes) {
@@ -279,12 +289,11 @@ export function resolveMelee(companies, seconds) {
     company.takeHit(blows / bracing(company));
   }
 
-  // Only blows break morale -- a raider bloodied climbing a wall is shaken,
-  // not beaten, until something actually stands and fights it.
+  // Only blows break morale -- here, and from a wall that strikes back at
+  // whoever batters it (see Game#resolveWallContact). A raider bloodied
+  // merely climbing over one is shaken, not beaten.
   for (const company of struck.keys()) {
-    if (breaksNow(company)) {
-      rout(company);
-    }
+    testMorale(company);
   }
 
   // Break off the dead, and anything that has been at it too long.

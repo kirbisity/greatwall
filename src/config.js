@@ -217,12 +217,16 @@ export const HOLD = {
  * A company whose morale breaks (see each unit type's `breaksAt`) runs for
  * it: it hits at `attackMultiplier` of its strength, can only be pinned by
  * an enemy that gets within `catchDistance` of it, and once it is clear of
- * every enemy by `escapeDistance` it has left the field altogether.
+ * every enemy by `escapeDistance` it has left the field altogether. For a
+ * raider, the city itself counts as an enemy -- see Game#raiderThreats.
  */
 export const ROUT = {
   attackMultiplier: 0.5,
   catchDistance: 8,
   escapeDistance: 160,
+  // And it must have run at least this far from where it broke -- it is seen
+  // to run, rather than vanishing where it stood.
+  runDistance: 80,
   // How far ahead of itself a fleeing company aims.
   fleeReach: 100,
 };

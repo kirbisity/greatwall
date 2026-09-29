@@ -164,6 +164,14 @@ const SELECTION_RING_RADIUS = 12;
 const SELECTION_LINE = '235, 210, 120';
 const SELECTION_PING_SECONDS = 0.8;
 
+// The destination circle and the light arrow from each company to its own
+// spread point, shown the moment a move order is given -- see
+// Input#handleAttackTap, pingMoveOrder/drawMoveOrder.
+const ORDER_LINE = '255, 250, 225';
+const ORDER_EFFECT_SECONDS = 1.1;
+const ORDER_RING_RADIUS = 16;
+const ORDER_ARROWHEAD_LENGTH = 10;
+
 // A beached raiding hull: how long, how wide at the stern and at the bow,
 // and how tall the freeboard, deckhouse and mast stand above the keel.
 const BOAT = {
@@ -460,6 +468,11 @@ export class Renderer {
     // show what got searched -- see pingSelection/drawSelection. Selected
     // companies themselves are read straight off game.guards (guard.selected).
     this.selectionPing = null;
+    // A move order just given: a circle at the point tapped, and a light
+    // arrow from each company's own position to where it is actually
+    // headed (which may be spread a little off the tapped point -- see
+    // Game#orderGuards). See pingMoveOrder/drawMoveOrder.
+    this.moveOrder = null;
     this.units = new Map();
     this.images = new Map();
     // Scratch for the ground mesh, grown to fit and then reused: a repaint
@@ -622,6 +635,7 @@ export class Renderer {
     this.drawPeggedWalls(view, game);
     this.drawInvalidAttempt(view);
     this.drawSelection(view, game.guards);
+    this.drawMoveOrder(view);
     this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
@@ -1512,7 +1526,10 @@ export class Renderer {
     if (!point) {
       return;
     }
-    const progress = 1 - (ping.until - this.clock) / SELECTION_PING_SECONDS;
+    // Clamped defensively, not just derived: a radius built off this going
+    // negative does not just look wrong, it throws out of CanvasRenderingContext2D.arc
+    // and would take the whole render loop down with it.
+    const progress = clamp(1 - (ping.until - this.clock) / SELECTION_PING_SECONDS, 0, 1);
     const context = this.overlay;
     context.save();
     context.strokeStyle = `rgba(${SELECTION_LINE}, ${1 - progress})`;
@@ -1520,6 +1537,90 @@ export class Renderer {
     context.beginPath();
     context.arc(point.x, point.y, (view.focal / point.depth) * IMPERIAL.selectRadius * (0.4 + 0.6 * progress), 0, Math.PI * 2);
     context.stroke();
+    context.restore();
+  }
+
+  /**
+   * Mark a move order just given -- see Input#handleAttackTap. `starts` and
+   * `destinations` are paired by index, one entry per company ordered.
+   */
+  pingMoveOrder(starts, destinations, target, groundZ) {
+    this.moveOrder = {
+      starts: starts.map((point) => ({ ...point })),
+      destinations: destinations.map((point) => ({ ...point })),
+      target: { ...target },
+      groundZ,
+      until: this.clock + ORDER_EFFECT_SECONDS,
+    };
+  }
+
+  /**
+   * A circle where the order was actually aimed, and a light arrow from
+   * each company's own position to wherever it is headed -- spread a
+   * little off the tapped point for a group (see Game#orderGuards), so the
+   * arrow is what shows a viewer that company's own real destination.
+   */
+  drawMoveOrder(view) {
+    const order = this.moveOrder;
+    if (!order) {
+      return;
+    }
+    if (this.clock >= order.until) {
+      this.moveOrder = null;
+      return;
+    }
+    // See drawSelectionPing's own note: clamped so a radius built off this
+    // can never go negative and throw out the whole render loop.
+    const progress = clamp(1 - (order.until - this.clock) / ORDER_EFFECT_SECONDS, 0, 1);
+    const alpha = 1 - progress;
+    const context = this.overlay;
+
+    const centre = projectPoint(view, order.target.x, order.target.y, order.groundZ);
+    if (centre) {
+      context.save();
+      context.strokeStyle = `rgba(${ORDER_LINE}, ${alpha})`;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(centre.x, centre.y, (view.focal / centre.depth) * ORDER_RING_RADIUS * (0.5 + 0.5 * progress), 0, Math.PI * 2);
+      context.stroke();
+      context.restore();
+    }
+
+    order.starts.forEach((start, index) => {
+      const destination = order.destinations[index];
+      const from = projectPoint(view, start.x, start.y, order.groundZ);
+      const to = projectPoint(view, destination.x, destination.y, order.groundZ);
+      if (!from || !to) {
+        return;
+      }
+      this.drawArrow(from, to, alpha);
+    });
+  }
+
+  /** A line with an arrowhead at `to`, in the move order's own light colour. */
+  drawArrow(from, to, alpha) {
+    const context = this.overlay;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    context.save();
+    context.strokeStyle = `rgba(${ORDER_LINE}, ${alpha})`;
+    context.fillStyle = `rgba(${ORDER_LINE}, ${alpha})`;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(to.x, to.y);
+    context.lineTo(
+      to.x - ORDER_ARROWHEAD_LENGTH * Math.cos(angle - Math.PI / 6),
+      to.y - ORDER_ARROWHEAD_LENGTH * Math.sin(angle - Math.PI / 6),
+    );
+    context.lineTo(
+      to.x - ORDER_ARROWHEAD_LENGTH * Math.cos(angle + Math.PI / 6),
+      to.y - ORDER_ARROWHEAD_LENGTH * Math.sin(angle + Math.PI / 6),
+    );
+    context.closePath();
+    context.fill();
     context.restore();
   }
 

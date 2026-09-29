@@ -17,7 +17,9 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
   const camera = {
     toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
   };
-  const renderer = { hoveredWall: null, flashInvalidWall: () => {}, pingSelection: () => {} };
+  const renderer = {
+    hoveredWall: null, flashInvalidWall: () => {}, pingSelection: () => {}, pingMoveOrder: () => {},
+  };
   const game = {
     wallAt,
     castles: [],
@@ -171,7 +173,7 @@ test('the attack tool asks for a company first, then to tap one to select it', (
   input.selectTool('attack');
 
   assert.deepEqual(hints, [
-    'Choose a company above the castle',
+    'Choose a company to muster',
     'Tap a company to select it, then tap again to send it',
   ]);
 });
@@ -217,6 +219,21 @@ test('a tap with something selected sends that group instead of selecting again'
   assert.equal(selected.length, 0, 'already have a group -- this tap commands, not selects');
   assert.equal(orders.length, 1);
   assert.deepEqual(orders[0].target, { x: 400, y: 300 });
+});
+
+test('sending a selected group pings the destination and an arrow for each company', () => {
+  const { input, guards } = attackReady();
+  guards.push({ position: { x: 10, y: 20 }, selected: true });
+  const pings = [];
+  input.renderer.pingMoveOrder = (starts, destinations, target, groundZ) => {
+    pings.push({ starts, destinations, target, groundZ });
+  };
+  input.selectTool('attack');
+  input.handleClick({ clientX: 400, clientY: 300 });
+
+  assert.equal(pings.length, 1);
+  assert.deepEqual(pings[0].starts, [{ x: 10, y: 20 }], 'each arrow starts at the company\'s own position');
+  assert.deepEqual(pings[0].target, { x: 400, y: 300 });
 });
 
 test('a tap always closes the tier picker, since tapping the map means mustering is done', () => {
@@ -391,6 +408,33 @@ test('a wall blocked by the city, in the water, or onto a crowded node all blink
   }
 });
 
+test('a wall refused for being blocked or wet keeps the chain -- the phantom wall snaps the same way a real one would', () => {
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: () => ({ status: 'blocked', start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
+  });
+  input.renderer.flashInvalidWall = () => {};
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.ok(input.chainPoint, 'the chain should still be live, ready to try a different end');
+});
+
+test('a crowded node still lets go of the chain and the tool -- a capacity limit, not a direction to try again', () => {
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: () => ({ status: 'crowded', start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
+  });
+  input.renderer.flashInvalidWall = () => {};
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.equal(input.chainPoint, null);
+  assert.equal(input.tool, 'move', 'the tool itself is put away');
+});
+
 test('two fingers pinching apart zoom in around the point between them', () => {
   const { input, calls } = gestureInput();
   input.handlePointerDown(finger(1, 200, 300));
@@ -501,19 +545,29 @@ test('two fingers panning hold the ground as well', () => {
   assert.ok(calls.pan.length > 0 && calls.pan.every((call) => call.direct));
 });
 
-test('the tier picker hangs over the roof, not the ground at sea level', () => {
-  const asked = [];
+test('the tier picker anchors to the Attack button, not a world point over the castle', () => {
+  const seen = [];
   const { input } = makeInput({
-    game: {
-      castles: [{ position: { x: 5, y: 7 }, typeId: 'CC0' }],
-      buildings: { CC0: { name: 'keep' } },
-      dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }],
-      terrain: { heightAt: () => 40 },
-    },
+    game: { dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }] },
   });
-  input.renderer.structureFor = () => ({ height: 16 });
-  input.camera.toScreen = (point) => { asked.push(point); return { x: 100, y: 100 }; };
-  input.hud.showDispatchMenu = () => {};
+  input.hud.showDispatchMenu = (options, screen) => seen.push(screen);
+  const button = { getBoundingClientRect: () => ({ left: 120, top: 640, width: 60, height: 40 }) };
+  const previousDocument = globalThis.document;
+  globalThis.document = { getElementById: (id) => (id === 'attackTool' ? button : null) };
+  try {
+    input.selectTool('attack');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+  assert.deepEqual(seen[0], { x: 150, y: 640 }, 'centred above the button, at its own top edge');
+});
+
+test('with no Attack button to anchor to, the tier picker falls back to the middle of the screen', () => {
+  const seen = [];
+  const { input } = makeInput({
+    game: { dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }] },
+  });
+  input.hud.showDispatchMenu = (options, screen) => seen.push(screen);
   input.selectTool('attack');
-  assert.deepEqual(asked[0], { x: 5, y: 7, z: 56 }, 'ground 40 up the hill plus a roof 16 high');
+  assert.deepEqual(seen[0], { x: input.camera.width / 2, y: input.camera.height / 2 });
 });

@@ -340,3 +340,65 @@ test('an empty shimmer list draws nothing, and a real one draws something', () =
   renderer.drawShimmer(renderer.camera.view, game);
   assert.ok(calls.fill > 0, 'expected a real list, twinkling above the threshold, to draw something');
 });
+
+// --- transient order/selection effects never crash the render loop --------
+
+/** A renderer with just enough of itself for the overlay-drawn pings: a
+ *  camera view to project through, and a stub 2d context whose arc() throws
+ *  on a negative radius, the same way a real CanvasRenderingContext2D does. */
+function pingRenderer() {
+  const context = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    closePath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    fill() {},
+    arc(x, y, radius) {
+      if (radius < 0) {
+        throw new DOMException(`The radius provided (${radius}) is negative.`, 'IndexSizeError');
+      }
+    },
+    set strokeStyle(value) {},
+    set fillStyle(value) {},
+    set lineWidth(value) {},
+  };
+  const renderer = Object.create(Renderer.prototype);
+  renderer.overlay = context;
+  renderer.camera = { view: createView({ focus: { x: 0, y: 0 }, distance: 150, elevation: 45, width: 1200, height: 800 }) };
+  return renderer;
+}
+
+test('a selection ping never throws, even if its own lifetime is somehow extended past its duration', () => {
+  const renderer = pingRenderer();
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  renderer.pingSelection(10, 10, 0);
+  // A ping's `until` is only ever set once, at creation -- this reproduces
+  // what happens if something later stretches it out regardless.
+  renderer.selectionPing.until = 1000;
+  Object.defineProperty(renderer, 'clock', { value: 5, configurable: true });
+  assert.doesNotThrow(() => renderer.drawSelectionPing(renderer.camera.view));
+});
+
+test('a move order ping never throws, even if its own lifetime is somehow extended past its duration', () => {
+  const renderer = pingRenderer();
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  renderer.pingMoveOrder([{ x: 0, y: 0 }], [{ x: 10, y: 0 }], { x: 10, y: 0 }, 0);
+  renderer.moveOrder.until = 1000;
+  Object.defineProperty(renderer, 'clock', { value: 5, configurable: true });
+  assert.doesNotThrow(() => renderer.drawMoveOrder(renderer.camera.view));
+});
+
+test('both pings run clean across their entire natural lifetime, not just at the ends', () => {
+  const renderer = pingRenderer();
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  renderer.pingSelection(10, 10, 0);
+  renderer.pingMoveOrder([{ x: 0, y: 0 }], [{ x: 10, y: 0 }], { x: 10, y: 0 }, 0);
+  for (const clock of [0, 0.2, 0.4, 0.6, 0.8, 1, 1.2]) {
+    Object.defineProperty(renderer, 'clock', { value: clock, configurable: true });
+    assert.doesNotThrow(() => renderer.drawSelectionPing(renderer.camera.view), `selection at clock=${clock}`);
+    assert.doesNotThrow(() => renderer.drawMoveOrder(renderer.camera.view), `move order at clock=${clock}`);
+  }
+});

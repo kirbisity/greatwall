@@ -225,21 +225,19 @@ export class Input {
 
   /** Show the tier picker above the castle, so an order carries a company. */
   openDispatchMenu() {
-    const castle = this.game.castles[0];
     const options = this.game.dispatchOptions();
-    if (!castle || options.length === 0) {
+    if (options.length === 0) {
       return;
     }
-    // Over the roof, where the castle actually stands. At sea level the
-    // picker landed on top of a keep standing up a hill.
-    const { x, y } = castle.position;
-    const definition = this.game.buildings?.[castle.typeId];
-    const roof = definition && this.renderer.structureFor
-      ? this.renderer.structureFor(definition).height
-      : 0;
-    const screen = this.camera.toScreen({ x, y, z: this.groundHeight(x, y) + roof })
-      ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
-    this.hud.showActionHint('Choose a company above the castle');
+    // Anchored to the Attack button itself, not the castle -- a fixed
+    // screen point the player's eye is already on, rather than a world
+    // point that can drift off-screen as the camera pans or zooms.
+    const button = typeof document !== 'undefined' ? document.getElementById('attackTool') : null;
+    const rect = button?.getBoundingClientRect();
+    const screen = rect
+      ? { x: rect.left + rect.width / 2, y: rect.top }
+      : { x: this.camera.width / 2, y: this.camera.height / 2 };
+    this.hud.showActionHint('Choose a company to muster');
     // Left open rather than hidden after a pick, so several companies can be
     // mustered in a row -- tapping the map (see handleAttackTap) is what
     // closes it, once the player has moved on to selecting and sending them.
@@ -331,7 +329,10 @@ export class Input {
     this.hud.hideDispatchMenu();
     const selected = this.game.selectedGuards;
     if (selected.length > 0) {
+      const starts = selected.map((guard) => ({ ...guard.position }));
       this.game.orderGuards(selected, point);
+      const destinations = selected.map((guard) => ({ ...guard.orders }));
+      this.renderer.pingMoveOrder(starts, destinations, point, this.groundHeight(point.x, point.y));
       this.hud.showActionHint('Tap a company to select it, then tap again to send it');
       return;
     }
@@ -440,14 +441,17 @@ export class Input {
       this.chainPoint = result.end ?? target;
       return;
     }
+    // Blocked, wet or too poor: the attempt itself is shown as a blinking
+    // "phantom" wall (see flashInvalidWall) at the same snapped ends a real
+    // one would use, but chainPoint is deliberately left alone -- a refused
+    // segment does not throw away the chain, so the very next drag can
+    // still snap on and try a different end without starting over.
     if (result.status === 'blocked') {
-      this.chainPoint = null;
       this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Walls cannot cross the city');
       return;
     }
     if (result.status === 'water') {
-      this.chainPoint = null;
       this.renderer.flashInvalidWall(result.start, result.end);
       this.hud.showMessage('Walls cannot be laid in water');
       return;

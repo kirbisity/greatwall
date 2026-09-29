@@ -54,7 +54,7 @@ const PAN_RAMP_SAMPLES = 6;
 // Anything a gesture can start on that is interface rather than map. A drag
 // that begins on a button, the dock or a menu must not move the camera or
 // lay stone, and a tap on one must not also land on the ground beneath it.
-const INTERFACE = 'button, a, input, #topMenu, #toolDock, #dispatchMenu, .overlay, .modal';
+const INTERFACE = 'button, a, input, #topMenu, #toolDock, #battleDock, #dispatchMenu, .overlay, .modal';
 
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {
@@ -510,6 +510,10 @@ export class Input {
     }
     if (result.status === 'zone') {
       this.hud.showMessage('Place your troops south of the start line');
+      return;
+    }
+    if (result.status === 'unique') {
+      this.hud.showMessage('Only one Emperor can be fielded');
     }
   }
 

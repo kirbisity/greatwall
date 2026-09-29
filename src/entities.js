@@ -419,6 +419,12 @@ export class Guard extends Company {
     this.orders = { ...position };
     this.quarry = null;
     this.home = { ...position };
+    // Starts true -- a fresh company's orders are just its own spawn point,
+    // so it is already there. Game#orderGuards clears this on a real order,
+    // and it stays clear until the company actually gets there: see
+    // Game#guardDestination for why this is a sticky flag rather than a
+    // distance check redone every frame.
+    this.arrived = true;
     // Set once it has wandered past its leash, cleared once it is back.
     this.recalled = false;
     // Picked out by a tap on the map -- see Game#selectGuardsNear -- so the

@@ -299,7 +299,12 @@ export class Game {
       // Instant, not a slow breach -- there is no city left burning to
       // wait on. Only once the battle has actually started: an empty field
       // before Start Battle is pressed is not a loss, it is an empty field.
-      return this.started && this.guards.length === 0;
+      if (!this.started) {
+        return false;
+      }
+      // Losing the Emperor is fatal here too, the same as in a siege --
+      // even with other companies still standing.
+      return this.guards.length === 0 || (this.emperor !== null && !this.emperor.isAlive);
     }
     return this.castles.some((castle) => castle.health < 0) || (this.emperor !== null && !this.emperor.isAlive);
   }
@@ -710,8 +715,18 @@ export class Game {
   raiderDestination(raider, castle) {
     // No city to make for, and no reason to shy off from a company it can
     // see either -- the open battleground mode is a fight both sides came
-    // looking for, so the whole line simply charges its own lane south.
+    // looking for. Whatever guard is nearest gets run down; with nothing
+    // close enough to notice, the raider makes straight for the Emperor
+    // instead if one is on the field, and only charges blindly south with
+    // neither to aim at.
     if (this.mode === 'battle') {
+      const nearby = this.nearestGuard(raider.position, FEAR.noticeRadius);
+      if (nearby) {
+        return nearby.position;
+      }
+      if (this.emperor && this.emperor.isAlive) {
+        return this.emperor.position;
+      }
       return { x: raider.position.x, y: -BATTLE.fieldHalfDepth };
     }
     const city = castle ? castle.position : { x: 0, y: 0 };
@@ -859,6 +874,9 @@ export class Game {
     if (!entry) {
       return { placed: false, status: 'unknown' };
     }
+    if (typeId === 'EMPEROR' && this.emperorMustered) {
+      return { placed: false, status: 'unique' };
+    }
     if (this.battleBudget < entry.cost) {
       return { placed: false, status: 'poor' };
     }
@@ -866,7 +884,11 @@ export class Game {
       return { placed: false, status: 'zone' };
     }
     this.battleBudget -= entry.cost;
-    const guard = new Guard(typeId, point);
+    const guard = typeId === 'EMPEROR' ? new Emperor(point) : new Guard(typeId, point);
+    if (typeId === 'EMPEROR') {
+      this.emperor = guard;
+      this.emperorMustered = true;
+    }
     this.guards.push(guard);
     this.placementLog.push({ type: 'guard', guard, cost: entry.cost });
     this.onEffect('attack', point);
@@ -905,6 +927,10 @@ export class Game {
     if (entry.type === 'guard') {
       this.guards = this.guards.filter((guard) => guard !== entry.guard);
       this.battleBudget += entry.cost;
+      if (entry.guard === this.emperor) {
+        this.emperor = null;
+        this.emperorMustered = false;
+      }
     } else {
       this.earthworks = this.earthworks.filter((earthwork) => earthwork !== entry.earthwork);
     }
@@ -957,6 +983,9 @@ export class Game {
       guard.orders = spreadPoint(target, index, guards.length);
       guard.recalled = false;
       guard.selected = false;
+      // A fresh order takes the company's whole attention until it gets
+      // there -- see guardDestination.
+      guard.arrived = false;
     });
   }
 
@@ -972,6 +1001,21 @@ export class Game {
       const gap = distanceSquared(from, raider.position);
       if (gap < reach && gap < closestGap) {
         closest = raider;
+        closestGap = gap;
+      }
+    }
+    return closest;
+  }
+
+  /** The nearest live guard within `radius`, or null -- a raider's own mirror of nearestRaider. */
+  nearestGuard(from, radius) {
+    const reach = radius * radius;
+    let closest = null;
+    let closestGap = Infinity;
+    for (const guard of this.guards) {
+      const gap = distanceSquared(from, guard.position);
+      if (gap < reach && gap < closestGap) {
+        closest = guard;
         closestGap = gap;
       }
     }
@@ -1002,6 +1046,22 @@ export class Game {
       guard.closestApproach = Infinity;
     }
 
+    // An open order takes precedence over the hunt: the company beelines for
+    // it and fights only what actually catches it in melee (see
+    // lockEngagements) rather than breaking off because a raider strayed
+    // near. `arrived` is sticky rather than a fresh distance check every
+    // frame -- once it flips, a later hunt that carries the company back
+    // away from that point must not immediately read as "order still open"
+    // and snap it back.
+    if (!guard.arrived) {
+      if (distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2) {
+        guard.arrived = true;
+      } else {
+        guard.quarry = null;
+        return guard.orders;
+      }
+    }
+
     // Once past the leash it heads home and stays deaf to the hunt until it
     // is well back, otherwise it turns round the moment it clears the line
     // and yo-yos on the spot.
@@ -1023,8 +1083,7 @@ export class Game {
     if (guard.quarry) {
       return guard.quarry.position;
     }
-    const arrived = distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2;
-    return arrived ? guard.home : guard.orders;
+    return guard.home;
   }
 
   /**

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
-import { Castle, Raider, Wall } from '../src/entities.js';
+import { Castle, Emperor, Raider, Wall } from '../src/entities.js';
 import { LEVELS } from '../src/levels.js';
 import {
   BATTLE,
@@ -10,6 +10,7 @@ import {
   CASTLE_TYPES,
   EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
+  FEAR,
   FPS,
   GUARD_TYPES,
   RAIDER_SPAWN_INTERVAL_SECONDS,
@@ -490,6 +491,52 @@ test('orderGuards spreads a group around the shared destination rather than stac
   }
 });
 
+test('a company under open orders beelines for them and ignores a raider that merely strays near', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.orderGuards([guard], { x: 300, y: 40 });
+  game.raiders = [new Raider('CR0', { x: guard.position.x + 5, y: guard.position.y })];
+
+  assert.deepEqual(game.guardDestination(guard), guard.orders, 'the order should win, not a raider a few steps away');
+  assert.equal(guard.quarry, null, 'no quarry should be picked up while an order is still open');
+});
+
+test('once it reaches its order, a company goes back to hunting whatever is near, exactly as an idle one does', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  const target = { x: 300, y: 40 };
+  game.orderGuards([guard], target);
+  guard.position = { ...target };
+  game.raiders = [new Raider('CR0', { x: target.x + 50, y: target.y })];
+
+  assert.deepEqual(game.guardDestination(guard), game.raiders[0].position, 'arrived, and now free to run down what is close');
+  assert.equal(guard.arrived, true);
+});
+
+test('the arrival flag is sticky -- chasing a raider away from the held point does not cancel the chase', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  // Kept well inside IMPERIAL.leashRadius throughout -- this test is about
+  // the arrival flag, not the separate leash/recall mechanic.
+  const target = { x: 150, y: 40 };
+  game.orderGuards([guard], target);
+  guard.position = { ...target };
+  const raider = new Raider('CR0', { x: target.x + 70, y: target.y });
+  game.raiders = [raider];
+
+  // First call settles it onto the hunt and sends it well clear of `target`.
+  assert.deepEqual(game.guardDestination(guard), raider.position);
+  guard.position = { x: target.x + 50, y: target.y };
+
+  // Far past IMPERIAL.arriveRadius from `target` by now, but still mid-hunt
+  // -- this must still read as free to press the chase, not snap back to
+  // "the order is still open" just because it has drifted from that point.
+  assert.deepEqual(game.guardDestination(guard), raider.position, 'should still be free to press the chase');
+});
+
 test('a company left idle at home still hunts a raider that strays close, on its own', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 100000;
@@ -742,3 +789,84 @@ test('the open battleground mode never touches the treasury, seasons or the raid
   assert.equal(game.season, 0, 'no season to turn');
   assert.equal(game.raiders.length, raidersBefore, 'the line was drawn up once, not trickled in');
 });
+
+test('the Emperor is on the open battleground roster too: free, unique, and its own model', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const entry = BATTLE.roster.find((one) => one.id === 'EMPEROR');
+  assert.ok(entry, 'expected the Emperor on the battle roster');
+  assert.equal(entry.cost, 0);
+
+  const point = { x: 0, y: BATTLE.baselineY - 10 };
+  const result = game.placeGuard('EMPEROR', point);
+  assert.equal(result.placed, true);
+  assert.ok(result.guard instanceof Emperor);
+  assert.equal(game.emperor, result.guard);
+  assert.equal(game.battleBudget, BATTLE.budget, 'free -- placing it should not touch the budget');
+
+  const again = game.placeGuard('EMPEROR', { x: 20, y: BATTLE.baselineY - 10 });
+  assert.equal(again.placed, false);
+  assert.equal(again.status, 'unique', 'only one Emperor, the same as a siege');
+});
+
+test('undoing the Emperor\'s placement frees it up to be fielded again', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(game.emperorMustered, true);
+
+  game.undoLastPlacement();
+  assert.equal(game.emperor, null);
+  assert.equal(game.emperorMustered, false);
+  assert.equal(game.guards.length, 0);
+
+  const result = game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, true, 'undone, so it should be free to place again');
+});
+
+test('losing the Emperor ends an open battleground fight too, even with other companies still standing', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 });
+  game.placeGuard('IG_LIGHT', { x: 40, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  assert.equal(game.isDefeated, false);
+
+  game.emperor.health = -1;
+  assert.equal(game.guards.length, 2, 'the other company is still standing');
+  assert.equal(game.isDefeated, true, 'losing the Emperor alone should be enough');
+});
+
+test('a raider with a company nearby runs it down rather than making for the Emperor', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  // Placed within the deployment zone, then moved -- placeGuard's own zone
+  // check is not what this test is about.
+  const emperor = game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 }).guard;
+  emperor.position = { x: 0, y: -300 };
+  const nearGuard = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }).guard;
+  const raider = { position: { x: 0, y: BATTLE.baselineY - 10 + 50 } };
+  game.raiders = [raider];
+
+  assert.deepEqual(game.raiderDestination(raider), nearGuard.position);
+  assert.notDeepEqual(game.raiderDestination(raider), emperor.position);
+});
+
+test('with nothing nearby, a raider makes for the Emperor instead of just charging south blind', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const emperor = game.placeGuard('EMPEROR', { x: 15, y: BATTLE.baselineY - 10 }).guard;
+  emperor.position = { x: 15, y: -300 };
+  const raider = { position: { x: 0, y: 0 } };
+  game.raiders = [raider];
+
+  assert.ok(distanceBetween(raider.position, emperor.position) > FEAR.noticeRadius, 'sanity: too far to just be a nearby company');
+  assert.deepEqual(game.raiderDestination(raider), emperor.position);
+});
+
+test('with no Emperor fielded and nothing nearby, a raider falls back to charging its own lane south', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = { position: { x: 30, y: 0 } };
+  game.raiders = [raider];
+
+  assert.deepEqual(game.raiderDestination(raider), { x: 30, y: -BATTLE.fieldHalfDepth });
+});
+
+function distanceBetween(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}

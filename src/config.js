@@ -402,10 +402,14 @@ export const BATTLE = {
   // Reuses the imperial guard tiers rather than inventing a parallel unit
   // list -- same stats, same avatar, same 3D model, just priced in points
   // instead of coin, since there is no income to spend coin out of.
+  // The Emperor is on offer here too, free and unique the same way it is in
+  // a siege (see Game#placeGuard) -- no castle tier to scale it off in this
+  // mode, so it fields at its plain base stats.
   roster: [
     { id: 'IG_LIGHT', cost: 3 },
     { id: 'IG0', cost: 5 },
     { id: 'IG_HEAVY', cost: 8 },
+    { id: 'EMPEROR', cost: 0 },
   ],
   // North is +y (see Game#spawnPoint's own bearing convention); the player
   // deploys south of the start line, the enemy is drawn up north of it.

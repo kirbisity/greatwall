@@ -6,6 +6,7 @@ import {
   FLAG,
   HEALTH_COLORS,
   HOUSES,
+  IMPERIAL,
   PALETTE,
   SUN,
   TERRAIN,
@@ -156,6 +157,12 @@ const PLAN_TOOL_SIZE = 22;
 const INVALID_ATTEMPT_SECONDS = 2;
 const INVALID_BLINK_RATE = 9;
 const INVALID_LINE = '220, 60, 50';
+
+// A ring under each selected company (see Game#selectGuardsNear), and the
+// brief outward ping marking where an Attack-tool tap just landed.
+const SELECTION_RING_RADIUS = 12;
+const SELECTION_LINE = '235, 210, 120';
+const SELECTION_PING_SECONDS = 0.8;
 
 // A beached raiding hull: how long, how wide at the stern and at the bow,
 // and how tall the freeboard, deckhouse and mast stand above the keel.
@@ -449,6 +456,10 @@ export class Renderer {
     // as a brief red blink rather than just a toast, so the drag itself
     // reads as refused. See flashInvalidWall/drawInvalidAttempt.
     this.invalidAttempt = null;
+    // Where an Attack-tool tap last landed, a brief ring fading outward to
+    // show what got searched -- see pingSelection/drawSelection. Selected
+    // companies themselves are read straight off game.guards (guard.selected).
+    this.selectionPing = null;
     this.units = new Map();
     this.images = new Map();
     // Scratch for the ground mesh, grown to fit and then reused: a repaint
@@ -610,6 +621,7 @@ export class Renderer {
     }
     this.drawPeggedWalls(view, game);
     this.drawInvalidAttempt(view);
+    this.drawSelection(view, game.guards);
     this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
@@ -1451,6 +1463,62 @@ export class Renderer {
     context.beginPath();
     context.moveTo(from.x, from.y);
     context.lineTo(to.x, to.y);
+    context.stroke();
+    context.restore();
+  }
+
+  /** Mark where an Attack-tool tap just landed -- see Input#handleAttackTap. */
+  pingSelection(x, y, groundZ) {
+    this.selectionPing = { x, y, groundZ, until: this.clock + SELECTION_PING_SECONDS };
+  }
+
+  /**
+   * A ring under each selected company, read straight off guard.selected
+   * every frame so it tracks a company as it moves, plus the brief outward
+   * ping from the tap that picked them out.
+   */
+  drawSelection(view, guards) {
+    const context = this.overlay;
+    for (const guard of guards) {
+      if (!guard.selected) {
+        continue;
+      }
+      const point = projectPoint(view, guard.position.x, guard.position.y, 0);
+      if (!point) {
+        continue;
+      }
+      const radius = (view.focal / point.depth) * SELECTION_RING_RADIUS;
+      context.save();
+      context.strokeStyle = `rgb(${SELECTION_LINE})`;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      context.stroke();
+      context.restore();
+    }
+    this.drawSelectionPing(view);
+  }
+
+  drawSelectionPing(view) {
+    const ping = this.selectionPing;
+    if (!ping) {
+      return;
+    }
+    if (this.clock >= ping.until) {
+      this.selectionPing = null;
+      return;
+    }
+    const point = projectPoint(view, ping.x, ping.y, ping.groundZ);
+    if (!point) {
+      return;
+    }
+    const progress = 1 - (ping.until - this.clock) / SELECTION_PING_SECONDS;
+    const context = this.overlay;
+    context.save();
+    context.strokeStyle = `rgba(${SELECTION_LINE}, ${1 - progress})`;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(point.x, point.y, (view.focal / point.depth) * IMPERIAL.selectRadius * (0.4 + 0.6 * progress), 0, Math.PI * 2);
     context.stroke();
     context.restore();
   }

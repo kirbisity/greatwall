@@ -73,7 +73,7 @@ test('it applies on every level, to raiders and defenders alike', () => {
   const game = onARamp();
   game.tokens = 100000;
   game.spawnRaider();
-  const sent = game.sendGuard(game.dispatchOptions()[0].id, { x: 200, y: 0 });
+  const sent = game.sendGuard(game.dispatchOptions()[0].id);
   assert.equal(sent.sent, true, 'the company should have been mustered');
   const raider = game.raiders[0];
   const guard = game.guards[0];

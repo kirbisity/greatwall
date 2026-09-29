@@ -79,9 +79,6 @@ export class Input {
     this.smoothedTouch = null;
     this.zoomAnchor = null;
     this.chainPoint = null;
-    // Which guard tier the dispatch menu last picked. Sticky across sends,
-    // so repeat orders of the same company do not reopen the menu.
-    this.selectedGuardType = null;
   }
 
   /**
@@ -208,6 +205,7 @@ export class Input {
       this.openDispatchMenu();
     } else {
       this.hud.hideDispatchMenu();
+      this.game.deselectGuards();
     }
     const hint = TOOL_HINTS[this.tool];
     if (hint) {
@@ -222,6 +220,7 @@ export class Input {
     this.applyTool();
     this.hud.hideDispatchMenu();
     this.hud.clearActionHint();
+    this.game.deselectGuards();
   }
 
   /** Show the tier picker above the castle, so an order carries a company. */
@@ -241,10 +240,18 @@ export class Input {
     const screen = this.camera.toScreen({ x, y, z: this.groundHeight(x, y) + roof })
       ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
     this.hud.showActionHint('Choose a company above the castle');
+    // Left open rather than hidden after a pick, so several companies can be
+    // mustered in a row -- tapping the map (see handleAttackTap) is what
+    // closes it, once the player has moved on to selecting and sending them.
     this.hud.showDispatchMenu(options, screen, (typeId) => {
-      this.selectedGuardType = typeId;
-      this.hud.hideDispatchMenu();
-      this.hud.showActionHint('Tap the map to send them');
+      const option = options.find((candidate) => candidate.id === typeId);
+      const result = this.game.sendGuard(typeId);
+      if (!result.sent) {
+        this.hud.showMessage(`${option.name} costs $${option.cost} to muster`);
+        return;
+      }
+      this.hud.showActionHint('Tap a company to select it, then tap again to send it');
+      this.onChange();
     });
   }
 
@@ -292,7 +299,7 @@ export class Input {
     }
     if (this.tool === 'attack') {
       this.trackPointer(event);
-      this.orderAttack(this.pointerOnGround());
+      this.handleAttackTap(this.pointerOnGround());
       this.onChange();
       return;
     }
@@ -313,16 +320,26 @@ export class Input {
     }
   }
 
-  /** Muster the picked tier, or the cheapest, and send it to hold a spot. */
-  orderAttack(target) {
-    const options = this.game.dispatchOptions();
-    const chosen = options.find((option) => option.id === this.selectedGuardType) ?? options[0];
-    if (!chosen) {
+  /**
+   * The Attack tool's own two-step order: an empty-handed tap picks out
+   * whatever companies are nearby (see Game#selectGuardsNear), and a tap
+   * with something already selected sends that group to hold the new
+   * ground (see Game#orderGuards) instead. A tap always closes the tier
+   * picker -- mustering is done, this tap is about commanding.
+   */
+  handleAttackTap(point) {
+    this.hud.hideDispatchMenu();
+    const selected = this.game.selectedGuards;
+    if (selected.length > 0) {
+      this.game.orderGuards(selected, point);
+      this.hud.showActionHint('Tap a company to select it, then tap again to send it');
       return;
     }
-    const result = this.game.sendGuard(chosen.id, target);
-    if (result.status === 'poor') {
-      this.hud.showMessage(`${chosen.name} costs $${chosen.cost} to muster`);
+    const found = this.game.selectGuardsNear(point);
+    const ground = this.groundHeight(point.x, point.y);
+    this.renderer.pingSelection(point.x, point.y, ground);
+    if (found.length > 0) {
+      this.hud.showActionHint('Tap again to send them there');
     }
   }
 

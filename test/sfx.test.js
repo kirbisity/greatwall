@@ -209,7 +209,7 @@ test('sending a company out plays the attack effect', () => {
   const game = gameWith();
   const [option] = game.dispatchOptions();
   const effects = trackEffects(game);
-  const result = game.sendGuard(option.id, { x: 300, y: 0 });
+  const result = game.sendGuard(option.id);
   assert.equal(result.sent, true);
   assert.equal(effects.at(-1).name, 'attack');
 });
@@ -275,7 +275,7 @@ test('a wall falling in battle plays the destroyed effect once', () => {
 
 test('our guards trading blows with a raider plays the fighting effect', () => {
   const game = gameWith();
-  const guard = game.sendGuard(game.dispatchOptions()[0].id, { x: 0, y: 0 }).guard;
+  const guard = game.sendGuard(game.dispatchOptions()[0].id).guard;
   const raider = new Raider('CR0', { ...guard.position });
   game.raiders = [raider];
 
@@ -286,7 +286,7 @@ test('our guards trading blows with a raider plays the fighting effect', () => {
 
 test('a guard staying locked in the same melee only sounds fighting once', () => {
   const game = gameWith();
-  const guard = game.sendGuard(game.dispatchOptions()[0].id, { x: 0, y: 0 }).guard;
+  const guard = game.sendGuard(game.dispatchOptions()[0].id).guard;
   const raider = new Raider('CR0', { ...guard.position });
   raider.health = 100000; // outlasts a handful of frames so the bout stays locked
   game.raiders = [raider];

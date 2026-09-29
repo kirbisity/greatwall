@@ -421,5 +421,8 @@ export class Guard extends Company {
     this.home = { ...position };
     // Set once it has wandered past its leash, cleared once it is back.
     this.recalled = false;
+    // Picked out by a tap on the map -- see Game#selectGuardsNear -- so the
+    // next tap knows to command it rather than pick out something new.
+    this.selected = false;
   }
 }

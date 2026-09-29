@@ -305,7 +305,7 @@ test('sendGuard charges the tier it was asked for, not a flat rate', () => {
   game.tokens = 100000;
   for (const [typeId, type] of Object.entries(GUARD_TYPES)) {
     const before = game.tokens;
-    const result = game.sendGuard(typeId, { x: 10, y: 10 });
+    const result = game.sendGuard(typeId);
     assert.equal(result.sent, true, typeId);
     assert.equal(before - game.tokens, type.cost, `${typeId} should cost $${type.cost}`);
     assert.equal(result.guard.typeId, typeId);
@@ -315,10 +315,82 @@ test('sendGuard charges the tier it was asked for, not a flat rate', () => {
 test('sendGuard refuses a company the treasury cannot afford', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 0;
-  const result = game.sendGuard('IG0', { x: 10, y: 10 });
+  const result = game.sendGuard('IG0');
   assert.equal(result.sent, false);
   assert.equal(result.status, 'poor');
   assert.equal(game.guards.length, 0);
+});
+
+// --- mustering stands idle until selected and sent ------------------------
+
+test('a mustered company stands at home rather than marching anywhere', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const { guard } = game.sendGuard('IG0');
+  assert.deepEqual(guard.orders, guard.home);
+  assert.deepEqual(guard.position, guard.home);
+});
+
+test('selectGuardsNear picks out only the companies within range, and marks them', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const near = game.sendGuard('IG0').guard;
+  const far = game.sendGuard('IG0').guard;
+  far.position = { x: 900, y: 900 };
+  far.home = { x: 900, y: 900 };
+
+  const found = game.selectGuardsNear(near.position);
+
+  assert.deepEqual(found, [near]);
+  assert.equal(near.selected, true);
+  assert.equal(far.selected, false);
+});
+
+test('deselectGuards clears every company\'s own selected flag', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.selectGuardsNear(guard.position);
+  assert.equal(guard.selected, true);
+
+  game.deselectGuards();
+  assert.equal(guard.selected, false);
+});
+
+test('orderGuards sends a single company exactly where aimed', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.orderGuards([guard], { x: 300, y: 40 });
+  assert.deepEqual(guard.orders, { x: 300, y: 40 });
+  assert.equal(guard.selected, false, 'commanding a company deselects it');
+});
+
+test('orderGuards spreads a group around the shared destination rather than stacking them', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guards = [game.sendGuard('IG0').guard, game.sendGuard('IG0').guard, game.sendGuard('IG0').guard];
+  const target = { x: 300, y: 40 };
+
+  game.orderGuards(guards, target);
+
+  const distinctOrders = new Set(guards.map((guard) => `${guard.orders.x},${guard.orders.y}`));
+  assert.equal(distinctOrders.size, guards.length, 'each company should land somewhere different');
+  for (const guard of guards) {
+    const distance = Math.hypot(guard.orders.x - target.x, guard.orders.y - target.y);
+    assert.ok(distance > 0 && distance < 30, `order should stay near the target, was ${distance}`);
+  }
+});
+
+test('a company left idle at home still hunts a raider that strays close, on its own', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.raiders = [new Raider('CR0', { x: guard.home.x + 50, y: guard.home.y })];
+
+  const destination = game.guardDestination(guard);
+
+  assert.deepEqual(destination, game.raiders[0].position, 'never ordered anywhere, but a raider is close enough to chase');
 });
 
 // --- affordability, for Hud's own greying of the Build and Attack tools ---

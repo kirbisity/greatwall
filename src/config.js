@@ -195,6 +195,14 @@ export const IMPERIAL = {
   // their formation, but they pick their way over the stone: astride a
   // section (see WALL.crossDistance) they slow to this much of their pace.
   crossSpeed: 0.45,
+  // How close an Attack-tool tap must land to a company to pick it out --
+  // see Game#selectGuardsNear. Shared with the renderer, which draws the
+  // tap's own ping at the same radius, so what the player sees searched is
+  // exactly what was searched.
+  selectRadius: 40,
+  // How far apart a selected group spreads around a shared destination --
+  // see Game#orderGuards.
+  groupSpreadRadius: 18,
 };
 
 /**

@@ -9,6 +9,7 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
     setCursor: () => {},
     setActiveTool: () => {},
     hideDispatchMenu: () => {},
+    showDispatchMenu: () => {},
     showMessage: () => {},
     showActionHint: () => {},
     clearActionHint: () => {},
@@ -16,9 +17,17 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
   const camera = {
     toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
   };
-  const renderer = { hoveredWall: null, flashInvalidWall: () => {} };
+  const renderer = { hoveredWall: null, flashInvalidWall: () => {}, pingSelection: () => {} };
   const game = {
-    wallAt, castles: [], dispatchOptions: () => [], terrain: { heightAt: () => 0 }, ...gameOverrides,
+    wallAt,
+    castles: [],
+    dispatchOptions: () => [],
+    terrain: { heightAt: () => 0 },
+    selectedGuards: [],
+    deselectGuards: () => {},
+    selectGuardsNear: () => [],
+    orderGuards: () => {},
+    ...gameOverrides,
   };
   const input = new Input({
     game,
@@ -125,35 +134,99 @@ test('tapping repair on open ground with nothing to mend is a quiet no-op', () =
   assert.doesNotThrow(() => input.handleClick({ clientX: 100, clientY: 100 }));
 });
 
-// --- ordering an attack -------------------------------------------------
+// --- mustering, selecting and ordering an attack -------------------------
 
-/** An Input wired to a game that records the companies it is asked to send. */
+/** An Input wired to a game that records every company it is asked to muster. */
 function attackReady({ options = [{ id: 'IG0', name: 'Guardsman', cost: 260 }], sent = { sent: true } } = {}) {
+  const spawned = [];
+  const selected = [];
   const orders = [];
+  const guards = [];
   const { input } = makeInput({
     game: {
       dispatchOptions: () => options,
-      sendGuard: (typeId, target) => {
-        orders.push({ typeId, target });
-        return sent;
-      },
+      castles: [{ position: { x: 0, y: 0 }, typeId: 'CC0' }],
+      sendGuard: (typeId) => { spawned.push(typeId); return sent; },
+      selectGuardsNear: (point) => { selected.push(point); return guards; },
+      orderGuards: (group, target) => orders.push({ group, target }),
+      get selectedGuards() { return guards; },
     },
   });
-  return { input, orders };
+  return { input, spawned, selected, orders, guards };
 }
 
-test('the attack tool asks for a company first, then to tap the map once one is picked', () => {
+test('the attack tool asks for a company first, then to tap one to select it', () => {
   const options = [{ id: 'IG0', name: 'Guardsman', cost: 260 }];
   const hints = [];
   const { input } = makeInput({
-    game: { dispatchOptions: () => options, castles: [{ position: { x: 0, y: 0 }, typeId: 'CC0' }] },
+    game: {
+      dispatchOptions: () => options,
+      castles: [{ position: { x: 0, y: 0 }, typeId: 'CC0' }],
+      sendGuard: () => ({ sent: true }),
+    },
   });
   input.hud.showActionHint = (text) => hints.push(text);
   input.hud.showDispatchMenu = (opts, screen, onPick) => onPick(options[0].id);
 
   input.selectTool('attack');
 
-  assert.deepEqual(hints, ['Choose a company above the castle', 'Tap the map to send them']);
+  assert.deepEqual(hints, [
+    'Choose a company above the castle',
+    'Tap a company to select it, then tap again to send it',
+  ]);
+});
+
+test('picking a tier spawns a company right away, without needing a map tap', () => {
+  const { input, spawned } = attackReady();
+  input.hud.showDispatchMenu = (opts, screen, onPick) => onPick('IG0');
+  input.selectTool('attack');
+  assert.deepEqual(spawned, ['IG0']);
+});
+
+test('picking a tier the treasury cannot afford says so and musters nobody', () => {
+  const messages = [];
+  const { input } = attackReady({ sent: { sent: false, status: 'poor' } });
+  input.hud.showMessage = (text) => messages.push(text);
+  input.hud.showDispatchMenu = (opts, screen, onPick) => onPick('IG0');
+  input.selectTool('attack');
+  assert.match(messages.join(' '), /costs \$260/);
+});
+
+test('the tier picker stays open after a pick, so several companies can be mustered in a row', () => {
+  const hidden = [];
+  const { input } = attackReady();
+  input.hud.hideDispatchMenu = () => hidden.push(true);
+  input.hud.showDispatchMenu = (opts, screen, onPick) => { onPick('IG0'); onPick('IG0'); };
+  input.selectTool('attack');
+  assert.equal(hidden.length, 0, 'mustering should not close the picker');
+});
+
+test('an empty-handed tap selects whatever companies are nearby', () => {
+  const { input, selected } = attackReady();
+  input.selectTool('attack');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected[0], { x: 400, y: 300 });
+});
+
+test('a tap with something selected sends that group instead of selecting again', () => {
+  const { input, selected, orders, guards } = attackReady();
+  guards.push({ selected: true });
+  input.selectTool('attack');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 0, 'already have a group -- this tap commands, not selects');
+  assert.equal(orders.length, 1);
+  assert.deepEqual(orders[0].target, { x: 400, y: 300 });
+});
+
+test('a tap always closes the tier picker, since tapping the map means mustering is done', () => {
+  const hidden = [];
+  const { input } = attackReady();
+  input.hud.hideDispatchMenu = () => hidden.push(true);
+  input.selectTool('attack');
+  hidden.length = 0;
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(hidden.length, 1);
 });
 
 test('a tool with nothing of its own to say clears whatever hint was showing', () => {
@@ -176,65 +249,12 @@ test('every other tool names what to do with it', () => {
   assert.ok(hints.every((text) => text.length > 0));
 });
 
-test('clicking the map with the attack tool musters a company', () => {
-  const { input, orders } = attackReady();
+test('the attack tool stays up through a full select-then-command cycle', () => {
+  const { input, guards } = attackReady();
+  guards.push({ selected: true });
   input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
-
-  assert.equal(orders.length, 1, 'the click should have sent a company');
-  assert.equal(orders[0].typeId, 'IG0');
-  assert.deepEqual(orders[0].target, { x: 400, y: 300 });
-});
-
-test('the attack order carries the tier the player picked, not just the first', () => {
-  const options = [
-    { id: 'IG_LIGHT', name: 'Light Guard', cost: 260 },
-    { id: 'IG_HEAVY', name: 'Heavy Guard', cost: 680 },
-  ];
-  const { input, orders } = attackReady({ options });
-  input.selectTool('attack');
-  input.selectedGuardType = 'IG_HEAVY';
-  input.handleClick({ clientX: 500, clientY: 350 });
-
-  assert.equal(orders[0].typeId, 'IG_HEAVY');
-});
-
-test('an attack the treasury cannot afford says so and sends nobody', () => {
-  const messages = [];
-  const orders = [];
-  const { input } = makeInput({
-    game: {
-      dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }],
-      sendGuard: (typeId) => {
-        orders.push(typeId);
-        return { sent: false, status: 'poor' };
-      },
-    },
-  });
-  input.hud.showMessage = (text) => messages.push(text);
-  input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
-
-  assert.equal(orders.length, 1, 'it still asks');
-  assert.match(messages.join(' '), /costs \$260/);
-});
-
-test('with no company available the attack click is simply ignored', () => {
-  const { input, orders } = attackReady({ options: [] });
-  input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
-  assert.equal(orders.length, 0);
-});
-
-test('the attack tool stays up, so several companies can be sent in a row', () => {
-  const { input, orders } = attackReady();
-  input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
-  input.handleClick({ clientX: 500, clientY: 320 });
-
+  input.handleClick({ clientX: 400, clientY: 300 }); // commands the group already in guards
   assert.equal(input.tool, 'attack', 'ordering should not put the tool away');
-  assert.equal(orders.length, 2);
-  assert.deepEqual(orders[1].target, { x: 500, y: 320 });
 });
 
 // --- touch and pointer gestures -----------------------------------------

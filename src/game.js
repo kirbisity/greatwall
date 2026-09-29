@@ -78,6 +78,21 @@ function wallMidpoint(wall) {
   return { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
 }
 
+/**
+ * One of `count` points evenly ringed around `target` -- a single company
+ * gets the exact point, so a lone order still lands precisely where aimed.
+ */
+function spreadPoint(target, index, count) {
+  if (count <= 1) {
+    return { ...target };
+  }
+  const angle = (index / count) * Math.PI * 2;
+  return {
+    x: target.x + Math.cos(angle) * IMPERIAL.groupSpreadRadius,
+    y: target.y + Math.sin(angle) * IMPERIAL.groupSpreadRadius,
+  };
+}
+
 function spawnOffset(random) {
   const value = Math.floor(random() * SPAWN_MAX_DISTANCE * 2) - SPAWN_MAX_DISTANCE;
   if (value > 0 && value < SPAWN_MIN_DISTANCE) {
@@ -636,7 +651,7 @@ export class Game {
   }
 
   /** Send a company of the given tier to hold a patch of ground. */
-  sendGuard(typeId, target) {
+  sendGuard(typeId) {
     const home = this.castles[0];
     if (!home) {
       return { sent: false, status: 'nocity' };
@@ -651,11 +666,53 @@ export class Game {
     this.tokens -= type.cost;
     const guard = new Guard(typeId, home.position);
     guard.home = { ...home.position };
-    guard.orders = { ...target };
-    guard.aimAt(target);
+    // No order yet: it stands at home until selected and sent (see
+    // selectGuardsNear/orderGuards), hunting anything that strays within
+    // IMPERIAL.huntRadius on its own the same way any mustered company
+    // already does -- see guardDestination.
     this.guards.push(guard);
     this.onEffect('attack', home.position);
     return { sent: true, guard };
+  }
+
+  /**
+   * Every company within ATTACK_SELECT_RADIUS of a point -- a tap to pick
+   * out whatever is nearby, whether it is still standing at home or
+   * already out on the field. Marks them selected and hands the group
+   * back, so Input knows who a following tap should command.
+   */
+  selectGuardsNear(point) {
+    const reach = IMPERIAL.selectRadius * IMPERIAL.selectRadius;
+    const found = this.guards.filter((guard) => distanceSquared(guard.position, point) <= reach);
+    for (const guard of this.guards) {
+      guard.selected = found.includes(guard);
+    }
+    return found;
+  }
+
+  /** Every company currently selected -- see selectGuardsNear. */
+  get selectedGuards() {
+    return this.guards.filter((guard) => guard.selected);
+  }
+
+  deselectGuards() {
+    for (const guard of this.guards) {
+      guard.selected = false;
+    }
+  }
+
+  /**
+   * Send a selected group to hold new ground, spread a little around the
+   * point instead of stacked on the exact same spot -- but a company
+   * already trading blows stays put until it is free, the same as any
+   * other order (see Company#isHeld, moveGuards).
+   */
+  orderGuards(guards, target) {
+    guards.forEach((guard, index) => {
+      guard.orders = spreadPoint(target, index, guards.length);
+      guard.recalled = false;
+      guard.selected = false;
+    });
   }
 
   /** The nearest live raider within `radius`, or null. */

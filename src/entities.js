@@ -292,6 +292,13 @@ class Company {
     // every frame.
     this.planVersion = null;
     this.replanCountdown = 0;
+    // Whether this company's current bout of contact -- battering a wall or
+    // the castle, or trading blows in melee -- has already played its sound
+    // effect, so a long engagement sounds once rather than every frame it
+    // continues. See Game#moveRaiders and Game#step.
+    this.touchedThisFrame = false;
+    this.soundedEngage = false;
+    this.soundedFight = false;
   }
 
   get isAlive() {

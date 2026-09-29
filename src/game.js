@@ -311,9 +311,16 @@ export class Game {
     }
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
-    const fighting = this.guards.find((guard) => guard.foes.size > 0);
-    if (fighting) {
-      this.onEffect('fighting', fighting.position);
+    for (const guard of this.guards) {
+      if (guard.inMelee) {
+        if (!guard.soundedFight) {
+          this.onEffect('fighting', guard.position);
+          guard.soundedFight = true;
+        }
+      } else {
+        // The bout ended -- the next one is a fresh engagement.
+        guard.soundedFight = false;
+      }
     }
     this.moveRaiders();
     this.moveGuards();
@@ -528,9 +535,14 @@ export class Game {
       }
       this.advanceAgainstWalls(navigation, raider);
       this.chargeWallClimb(raider);
+      raider.touchedThisFrame = false;
       this.resolveWallContact(navigation, raider);
       if (raider.isAlive && target) {
         this.resolveCastleContact(raider, target);
+      }
+      if (!raider.touchedThisFrame) {
+        // Contact broke this frame -- see it as a fresh engagement next time.
+        raider.soundedEngage = false;
       }
     }
   }
@@ -814,7 +826,11 @@ export class Game {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
         wall.takeHit(raider.type.attack * wear);
-        this.onEffect('engaging', wallMidpoint(wall));
+        raider.touchedThisFrame = true;
+        if (!raider.soundedEngage) {
+          this.onEffect('engaging', wallMidpoint(wall));
+          raider.soundedEngage = true;
+        }
         if (!climb) {
           raider.takeHit(WALL.attack);
           if (!raider.isAlive) {
@@ -830,7 +846,11 @@ export class Game {
     if (distanceSquared(castle.position, raider.position) < reach * reach) {
       castle.takeHit(raider.type.attack);
       raider.takeHit(castle.type.attack);
-      this.onEffect('engaging', castle.position);
+      raider.touchedThisFrame = true;
+      if (!raider.soundedEngage) {
+        this.onEffect('engaging', castle.position);
+        raider.soundedEngage = true;
+      }
     }
   }
 

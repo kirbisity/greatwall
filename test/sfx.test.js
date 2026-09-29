@@ -229,6 +229,27 @@ test('a raider battering a wall plays the engaging effect', () => {
   assert.deepEqual(effects[0].position, { x: 50, y: 0 });
 });
 
+test('a raider battering the same wall on and on only sounds engaging once', () => {
+  const game = gameWith();
+  const wall = new Wall({ x: 0, y: 0 }, { x: 100, y: 0 });
+  wall.finish();
+  wall.health = 100000; // never dies mid-test
+  game.walls = [wall];
+  const navigation = buildNavigation(game.walls, { x: 0, y: 0 }, 'v1');
+  const raider = new Raider('CR0', { x: 50, y: 0 });
+
+  const effects = trackEffects(game);
+  game.resolveWallContact(navigation, raider);
+  game.resolveWallContact(navigation, raider);
+  game.resolveWallContact(navigation, raider);
+  assert.equal(effects.length, 1, 'still battering the same section -- no repeat');
+
+  // A frame with no contact at all (see Game#moveRaiders) ends the engagement.
+  raider.soundedEngage = false;
+  game.resolveWallContact(navigation, raider);
+  assert.equal(effects.length, 2, 'contact broke and resumed -- a fresh engagement sounds again');
+});
+
 test('a raider reaching the castle plays the engaging effect', () => {
   const game = gameWith();
   const castle = game.castles[0];
@@ -261,6 +282,21 @@ test('our guards trading blows with a raider plays the fighting effect', () => {
   const effects = trackEffects(game);
   game.step();
   assert.ok(effects.some((effect) => effect.name === 'fighting'), 'a locked guard plays the fighting effect');
+});
+
+test('a guard staying locked in the same melee only sounds fighting once', () => {
+  const game = gameWith();
+  const guard = game.sendGuard(game.dispatchOptions()[0].id, { x: 0, y: 0 }).guard;
+  const raider = new Raider('CR0', { ...guard.position });
+  raider.health = 100000; // outlasts a handful of frames so the bout stays locked
+  game.raiders = [raider];
+
+  const effects = trackEffects(game);
+  for (let frame = 0; frame < 10; frame += 1) {
+    game.step();
+  }
+  const fighting = effects.filter((effect) => effect.name === 'fighting');
+  assert.equal(fighting.length, 1, 'still the same bout -- no repeat across frames');
 });
 
 test('the city falling plays the destroyed effect once, at the castle', () => {

@@ -259,9 +259,9 @@ export const AVATARS = {
   imperialLight: 'images/unit_avatar/avatar_chinese_light.png',
   imperialRegular: 'images/unit_avatar/avatar_chinese_regular.png',
   imperialHeavy: 'images/unit_avatar/avatar_chinese_heavy.png',
-  japanLight: 'images/unit_avatar/avatar_japanese_ashigaru.svg',
-  japanRegular: 'images/unit_avatar/avatar_japanese_samurai.svg',
-  japanHeavy: 'images/unit_avatar/avatar_japanese_sohei.svg',
+  japanLight: 'images/unit_avatar/avatar_japanese_light.png',
+  japanRegular: 'images/unit_avatar/avatar_japanese_regular.png',
+  japanHeavy: 'images/unit_avatar/avatar_japanese_heavy.png',
 };
 
 export const AVATAR = {

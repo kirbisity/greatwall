@@ -115,6 +115,8 @@ export class Hud {
     this.attackToolButton = element('attackTool');
     this.upgradeToolButton = element('upgradeTool');
     this.dispatchMenu = element('dispatchMenu');
+    this.holdToggle = element('holdToggle');
+    this.shownHoldLabel = null;
     this.dispatchButtons = [
       element('dispatchOption0'),
       element('dispatchOption1'),
@@ -458,6 +460,27 @@ export class Hud {
     const { dx, dy } = clampIntoView(node.getBoundingClientRect(), view, MENU_MARGIN);
     node.style.left = `${Math.round(screen.x + dx)}px`;
     node.style.top = `${Math.round(screen.y + dy)}px`;
+  }
+
+  /**
+   * The Hold button, floated over whatever companies are selected: "Hold"
+   * to plant them where they stand, "Release" once every one of them
+   * already is. `screen` is where over them to put it, or null to hide it.
+   */
+  updateHoldToggle(guards, screen) {
+    if (guards.length === 0 || !screen) {
+      this.holdToggle.style.display = 'none';
+      return;
+    }
+    const allHolding = guards.every((guard) => guard.holding);
+    const label = allHolding ? 'Release' : 'Hold';
+    if (label !== this.shownHoldLabel) {
+      this.shownHoldLabel = label;
+      this.holdToggle.innerText = label;
+      this.holdToggle.classList.toggle('is-holding', allHolding);
+    }
+    this.holdToggle.style.display = 'block';
+    this.placeOnScreen(this.holdToggle, screen);
   }
 
   hideDispatchMenu() {

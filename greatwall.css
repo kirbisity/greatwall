@@ -351,6 +351,29 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .dispatchButton:hover { border-color: var(--bronze); box-shadow: var(--glow); transform: translateY(-2px); }
 
+/* --- hold toggle, floated over the selected companies ------------------ */
+
+.holdToggle {
+	position: fixed;
+	display: none;
+	z-index: 7;
+	transform: translate(-50%, 4px);
+	padding: 5px 12px;
+	font-family: var(--display);
+	font-size: 11px;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 3px;
+	box-shadow: var(--lift);
+	transition: border-color 160ms, box-shadow 160ms;
+}
+
+.holdToggle:hover { border-color: var(--bronze); box-shadow: var(--glow); }
+.holdToggle.is-holding { border-color: var(--bronze); color: var(--bronze); }
+
 /* --- full screen overlays ---------------------------------------------- */
 
 .overlay {

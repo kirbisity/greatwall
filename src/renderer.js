@@ -181,6 +181,18 @@ const START_LINE_COLOR = '236, 226, 196';
 const START_LINE_WIDTH = 2;
 const START_LINE_ALPHA = 0.55;
 
+// Small markers drawn over a company's portrait: the white flag of a routed
+// company, and the bars of one on hold.
+const MARKER = {
+  height: 16,
+  flag: '#f4f1e8',
+  flagWidth: 10,
+  flagHeight: 7,
+  hold: '#d8b25a',
+  holdBar: 3,
+  holdGap: 4,
+};
+
 // A ring under each selected company (see Game#selectGuardsNear), and the
 // brief outward ping marking where an Attack-tool tap just landed.
 const SELECTION_RING_RADIUS = 12;
@@ -1987,6 +1999,39 @@ export class Renderer {
     return top - AVATAR.gap;
   }
 
+  /** A small white flag over a company whose morale has broken -- see melee.js's rout. */
+  drawWhiteFlag(centreX, bottomY) {
+    const context = this.overlay;
+    const poleTop = bottomY - MARKER.height;
+    context.save();
+    context.strokeStyle = PALETTE.barEdge;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.moveTo(centreX, bottomY);
+    context.lineTo(centreX, poleTop);
+    context.stroke();
+    context.fillStyle = MARKER.flag;
+    context.fillRect(centreX, poleTop, MARKER.flagWidth, MARKER.flagHeight);
+    context.lineWidth = 1;
+    context.strokeRect(centreX, poleTop, MARKER.flagWidth, MARKER.flagHeight);
+    context.restore();
+  }
+
+  /** Two upright bars over a company standing its ground -- see Game#toggleHold. */
+  drawHoldMark(centreX, bottomY) {
+    const context = this.overlay;
+    const top = bottomY - MARKER.flagHeight - 2;
+    context.save();
+    context.fillStyle = MARKER.hold;
+    context.strokeStyle = PALETTE.barEdge;
+    context.lineWidth = 1;
+    for (const offset of [-MARKER.holdGap, MARKER.holdGap - MARKER.holdBar]) {
+      context.fillRect(centreX + offset, top, MARKER.holdBar, MARKER.flagHeight);
+      context.strokeRect(centreX + offset, top, MARKER.holdBar, MARKER.flagHeight);
+    }
+    context.restore();
+  }
+
   drawBars(view, game) {
     for (const castle of game.castles) {
       const definition = game.buildings[castle.typeId];
@@ -2001,8 +2046,14 @@ export class Renderer {
       }
       const fraction = company.health / company.type.maxHealth;
       const top = this.drawCompanyBar(view, game, company, model.radius, fraction);
-      if (top !== null) {
-        this.drawAvatar(company, top.x, top.y);
+      if (top === null) {
+        continue;
+      }
+      const above = this.drawAvatar(company, top.x, top.y);
+      if (company.routed) {
+        this.drawWhiteFlag(top.x, above);
+      } else if (company.holding) {
+        this.drawHoldMark(top.x, above);
       }
     }
   }

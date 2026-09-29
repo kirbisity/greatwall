@@ -180,6 +180,75 @@ export const MELEE = {
   recoverySeconds: 0.6,
 };
 
+/**
+ * How a company gathers pace. Nothing starts at full speed: it builds up
+ * over `accelerationSeconds`, and a turn caps how much of it can be kept --
+ * an about-turn to `1 - turnSlowdown` of full pace, a gentler turn
+ * proportionally less -- bleeding off any excess at `brakeRate` (a share of
+ * full pace a second). Pace is also what a charge hits with; see CHARGE.
+ */
+export const MOMENTUM = {
+  accelerationSeconds: 5,
+  turnSlowdown: 0.7,
+  brakeRate: 1.5,
+};
+
+/**
+ * The first blows of a bout carry the pace a company came in with. A head-on
+ * charge at `referenceSpeed` -- the fastest cavalry -- lands at 1 + `bonus`
+ * (200%) for the first `seconds`, scaled down with speed and with how
+ * squarely it came on. Caught running the other way, the same speed counts
+ * against it instead, down to 1 - `retreatPenalty`.
+ */
+export const CHARGE = {
+  seconds: 1,
+  referenceSpeed: 20,
+  bonus: 1,
+  retreatPenalty: 0.5,
+};
+
+/** A company told to hold its ground braces for the first shock of a fight. */
+export const HOLD = {
+  defenseBonus: 0.2,
+  seconds: 2,
+};
+
+/**
+ * A company whose morale breaks (see each unit type's `breaksAt`) runs for
+ * it: it hits at `attackMultiplier` of its strength, can only be pinned by
+ * an enemy that gets within `catchDistance` of it, and once it is clear of
+ * every enemy by `escapeDistance` it has left the field altogether.
+ */
+export const ROUT = {
+  attackMultiplier: 0.5,
+  catchDistance: 8,
+  escapeDistance: 160,
+  // How far ahead of itself a fleeing company aims.
+  fleeReach: 100,
+};
+
+/**
+ * Mass. Every unit type carries a `mass` (1 light, 2 medium, 3 heavy); some
+ * are `cavalry`, and some carry `spears`. Heavy cavalry at the charge rides
+ * light infantry down and carries on through, but a braced spear wall stops
+ * any cavalry charge dead and punishes it. A charge only counts as one at
+ * `chargeSpeed` or more (see melee.js's chargeSpeed) and aimed within
+ * `chargeAlignment` (a cosine) of its target; spears are braced when on hold
+ * or at no more than `bracedMomentum` of their pace.
+ */
+export const MASS = {
+  heavy: 3,
+  light: 1,
+  chargeSpeed: 0.4,
+  chargeAlignment: 0.5,
+  bracedMomentum: 0.25,
+  trampleMultiplier: 2,
+  tramplePush: 10,
+  trampleStaggerSeconds: 1,
+  trampleMomentumKept: 0.7,
+  counterChargeMultiplier: 4,
+};
+
 /** How the imperial army behaves once ordered out. Cost lives on each tier. */
 export const IMPERIAL = {
   // A company will break off towards any raider inside this range.
@@ -316,22 +385,32 @@ export const FLAG = {
   maxWidth: 34,
 };
 
+/**
+ * Every unit type's `breaksAt` is the share of its health at which its
+ * morale breaks and it routs (see ROUT): the less disciplined, the sooner --
+ * 0.7 for the lightest levies, down to 0.3 for the steadiest heavy troops.
+ * The Emperor's 0 means it never does. `mass`, `cavalry` and `spears`: see MASS.
+ */
 export const RAIDER_TYPES = {
   CR0: {
     name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
-    defense: 2, range: 5, lineOfSight: 40, avatar: AVATARS.steppeRegular,
+    defense: 2, range: 5, lineOfSight: 40,
+    mass: 2, cavalry: true, breaksAt: 0.6, avatar: AVATARS.steppeRegular,
   },
   IR0: {
     name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
-    defense: 3, range: 2, lineOfSight: 30, avatar: AVATARS.steppeLight,
+    defense: 3, range: 2, lineOfSight: 30,
+    mass: 1, breaksAt: 0.7, avatar: AVATARS.steppeLight,
   },
   IR1: {
     name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
-    defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeHeavy,
+    defense: 5, range: 2, lineOfSight: 30,
+    mass: 2, breaksAt: 0.45, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
     name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 8,
-    defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeHeavy,
+    defense: 2, range: 6, lineOfSight: 50,
+    mass: 3, cavalry: true, breaksAt: 0.5, avatar: AVATARS.steppeHeavy,
   },
 };
 
@@ -345,15 +424,18 @@ export const STARTING_CASTLE_TYPE = 'CC0';
 export const GUARD_TYPES = {
   IG_LIGHT: {
     name: 'Imperial Light Guard', speed: 7, maxHealth: 25, attack: 2,
-    defense: 3, range: 2, cost: 260, avatar: AVATARS.imperialLight,
+    defense: 3, range: 2, cost: 260,
+    mass: 1, breaksAt: 0.6, avatar: AVATARS.imperialLight,
   },
   IG0: {
     name: 'Imperial Guardsman', speed: 6, maxHealth: 30, attack: 3,
-    defense: 4, range: 2, cost: 450, avatar: AVATARS.imperialRegular,
+    defense: 4, range: 2, cost: 450,
+    mass: 2, breaksAt: 0.45, avatar: AVATARS.imperialRegular,
   },
   IG_HEAVY: {
     name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40, attack: 3,
-    defense: 6, range: 2, cost: 680, avatar: AVATARS.imperialHeavy,
+    defense: 6, range: 2, cost: 680,
+    mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.imperialHeavy,
   },
   // The island garrison. Same three rungs at the same prices as the imperial
   // army, so a level can swap the defenders it fields without also changing
@@ -361,15 +443,18 @@ export const GUARD_TYPES = {
   // and the sohei a little pace for reach off the wall.
   JG_ASHIGARU: {
     name: 'Ashigaru Spearman', speed: 8, maxHealth: 24, attack: 2,
-    defense: 3, range: 3, cost: 260, avatar: AVATARS.japanLight,
+    defense: 3, range: 3, cost: 260,
+    mass: 1, spears: true, breaksAt: 0.6, avatar: AVATARS.japanLight,
   },
   JG_SAMURAI: {
     name: 'Samurai Retainer', speed: 6, maxHealth: 30, attack: 4,
-    defense: 4, range: 2, cost: 450, avatar: AVATARS.japanRegular,
+    defense: 4, range: 2, cost: 450,
+    mass: 2, breaksAt: 0.35, avatar: AVATARS.japanRegular,
   },
   JG_SOHEI: {
     name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42, attack: 3,
-    defense: 6, range: 3, cost: 680, avatar: AVATARS.japanHeavy,
+    defense: 6, range: 3, cost: 680,
+    mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.japanHeavy,
   },
   // The one company every level fields the same way -- see Game#dispatchOptions
   // and #spawnEmperor. About a regular guard's own stats, but with three
@@ -378,7 +463,8 @@ export const GUARD_TYPES = {
   // scales attack, defense and health up as the city grows.
   EMPEROR: {
     name: 'The Emperor', speed: 10, maxHealth: 90, attack: 3,
-    defense: 4, range: 2, cost: 0, avatar: AVATARS.emperor,
+    defense: 4, range: 2, cost: 0,
+    mass: 2, breaksAt: 0, avatar: AVATARS.emperor,
   },
 };
 

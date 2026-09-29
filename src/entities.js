@@ -1,6 +1,6 @@
 import { distance } from './geometry.js';
 import {
-  CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, HOUSES, RAIDER_TYPES, WALL, WALL_TIERS,
+  CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, HOUSES, MOMENTUM, RAIDER_TYPES, WALL, WALL_TIERS,
 } from './config.js';
 
 export class Wall {
@@ -275,7 +275,13 @@ class Company {
     this.typeId = typeId;
     this.type = type;
     this.position = { ...position };
+    // Full-pace heading; how much of that pace it actually has is momentum,
+    // from 0 at a standstill to 1 -- see gatherPace.
     this.velocity = { x: 0, y: 0 };
+    this.momentum = 0;
+    // How far off its wanted heading it was this frame, which is what caps
+    // the pace it can hold through a turn. Set by pathfinding's turnTowards.
+    this.turnAngle = 0;
     this.destination = { x: 0, y: 0 };
     this.waypoint = { x: 0, y: 0 };
     this.health = type.maxHealth;
@@ -283,6 +289,14 @@ class Company {
     this.foes = new Set();
     this.meleeSeconds = 0;
     this.recoverySeconds = 0;
+    // What this bout's first blows are multiplied by, fixed the moment it
+    // began -- see melee.js's chargeImpact.
+    this.impact = 1;
+    // Morale broken: running for it rather than fighting (see melee.js's
+    // rout), and gone for good once clear of every enemy -- see
+    // Game#fleeDestination.
+    this.routed = false;
+    this.fled = false;
     // Only raiders are stopped by walls: they batter them or find a way
     // round. Imperial companies file through their own stonework.
     this.besieges = false;
@@ -339,6 +353,25 @@ class Company {
     this.health -= attackPower / this.type.defense;
   }
 
+  /**
+   * Build pace toward full over MOMENTUM.accelerationSeconds -- but never
+   * past what the turn it is making allows, bleeding off whatever it had
+   * above that.
+   */
+  gatherPace(seconds) {
+    const turnCap = 1 - MOMENTUM.turnSlowdown * Math.min(1, this.turnAngle / Math.PI);
+    if (this.momentum > turnCap) {
+      this.momentum = Math.max(turnCap, this.momentum - MOMENTUM.brakeRate * seconds);
+      return;
+    }
+    this.momentum = Math.min(turnCap, this.momentum + seconds / MOMENTUM.accelerationSeconds);
+  }
+
+  /** Stopped where it stands: whatever pace it had has to be built up again. */
+  halt() {
+    this.momentum = 0;
+  }
+
   aimAt(target) {
     this.destination = { ...target };
     this.waypoint = { ...target };
@@ -350,8 +383,8 @@ class Company {
   }
 
   advance(seconds) {
-    this.position.x += this.velocity.x * seconds;
-    this.position.y += this.velocity.y * seconds;
+    this.position.x += this.velocity.x * this.momentum * seconds;
+    this.position.y += this.velocity.y * this.momentum * seconds;
   }
 }
 
@@ -430,6 +463,9 @@ export class Guard extends Company {
     // Picked out by a tap on the map -- see Game#selectGuardsNear -- so the
     // next tap knows to command it rather than pick out something new.
     this.selected = false;
+    // Told to stand its ground: it will not move for anything short of
+    // being attacked where it stands -- see Game#toggleHold.
+    this.holding = false;
     // True only for the Emperor: never breaks off to hunt a raider on its
     // own, and never auto-recalled home -- see Game#guardDestination.
     this.followsOrdersOnly = false;

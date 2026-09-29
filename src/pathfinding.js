@@ -165,6 +165,10 @@ function turnTowards(raider, waypoint) {
     difference -= FULL_TURN_RADIANS;
   }
 
+  // How sharp a turn it is making is what caps the pace it can carry through
+  // it -- see Company#gatherPace.
+  raider.turnAngle = Math.abs(difference);
+
   // Ease into it rather than swinging at a fixed rate, which overshoots and
   // then has to come back.
   const turn = Math.max(

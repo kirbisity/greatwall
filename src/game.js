@@ -36,6 +36,7 @@ import {
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
   RAIDER_SPAWN_INTERVAL_SECONDS,
+  ROUT,
   REGEN_FRACTION_PER_PAYOUT,
   SEASON_LENGTH_SECONDS,
   SEASON_MESSAGES,
@@ -441,8 +442,8 @@ export class Game {
     if (preBattleHealth) {
       this.trackBattleLosses(preBattleHealth);
     }
-    this.raiders = this.raiders.filter((raider) => raider.isAlive);
-    this.guards = this.guards.filter((guard) => guard.isAlive);
+    this.raiders = this.raiders.filter((raider) => raider.isAlive && !raider.fled);
+    this.guards = this.guards.filter((guard) => guard.isAlive && !guard.fled);
     for (const wall of this.walls) {
       if (wall.health < 0) {
         this.onEffect('destroyed', wallMidpoint(wall));
@@ -677,14 +678,15 @@ export class Game {
     for (const raider of this.raiders) {
       const priorHealth = before.get(raider) ?? raider.health;
       this.tallyBattleLoss(raider, priorHealth, 'enemyLoss', 'enemyLossByType');
-      if (!raider.isAlive) {
+      // Run off the field counts the same as cut down: that company is out of the fight.
+      if (!raider.isAlive || raider.fled) {
         this.battleStats.kills += 1;
       }
     }
     for (const guard of this.guards) {
       const priorHealth = before.get(guard) ?? guard.health;
       this.tallyBattleLoss(guard, priorHealth, 'playerLoss', 'playerLossByType');
-      if (!guard.isAlive) {
+      if (!guard.isAlive || guard.fled) {
         this.battleStats.deaths += 1;
       }
     }
@@ -757,22 +759,31 @@ export class Game {
     const navigation = this.navigation();
     for (const raider of this.raiders) {
       if (raider.isHeld) {
+        raider.halt();
         continue;
       }
-      raider.destination = this.raiderDestination(raider, target);
+      raider.destination = raider.routed
+        ? this.fleeDestination(raider, this.guards)
+        : this.raiderDestination(raider, target);
       this.trackProgress(raider, 1 / FPS);
       // Runs down whatever siege it has sworn to; at zero it may think again.
       raider.siegeSeconds = Math.max(0, raider.siegeSeconds - 1 / FPS);
       steerCompany(raider, navigation, this.random);
+      raider.gatherPace(1 / FPS);
       if (this.wallClimb) {
         this.updateCrossing(navigation, raider, this.wallClimb.reach);
       }
       this.advanceAgainstWalls(navigation, raider);
       this.chargeWallClimb(raider);
       raider.touchedThisFrame = false;
-      this.resolveWallContact(navigation, raider);
-      if (raider.isAlive && target) {
-        this.resolveCastleContact(raider, target);
+      if (raider.routed) {
+        // Running, not besieging: nothing gets battered on the way out.
+        this.checkEscape(raider, this.guards);
+      } else {
+        this.resolveWallContact(navigation, raider);
+        if (raider.isAlive && target) {
+          this.resolveCastleContact(raider, target);
+        }
       }
       if (!raider.touchedThisFrame) {
         // Contact broke this frame -- see it as a fresh engagement next time.
@@ -1027,7 +1038,10 @@ export class Game {
    */
   selectGuardsNear(point) {
     const reach = IMPERIAL.selectRadius * IMPERIAL.selectRadius;
-    const found = this.guards.filter((guard) => distanceSquared(guard.position, point) <= reach);
+    // A routed company is past taking orders -- see melee.js's rout.
+    const found = this.guards.filter((guard) => (
+      !guard.routed && distanceSquared(guard.position, point) <= reach
+    ));
     for (const guard of this.guards) {
       guard.selected = found.includes(guard);
     }
@@ -1056,10 +1070,63 @@ export class Game {
       guard.orders = spreadPoint(target, index, guards.length);
       guard.recalled = false;
       guard.selected = false;
+      guard.holding = false;
       // A fresh order takes the company's whole attention until it gets
       // there -- see guardDestination.
       guard.arrived = false;
     });
+  }
+
+  /**
+   * Put a group on hold, or take it off: a group already all holding is
+   * released, anything else is told to hold. Returns whether it is now
+   * holding. A company on hold stands exactly where it is -- no hunting, no
+   * marching -- and only fights what comes to it (see moveGuards and
+   * melee.js's bracing). Released, it takes up from where it stands.
+   */
+  toggleHold(guards) {
+    const commandable = guards.filter((guard) => !guard.routed);
+    const holding = !commandable.every((guard) => guard.holding);
+    for (const guard of commandable) {
+      guard.holding = holding;
+      guard.quarry = null;
+      guard.orders = { ...guard.position };
+      guard.arrived = true;
+    }
+    return holding;
+  }
+
+  /**
+   * Where a routed company runs: straight away from the nearest enemy, or on
+   * along its own line if there is none about.
+   */
+  fleeDestination(company, enemies) {
+    let nearest = null;
+    let nearestGap = Infinity;
+    for (const enemy of enemies) {
+      const gap = distanceSquared(company.position, enemy.position);
+      if (gap < nearestGap) {
+        nearest = enemy;
+        nearestGap = gap;
+      }
+    }
+    let awayX = company.velocity.x;
+    let awayY = company.velocity.y;
+    if (nearest && nearestGap > 0) {
+      awayX = company.position.x - nearest.position.x;
+      awayY = company.position.y - nearest.position.y;
+    }
+    const length = Math.hypot(awayX, awayY) || 1;
+    return {
+      x: company.position.x + awayX / length * ROUT.fleeReach,
+      y: company.position.y + awayY / length * ROUT.fleeReach,
+    };
+  }
+
+  /** A routed company clear of every enemy by ROUT.escapeDistance has left the field. */
+  checkEscape(company, enemies) {
+    const clear = ROUT.escapeDistance * ROUT.escapeDistance;
+    company.fled = enemies.every((enemy) => distanceSquared(company.position, enemy.position) > clear);
   }
 
   /** The nearest live raider within `radius`, or null. */
@@ -1109,7 +1176,7 @@ export class Game {
     if (guard.followsOrdersOnly) {
       return guard.orders;
     }
-    if (guard.quarry && !guard.quarry.isAlive) {
+    if (guard.quarry && (!guard.quarry.isAlive || guard.quarry.fled)) {
       guard.quarry = null;
     }
     // A company that cannot reach what it is chasing picks something else.
@@ -1177,12 +1244,21 @@ export class Game {
   moveGuards() {
     const navigation = this.navigation();
     for (const guard of this.guards) {
-      if (guard.isHeld) {
+      // Locked in a fight, staggered, or told to stand its ground: it does
+      // not move, and whatever pace it had is gone.
+      if (guard.isHeld || guard.holding) {
+        guard.halt();
         continue;
       }
-      guard.destination = this.guardDestination(guard);
+      guard.destination = guard.routed
+        ? this.fleeDestination(guard, this.raiders)
+        : this.guardDestination(guard);
       this.trackProgress(guard, 1 / FPS);
       steerCompany(guard, navigation, this.random);
+      guard.gatherPace(1 / FPS);
+      if (guard.routed) {
+        this.checkEscape(guard, this.raiders);
+      }
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
       const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
@@ -1239,7 +1315,8 @@ export class Game {
       raider.advance(pace / FPS);
       return;
     }
-    const step = { x: raider.velocity.x * pace / FPS, y: raider.velocity.y * pace / FPS };
+    const stride = raider.momentum * pace / FPS;
+    const step = { x: raider.velocity.x * stride, y: raider.velocity.y * stride };
     const ahead = { x: raider.position.x + step.x, y: raider.position.y + step.y };
     const blocking = this.wallAcross(navigation, raider.position, ahead);
     if (!blocking) {

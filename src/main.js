@@ -10,6 +10,11 @@ import { clamp, distance } from './geometry.js';
 // A long stall must not teleport the camera or fast-forward the game.
 const MAX_FRAME_SECONDS = 0.05;
 
+// How far south of a selected group's middle the Hold button sits, in ground
+// units: just past the selection ring (see renderer.js), clear of the
+// portraits drawn above the companies themselves.
+const HOLD_TOGGLE_SOUTH = 16;
+
 // How far a sound effect's own world position can sit from the camera's
 // focus before it fades out entirely, in the same ground units as the map.
 const EFFECT_HEARING_RADIUS = 600;
@@ -98,6 +103,14 @@ class App {
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
     bind('startBattleBtn', () => this.beginBattle());
     bind('battleResultContinue', () => this.continueFromBattleResult());
+    bind('holdToggle', (event) => {
+      // Kept off the map's own click handler, which would otherwise read the
+      // same tap as an order for the group this button just held.
+      event.stopPropagation();
+      this.game.toggleHold(this.game.selectedGuards);
+      this.game.deselectGuards();
+      this.needsDraw = true;
+    });
     bind('attackTool', (event) => {
       // Without this, the same click bubbles to the map's own click handler,
       // which reads the tool as already 'attack' and fires an order at
@@ -149,6 +162,23 @@ class App {
   draw() {
     this.renderer.render(this.game);
     this.hud.update(this.game);
+    const selected = this.game.selectedGuards;
+    this.hud.updateHoldToggle(selected, this.holdToggleAnchor(selected));
+  }
+
+  /** Just below a selected group, on screen -- or null with nothing selected. */
+  holdToggleAnchor(guards) {
+    if (guards.length === 0) {
+      return null;
+    }
+    let x = 0;
+    let y = 0;
+    for (const guard of guards) {
+      x += guard.position.x / guards.length;
+      y += guard.position.y / guards.length;
+    }
+    const southY = y - HOLD_TOGGLE_SOUTH;
+    return this.camera.toScreen({ x, y: southY, z: this.game.terrain.heightAt(x, southY) });
   }
 
   start() {

@@ -70,6 +70,11 @@ const LANDING_SPREAD = 26;
 /** How finely a planned wall is sampled when checking it for water. */
 const WATER_PROBE_SPACING = 6;
 
+/** Where a wall's own sound effect should seem to come from. */
+function wallMidpoint(wall) {
+  return { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+}
+
 function spawnOffset(random) {
   const value = Math.floor(random() * SPAWN_MAX_DISTANCE * 2) - SPAWN_MAX_DISTANCE;
   if (value > 0 && value < SPAWN_MIN_DISTANCE) {
@@ -306,8 +311,9 @@ export class Game {
     }
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
-    if (this.guards.some((guard) => guard.foes.size > 0)) {
-      this.onEffect('clash');
+    const fighting = this.guards.find((guard) => guard.foes.size > 0);
+    if (fighting) {
+      this.onEffect('fighting', fighting.position);
     }
     this.moveRaiders();
     this.moveGuards();
@@ -316,7 +322,7 @@ export class Game {
     this.guards = this.guards.filter((guard) => guard.isAlive);
     for (const wall of this.walls) {
       if (wall.health < 0) {
-        this.onEffect('wallDestroyed');
+        this.onEffect('destroyed', wallMidpoint(wall));
       }
     }
     this.walls = this.walls.filter((wall) => wall.health >= 0);
@@ -324,6 +330,9 @@ export class Game {
     // Once the city is lost the field keeps animating, but this is the clock
     // the game-over screen actually waits on: see BREACH.collapseSeconds.
     if (this.isDefeated) {
+      if (this.breachSeconds === null) {
+        this.onEffect('destroyed', this.castles.find((castle) => castle.health < 0)?.position);
+      }
       this.breachSeconds = Math.min(BREACH.collapseSeconds, (this.breachSeconds ?? 0) + 1 / FPS);
     }
   }
@@ -591,7 +600,7 @@ export class Game {
     guard.orders = { ...target };
     guard.aimAt(target);
     this.guards.push(guard);
-    this.onEffect('attack');
+    this.onEffect('attack', home.position);
     return { sent: true, guard };
   }
 
@@ -805,7 +814,7 @@ export class Game {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
         wall.takeHit(raider.type.attack * wear);
-        this.onEffect('clash');
+        this.onEffect('engaging', wallMidpoint(wall));
         if (!climb) {
           raider.takeHit(WALL.attack);
           if (!raider.isAlive) {
@@ -821,7 +830,7 @@ export class Game {
     if (distanceSquared(castle.position, raider.position) < reach * reach) {
       castle.takeHit(raider.type.attack);
       raider.takeHit(castle.type.attack);
-      this.onEffect('clash');
+      this.onEffect('engaging', castle.position);
     }
   }
 
@@ -1068,7 +1077,7 @@ export class Game {
     }
     this.tokens -= cost;
     wall.beginRepair();
-    this.onEffect('repair');
+    this.onEffect('repair', wallMidpoint(wall));
     return { status: 'repairing', wall, cost };
   }
 
@@ -1108,7 +1117,7 @@ export class Game {
     }
     this.tokens -= cost;
     this.walls.push(wall);
-    this.onEffect('build');
+    this.onEffect('build', wallMidpoint(wall));
     return { status: 'built', wall, start, end };
   }
 
@@ -1160,7 +1169,7 @@ export class Game {
     }
     this.tokens += wall.refundValue;
     this.walls.splice(this.walls.indexOf(wall), 1);
-    this.onEffect('raze');
+    this.onEffect('raze', wallMidpoint(wall));
     return true;
   }
 
@@ -1198,7 +1207,7 @@ export class Game {
     }
     this.tokens -= cost;
     wall.beginUpgrade();
-    this.onEffect('fortify');
+    this.onEffect('fortify', wallMidpoint(wall));
     return { status: 'working', wall, cost, name: next.name };
   }
 
@@ -1244,7 +1253,7 @@ export class Game {
       return false;
     }
     this.tokens -= upgraded.type.cost;
-    this.onEffect('upgrade');
+    this.onEffect('upgrade', upgraded.position);
     this.castles[index] = upgraded;
     this.levelUnderCities();
     this.clearHousesUnder(upgraded);

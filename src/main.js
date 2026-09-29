@@ -5,9 +5,14 @@ import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { LEVELS } from './levels.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
+import { clamp, distance } from './geometry.js';
 
 // A long stall must not teleport the camera or fast-forward the game.
 const MAX_FRAME_SECONDS = 0.05;
+
+// How far a sound effect's own world position can sit from the camera's
+// focus before it fades out entirely, in the same ground units as the map.
+const EFFECT_HEARING_RADIUS = 600;
 
 function bind(id, handler) {
   const node = document.getElementById(id);
@@ -23,8 +28,8 @@ class App {
     this.camera = new Camera(window.innerWidth, window.innerHeight);
     this.game = new Game({
       onMessage: (text) => this.hud.showMessage(text),
-      onEffect: (name) => {
-        this.hud.playEffect(name);
+      onEffect: (name, position) => {
+        this.hud.playEffect(name, this.effectProximity(position));
         this.hud.closeStory();
       },
     });
@@ -108,6 +113,14 @@ class App {
       this.showLevels();
       this.restart();
     });
+  }
+
+  /** 1 at the camera's own focus point, fading to 0 by EFFECT_HEARING_RADIUS out. */
+  effectProximity(position) {
+    if (!position) {
+      return 1;
+    }
+    return clamp(1 - distance(position, this.camera.focus) / EFFECT_HEARING_RADIUS, 0, 1);
   }
 
   toggleAtmosphere() {

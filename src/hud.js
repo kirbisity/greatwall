@@ -362,8 +362,12 @@ export class Hud {
     this.soundButton.innerText = this.soundLevel === 0 ? 'Sound Off' : `Sound: ${this.soundLevel}`;
   }
 
-  /** Sound effects for game actions -- see sfx.js for how each one is built. */
-  playEffect(name) {
-    this.sfx.play(name);
+  /**
+   * Sound effects for game actions -- see sfx.js for the clips and main.js's
+   * own onEffect for how `proximity` (0 to 1) is worked out from the event's
+   * world position.
+   */
+  playEffect(name, proximity) {
+    this.sfx.play(name, proximity);
   }
 }

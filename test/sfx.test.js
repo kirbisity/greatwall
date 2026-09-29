@@ -5,88 +5,141 @@ import { Game } from '../src/game.js';
 import { Castle, Raider, Wall } from '../src/entities.js';
 import { buildNavigation } from '../src/navigation.js';
 
-const EFFECT_NAMES = ['build', 'repair', 'fortify', 'raze', 'upgrade', 'attack', 'clash', 'wallDestroyed'];
-
 function fixedRandom() {
   let value = 0.42;
   return () => value;
 }
 
-/** A stub AudioContext that records what it was asked to build, but plays nothing. */
-function stubAudioContext() {
-  const calls = { oscillators: 0, buffers: 0 };
-  const param = () => ({ setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+/** A stub AudioContext that records what it was asked to play, but plays nothing for real. */
+function stubContext() {
+  const started = [];
   return {
-    sampleRate: 44100,
-    currentTime: 0,
     state: 'running',
     destination: {},
     resume: () => Promise.resolve(),
-    createOscillator() {
-      calls.oscillators += 1;
-      return { type: 'sine', frequency: param(), connect() {}, start() {}, stop() {} };
+    createBufferSource() {
+      const node = { buffer: null, connect() {}, start: () => started.push(node) };
+      return node;
     },
     createGain() {
-      return { gain: param(), connect() {} };
+      return { gain: { value: 0 }, connect() {} };
     },
-    createBufferSource() {
-      calls.buffers += 1;
-      return { buffer: null, connect() {}, start() {}, stop() {} };
-    },
-    createBiquadFilter() {
-      return { type: 'lowpass', frequency: param(), Q: param(), connect() {} };
-    },
-    createBuffer(channels, length) {
-      return { getChannelData: () => new Float32Array(length) };
-    },
-    calls,
+    started,
+  };
+}
+
+/** Records which URLs were fetched instead of actually loading anything. */
+function stubLoadAudio(urlsLoaded) {
+  return async (url) => {
+    urlsLoaded.push(url);
+    return { url };
   };
 }
 
 // --- the Sfx class itself --------------------------------------------------
 
-test('every known effect plays without throwing', () => {
-  const context = stubAudioContext();
-  const sfx = new Sfx({ contextFactory: () => context, now: () => 0 });
-  for (const name of EFFECT_NAMES) {
-    sfx.lastClashAt = -Infinity;
-    assert.doesNotThrow(() => sfx.play(name));
-  }
-  assert.ok(context.calls.oscillators > 0, 'at least one oscillator was used');
+test('each mapped effect fetches its own clip and plays it', async () => {
+  const context = stubContext();
+  const urls = [];
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio(urls), now: () => 0 });
+
+  await sfx.play('build');
+  await sfx.play('fortify');
+  await sfx.play('raze');
+  await sfx.play('upgrade');
+  await sfx.play('destroyed');
+
+  assert.deepEqual(urls, ['sounds/fx/building.mp3', 'sounds/fx/destroyed.mp3'], 'the shared building clip is fetched once');
+  assert.equal(context.started.length, 5, 'but still played once per action');
 });
 
-test('an unknown effect name is a silent no-op', () => {
-  const context = stubAudioContext();
-  const sfx = new Sfx({ contextFactory: () => context });
-  sfx.play('nonsense');
-  assert.equal(context.calls.oscillators, 0);
-  assert.equal(context.calls.buffers, 0);
+test('the building clip is fetched once and reused for every building action', async () => {
+  const context = stubContext();
+  const urls = [];
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio(urls) });
+
+  await sfx.play('build');
+  await sfx.play('fortify');
+
+  assert.deepEqual(urls, ['sounds/fx/building.mp3'], 'fetched only on the first play');
+  assert.equal(context.started.length, 2, 'but still played both times');
 });
 
-test('a muted sound level silences every effect without touching the audio context', () => {
-  const context = stubAudioContext();
-  const sfx = new Sfx({ contextFactory: () => context });
+test('repair and the muster/attack action carry no clip and stay silent', async () => {
+  const context = stubContext();
+  const urls = [];
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio(urls) });
+
+  await sfx.play('repair');
+  await sfx.play('attack');
+  await sfx.play('nonsense');
+
+  assert.equal(urls.length, 0);
+  assert.equal(context.started.length, 0);
+});
+
+test('a muted sound level silences every effect without touching the audio context', async () => {
+  const context = stubContext();
+  const urls = [];
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio(urls) });
   sfx.setVolume(0);
-  sfx.play('build');
-  assert.equal(context.calls.oscillators, 0);
+
+  await sfx.play('build');
+
+  assert.equal(urls.length, 0);
+  assert.equal(context.started.length, 0);
 });
 
-test('two clashes in quick succession only sound once', () => {
+test('an event at zero proximity -- too far from the camera to hear -- stays silent', async () => {
+  const context = stubContext();
+  const urls = [];
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio(urls) });
+
+  await sfx.play('build', 0);
+
+  assert.equal(urls.length, 0);
+  assert.equal(context.started.length, 0);
+});
+
+test('proximity scales the gain applied to the clip', async () => {
+  const context = stubContext();
+  let lastGain = null;
+  context.createGain = () => {
+    const node = { connect() {} };
+    node.gain = new Proxy({ value: 0 }, {
+      set(target, key, value) {
+        if (key === 'value') {
+          lastGain = value;
+        }
+        target[key] = value;
+        return true;
+      },
+    });
+    return node;
+  };
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio([]) });
+
+  await sfx.play('build', 0.4);
+
+  assert.equal(lastGain, 0.4);
+});
+
+test('engaging and fighting are throttled, but a discrete action like build is not', async () => {
   let now = 0;
-  const context = stubAudioContext();
-  const sfx = new Sfx({ contextFactory: () => context, now: () => now });
+  const context = stubContext();
+  const sfx = new Sfx({ contextFactory: () => context, loadAudio: stubLoadAudio([]), now: () => now });
 
-  sfx.play('clash');
-  const afterFirst = context.calls.oscillators;
-  assert.ok(afterFirst > 0);
-
-  now += 10; // well inside the throttle window
-  sfx.play('clash');
-  assert.equal(context.calls.oscillators, afterFirst, 'the second clash is dropped');
+  await sfx.play('engaging');
+  await sfx.play('engaging'); // same instant: dropped
+  assert.equal(context.started.length, 1);
 
   now += 500; // past the throttle window
-  sfx.play('clash');
-  assert.ok(context.calls.oscillators > afterFirst, 'a clash after the window plays again');
+  await sfx.play('engaging');
+  assert.equal(context.started.length, 2);
+
+  await sfx.play('build');
+  await sfx.play('build'); // discrete actions are never throttled
+  assert.equal(context.started.length, 4);
 });
 
 test('a missing Web Audio API is a silent no-op rather than a crash', () => {
@@ -105,15 +158,17 @@ function gameWith(tokens = 100000) {
 
 function trackEffects(game) {
   const effects = [];
-  game.onEffect = (name) => effects.push(name);
+  game.onEffect = (name, position) => effects.push({ name, position });
   return effects;
 }
 
-test('building a section plays the build effect', () => {
+test('building a section plays the build effect at the wall', () => {
   const game = gameWith();
   const effects = trackEffects(game);
   game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
-  assert.deepEqual(effects, ['build']);
+  assert.equal(effects.length, 1);
+  assert.equal(effects[0].name, 'build');
+  assert.deepEqual(effects[0].position, { x: 200, y: 0 });
 });
 
 test('repairing a damaged section plays the repair effect', () => {
@@ -123,7 +178,7 @@ test('repairing a damaged section plays the repair effect', () => {
   wall.health -= 10;
   const effects = trackEffects(game);
   game.repairWall(wall);
-  assert.deepEqual(effects, ['repair']);
+  assert.equal(effects.at(-1).name, 'repair');
 });
 
 test('fortifying a standing section plays the fortify effect', () => {
@@ -132,7 +187,7 @@ test('fortifying a standing section plays the fortify effect', () => {
   wall.finish();
   const effects = trackEffects(game);
   game.upgradeWall(wall);
-  assert.deepEqual(effects, ['fortify']);
+  assert.equal(effects.at(-1).name, 'fortify');
 });
 
 test('razing a section plays the raze effect', () => {
@@ -140,14 +195,14 @@ test('razing a section plays the raze effect', () => {
   game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 });
   const effects = trackEffects(game);
   assert.equal(game.removeWallAt({ x: 200, y: 0 }), true);
-  assert.deepEqual(effects, ['raze']);
+  assert.equal(effects.at(-1).name, 'raze');
 });
 
 test('upgrading the castle plays the upgrade effect', () => {
   const game = gameWith();
   const effects = trackEffects(game);
   assert.equal(game.upgradeCastleAt({ x: 0, y: 0 }), true);
-  assert.deepEqual(effects, ['upgrade']);
+  assert.equal(effects.at(-1).name, 'upgrade');
 });
 
 test('sending a company out plays the attack effect', () => {
@@ -156,10 +211,10 @@ test('sending a company out plays the attack effect', () => {
   const effects = trackEffects(game);
   const result = game.sendGuard(option.id, { x: 300, y: 0 });
   assert.equal(result.sent, true);
-  assert.deepEqual(effects, ['attack']);
+  assert.equal(effects.at(-1).name, 'attack');
 });
 
-test('a raider battering a wall plays the clash effect', () => {
+test('a raider battering a wall plays the engaging effect', () => {
   const game = gameWith();
   const wall = new Wall({ x: 0, y: 0 }, { x: 100, y: 0 });
   wall.finish();
@@ -169,20 +224,23 @@ test('a raider battering a wall plays the clash effect', () => {
 
   const effects = trackEffects(game);
   game.resolveWallContact(navigation, raider);
-  assert.deepEqual(effects, ['clash']);
+  assert.equal(effects.length, 1);
+  assert.equal(effects[0].name, 'engaging');
+  assert.deepEqual(effects[0].position, { x: 50, y: 0 });
 });
 
-test('a raider reaching the castle plays the clash effect', () => {
+test('a raider reaching the castle plays the engaging effect', () => {
   const game = gameWith();
   const castle = game.castles[0];
   const raider = new Raider('CR0', { ...castle.position });
 
   const effects = trackEffects(game);
   game.resolveCastleContact(raider, castle);
-  assert.deepEqual(effects, ['clash']);
+  assert.equal(effects.length, 1);
+  assert.equal(effects[0].name, 'engaging');
 });
 
-test('a wall falling in battle plays the wallDestroyed effect once', () => {
+test('a wall falling in battle plays the destroyed effect once', () => {
   const game = gameWith();
   const wall = game.buildWall({ x: 200, y: -60 }, { x: 200, y: 60 }).wall;
   wall.finish();
@@ -190,6 +248,31 @@ test('a wall falling in battle plays the wallDestroyed effect once', () => {
 
   const effects = trackEffects(game);
   game.step();
-  assert.deepEqual(effects, ['wallDestroyed']);
+  assert.equal(effects.at(-1).name, 'destroyed');
   assert.equal(game.walls.length, 0, 'the fallen wall is gone from the field');
+});
+
+test('our guards trading blows with a raider plays the fighting effect', () => {
+  const game = gameWith();
+  const guard = game.sendGuard(game.dispatchOptions()[0].id, { x: 0, y: 0 }).guard;
+  const raider = new Raider('CR0', { ...guard.position });
+  game.raiders = [raider];
+
+  const effects = trackEffects(game);
+  game.step();
+  assert.ok(effects.some((effect) => effect.name === 'fighting'), 'a locked guard plays the fighting effect');
+});
+
+test('the city falling plays the destroyed effect once, at the castle', () => {
+  const game = gameWith();
+  const castle = game.castles[0];
+
+  const effects = trackEffects(game);
+  castle.health = -1;
+  game.step();
+  game.step();
+
+  const destroyed = effects.filter((effect) => effect.name === 'destroyed');
+  assert.equal(destroyed.length, 1, 'fires once, not every frame the city stays fallen');
+  assert.deepEqual(destroyed[0].position, castle.position);
 });

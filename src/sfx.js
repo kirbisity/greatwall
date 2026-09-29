@@ -1,137 +1,53 @@
-// Procedurally synthesized sound effects. No audio asset files exist for
-// these actions and none can be sourced as real audio by hand, so every
-// effect here is built from oscillators and filtered noise at the moment it
-// plays, rather than loaded from a file the way the level music is.
-
-// Clashes fire once per contact per raider per frame, so a raider pressed
-// against a wall for seconds at a time would otherwise retrigger the sound
-// sixty times a second. This is the minimum gap between two clash sounds.
-const CLASH_THROTTLE_MS = 120;
-
-function noiseBuffer(context, seconds) {
-  const length = Math.max(1, Math.round(context.sampleRate * seconds));
-  const buffer = context.createBuffer(1, length, context.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i += 1) {
-    data[i] = Math.random() * 2 - 1;
-  }
-  return buffer;
-}
-
-function tone(context, { frequency, duration, type = 'sine', gain = 0.3, sweepTo, delay = 0 }) {
-  const start = context.currentTime + delay;
-  const oscillator = context.createOscillator();
-  oscillator.type = type;
-  oscillator.frequency.setValueAtTime(frequency, start);
-  if (sweepTo) {
-    oscillator.frequency.exponentialRampToValueAtTime(sweepTo, start + duration);
-  }
-  const envelope = context.createGain();
-  envelope.gain.setValueAtTime(gain, start);
-  envelope.gain.exponentialRampToValueAtTime(0.001, start + duration);
-  oscillator.connect(envelope);
-  envelope.connect(context.destination);
-  oscillator.start(start);
-  oscillator.stop(start + duration);
-}
-
-function noiseBurst(context, {
-  duration, gain = 0.3, filterType = 'lowpass', filterFrequency = 2000, filterQ, filterSweepTo, delay = 0,
-}) {
-  const start = context.currentTime + delay;
-  const source = context.createBufferSource();
-  source.buffer = noiseBuffer(context, duration);
-  const filter = context.createBiquadFilter();
-  filter.type = filterType;
-  filter.frequency.setValueAtTime(filterFrequency, start);
-  if (filterQ) {
-    filter.Q.setValueAtTime(filterQ, start);
-  }
-  if (filterSweepTo) {
-    filter.frequency.exponentialRampToValueAtTime(filterSweepTo, start + duration);
-  }
-  const envelope = context.createGain();
-  envelope.gain.setValueAtTime(gain, start);
-  envelope.gain.exponentialRampToValueAtTime(0.001, start + duration);
-  source.connect(filter);
-  filter.connect(envelope);
-  envelope.connect(context.destination);
-  source.start(start);
-  source.stop(start + duration);
-}
-
-const EFFECTS = {
-  // Mason's mallet on a fresh peg: a low thud with a bright tap right behind it.
-  build(context, volume) {
-    tone(context, { frequency: 180, sweepTo: 120, duration: 0.09, type: 'triangle', gain: 0.35 * volume });
-    tone(context, { frequency: 900, duration: 0.05, type: 'square', gain: 0.12 * volume, delay: 0.03 });
-  },
-  // The same mallet, lighter and doubled: patching rather than laying stone.
-  repair(context, volume) {
-    tone(context, { frequency: 500, duration: 0.06, type: 'triangle', gain: 0.2 * volume });
-    tone(context, { frequency: 650, duration: 0.06, type: 'triangle', gain: 0.18 * volume, delay: 0.09 });
-  },
-  // Stone grinding upward into a taller, thicker shape.
-  fortify(context, volume) {
-    tone(context, { frequency: 90, sweepTo: 220, duration: 0.4, type: 'sawtooth', gain: 0.22 * volume });
-    noiseBurst(context, { duration: 0.3, gain: 0.15 * volume, filterFrequency: 800, filterSweepTo: 2200 });
-  },
-  // A section pulled down deliberately: shorter and lower than a wall dying in battle.
-  raze(context, volume) {
-    noiseBurst(context, { duration: 0.35, gain: 0.3 * volume, filterFrequency: 1800, filterSweepTo: 200 });
-    tone(context, { frequency: 140, sweepTo: 60, duration: 0.3, type: 'sawtooth', gain: 0.2 * volume });
-  },
-  // A triumphant rising chime for the castle growing into its next tier.
-  upgrade(context, volume) {
-    tone(context, { frequency: 523.25, duration: 0.15, type: 'sine', gain: 0.25 * volume });
-    tone(context, { frequency: 659.25, duration: 0.15, type: 'sine', gain: 0.25 * volume, delay: 0.12 });
-    tone(context, { frequency: 783.99, duration: 0.25, type: 'sine', gain: 0.28 * volume, delay: 0.24 });
-  },
-  // A ragged battle cry from the company as it musters: a few rasping
-  // throat tones rising together under a shout-shaped noise formant, rather
-  // than a horn call.
-  attack(context, volume) {
-    tone(context, { frequency: 170, sweepTo: 340, duration: 0.26, type: 'sawtooth', gain: 0.16 * volume });
-    tone(context, { frequency: 145, sweepTo: 300, duration: 0.28, type: 'sawtooth', gain: 0.14 * volume, delay: 0.015 });
-    tone(context, { frequency: 200, sweepTo: 380, duration: 0.24, type: 'sawtooth', gain: 0.12 * volume, delay: 0.03 });
-    noiseBurst(context, {
-      duration: 0.3,
-      gain: 0.22 * volume,
-      filterType: 'bandpass',
-      filterFrequency: 700,
-      filterSweepTo: 1700,
-      filterQ: 3,
-    });
-  },
-  // A quick metallic clang: blade or arrow striking stone or flesh.
-  clash(context, volume) {
-    noiseBurst(context, { duration: 0.06, gain: 0.2 * volume, filterFrequency: 4000, filterSweepTo: 1200 });
-    tone(context, { frequency: 1800, sweepTo: 900, duration: 0.05, type: 'square', gain: 0.08 * volume });
-  },
-  // A wall falling in battle: bigger and lower than a deliberate raze.
-  wallDestroyed(context, volume) {
-    noiseBurst(context, { duration: 0.5, gain: 0.35 * volume, filterFrequency: 2500, filterSweepTo: 150 });
-    tone(context, { frequency: 80, sweepTo: 35, duration: 0.45, type: 'sawtooth', gain: 0.3 * volume });
-  },
+// Sound effects for game actions, played from the recorded clips in
+// sounds/fx rather than synthesized -- one clip is shared by every kind of
+// building work but repair, one plays whenever a raider is in contact with
+// a wall or the castle, one plays for our own guards trading blows, and one
+// marks a wall or the city itself falling.
+const EFFECT_FILES = {
+  build: 'sounds/fx/building.mp3',
+  fortify: 'sounds/fx/building.mp3',
+  raze: 'sounds/fx/building.mp3',
+  upgrade: 'sounds/fx/building.mp3',
+  engaging: 'sounds/fx/engaging.mp3',
+  fighting: 'sounds/fx/fighting.mp3',
+  destroyed: 'sounds/fx/destroyed.mp3',
 };
 
+// Contact and melee fire every frame the raider or guard stays locked in,
+// so left unthrottled they would retrigger the clip sixty times a second.
+const THROTTLE_MS = { engaging: 150, fighting: 150 };
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+async function loadAudioBuffer(url, context) {
+  const response = await fetch(url);
+  const data = await response.arrayBuffer();
+  return context.decodeAudioData(data);
+}
+
 /**
- * Plays short procedural sound effects for game actions. Volume mirrors the
- * HUD's own sound level rather than owning a separate mute control, and the
- * AudioContext is created lazily on the first effect -- creating one earlier
- * would be silently blocked by the same autoplay policy that blocks music
- * until the page has been clicked.
+ * Plays the recorded sound effects for game actions. Volume mirrors the
+ * HUD's own sound level, scaled again by how close the event's world
+ * position is to the camera's own focus (see main.js's own onEffect), and
+ * the AudioContext is created lazily on the first effect -- creating one
+ * earlier would be silently blocked by the same autoplay policy that blocks
+ * music until the page has been clicked.
  */
 export class Sfx {
   constructor({
     contextFactory = () => new (window.AudioContext || window.webkitAudioContext)(),
     now = () => performance.now(),
+    loadAudio = loadAudioBuffer,
   } = {}) {
     this.contextFactory = contextFactory;
     this.now = now;
+    this.loadAudio = loadAudio;
     this.context = null;
     this.volume = 1;
-    this.lastClashAt = -Infinity;
+    this.buffers = new Map();
+    this.lastPlayedAt = {};
   }
 
   setVolume(level) {
@@ -153,20 +69,47 @@ export class Sfx {
     return this.context;
   }
 
-  play(name) {
-    if (this.volume <= 0 || !EFFECTS[name]) {
+  /**
+   * Fetched and decoded once per file, then reused for every later play --
+   * several effect names share the one building clip, so this is keyed by
+   * URL rather than by name.
+   */
+  bufferFor(url, context) {
+    if (!this.buffers.has(url)) {
+      this.buffers.set(url, this.loadAudio(url, context).catch(() => null));
+    }
+    return this.buffers.get(url);
+  }
+
+  /** `proximity` is 0 (inaudible) to 1 (at the camera's own focus point). */
+  play(name, proximity = 1) {
+    if (this.volume <= 0 || proximity <= 0 || !EFFECT_FILES[name]) {
       return;
     }
-    if (name === 'clash') {
+    const throttle = THROTTLE_MS[name];
+    if (throttle) {
       const at = this.now();
-      if (at - this.lastClashAt < CLASH_THROTTLE_MS) {
+      if (at - (this.lastPlayedAt[name] ?? -Infinity) < throttle) {
         return;
       }
-      this.lastClashAt = at;
+      this.lastPlayedAt[name] = at;
     }
     const context = this.ensureContext();
-    if (context) {
-      EFFECTS[name](context, this.volume);
+    if (!context) {
+      return;
     }
+    const gain = clamp01(this.volume * proximity);
+    return this.bufferFor(EFFECT_FILES[name], context).then((buffer) => {
+      if (!buffer) {
+        return;
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      const envelope = context.createGain();
+      envelope.gain.value = gain;
+      source.connect(envelope);
+      envelope.connect(context.destination);
+      source.start();
+    });
   }
 }

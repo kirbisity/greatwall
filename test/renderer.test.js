@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createView } from '../src/projection.js';
+import { createView, projectPoint } from '../src/projection.js';
 import { Renderer } from '../src/renderer.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
@@ -408,14 +408,15 @@ test('both pings run clean across their entire natural lifetime, not just at the
 /** A renderer with just enough of itself to draw the build trail: a real
  *  camera view to project through, and an overlay whose stroke() is
  *  recorded so a test can tell whether anything was actually drawn. */
-function trailRenderer() {
+function trailRenderer(heightAt = () => 0) {
   const strokes = [];
+  const points = [];
   const context = {
     save() {},
     restore() {},
-    beginPath() {},
-    moveTo() {},
-    lineTo() {},
+    beginPath() { points.length = 0; },
+    moveTo(x, y) { points.push({ x, y }); },
+    lineTo(x, y) { points.push({ x, y }); },
     stroke() { strokes.push(context.strokeStyle); },
     set strokeStyle(value) { context._strokeStyle = value; },
     get strokeStyle() { return context._strokeStyle; },
@@ -427,38 +428,54 @@ function trailRenderer() {
   renderer.overlay = context;
   renderer.camera = { view: createView({ focus: { x: 0, y: 0 }, distance: 150, elevation: 45, width: 1200, height: 800 }) };
   Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
-  return { renderer, strokes };
+  const terrain = { heightAt };
+  const draw = () => renderer.drawBuildTrail(renderer.camera.view, terrain);
+  return { renderer, strokes, points, terrain, draw };
 }
 
 test('a single point draws nothing -- there is no line until the drag has actually moved', () => {
-  const { renderer, strokes } = trailRenderer();
+  const { renderer, strokes, draw } = trailRenderer();
   renderer.setBuildTrail([{ x: 0, y: 0 }], true);
-  renderer.drawBuildTrail(renderer.camera.view);
+  draw();
   assert.equal(strokes.length, 0);
 });
 
 test('a real drag draws a stroke, gold while valid and red once it is not', () => {
-  const { renderer, strokes } = trailRenderer();
+  const { renderer, strokes, draw } = trailRenderer();
   renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
-  renderer.drawBuildTrail(renderer.camera.view);
+  draw();
   assert.match(strokes.at(-1), /232, 196, 68/, 'valid should read as the same gold a wall itself uses');
 
   renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], false);
-  renderer.drawBuildTrail(renderer.camera.view);
+  draw();
   assert.match(strokes.at(-1), /220, 60, 50/, 'invalid should read as red');
 });
 
+test('the trail follows the ground under each point, the same way a real wall preview does', () => {
+  // A slope: height climbs 1 unit for every unit of x, so the two ends of
+  // this trail sit at very different heights -- flattened to sea level,
+  // they would visibly float off a hillside.
+  const { renderer, points, draw } = trailRenderer((x) => x);
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 50, y: 0 }], true);
+  draw();
+
+  const flatEnd = projectPoint(renderer.camera.view, 50, 0, 0);
+  const groundEnd = projectPoint(renderer.camera.view, 50, 0, 50);
+  assert.notEqual(points.at(-1).y, flatEnd.y, 'should not have been drawn at sea level');
+  assert.ok(Math.abs(points.at(-1).y - groundEnd.y) < 0.01, 'should sit on the actual hillside instead');
+});
+
 test('releasing the trail fades it out over its own duration, then drops it for good', () => {
-  const { renderer, strokes } = trailRenderer();
+  const { renderer, strokes, draw } = trailRenderer();
   renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
   renderer.releaseBuildTrail();
 
   Object.defineProperty(renderer, 'clock', { value: 0.1, configurable: true });
-  renderer.drawBuildTrail(renderer.camera.view);
+  draw();
   assert.equal(strokes.length, 1, 'still fading -- should still draw');
 
   Object.defineProperty(renderer, 'clock', { value: 10, configurable: true });
-  renderer.drawBuildTrail(renderer.camera.view);
+  draw();
   assert.equal(strokes.length, 1, 'long past its fade -- should draw nothing more');
   assert.equal(renderer.buildTrail, null, 'and should have let go of itself');
 });

@@ -154,9 +154,12 @@ const PLAN_TOOL_SIZE = 22;
 
 // The live trail behind the Build tool's own drag, and how long it lingers
 // once the finger lifts -- see setBuildTrail/releaseBuildTrail/drawBuildTrail.
+// Kept muted rather than bright: it is a cursor trace, not another wall.
 const TRAIL_VALID_LINE = '232, 196, 68';
 const TRAIL_INVALID_LINE = '220, 60, 50';
 const TRAIL_FADE_SECONDS = 0.5;
+const TRAIL_WIDTH = 2;
+const TRAIL_MAX_ALPHA = 0.55;
 
 // A ring under each selected company (see Game#selectGuardsNear), and the
 // brief outward ping marking where an Attack-tool tap just landed.
@@ -634,7 +637,7 @@ export class Renderer {
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
-    this.drawBuildTrail(view);
+    this.drawBuildTrail(view, game.terrain);
     this.drawSelection(view, game.guards);
     this.drawMoveOrder(view);
     this.drawWorkingWalls(view, game);
@@ -1465,30 +1468,35 @@ export class Renderer {
     }
   }
 
-  drawBuildTrail(view) {
+  drawBuildTrail(view, terrain) {
     const trail = this.buildTrail;
     if (!trail || trail.points.length < 2) {
       return;
     }
-    let alpha = 1;
+    let alpha = TRAIL_MAX_ALPHA;
     if (trail.fadingSince !== null) {
       const elapsed = this.clock - trail.fadingSince;
       if (elapsed >= TRAIL_FADE_SECONDS) {
         this.buildTrail = null;
         return;
       }
-      alpha = clamp(1 - elapsed / TRAIL_FADE_SECONDS, 0, 1);
+      alpha = TRAIL_MAX_ALPHA * clamp(1 - elapsed / TRAIL_FADE_SECONDS, 0, 1);
     }
     const context = this.overlay;
     context.save();
-    context.lineWidth = 4;
+    context.lineWidth = TRAIL_WIDTH;
     context.lineJoin = 'round';
     context.lineCap = 'round';
     context.strokeStyle = `rgba(${trail.valid ? TRAIL_VALID_LINE : TRAIL_INVALID_LINE}, ${alpha})`;
     context.beginPath();
     let started = false;
     for (const point of trail.points) {
-      const projected = projectPoint(view, point.x, point.y, 0);
+      // Following the ground under each point, the same way a real wall's
+      // own preview does (see drawPeggedWalls) -- projected at sea level
+      // instead, the trail floated visibly off the hillside wherever the
+      // terrain was not flat.
+      const ground = terrain.heightAt(point.x, point.y);
+      const projected = projectPoint(view, point.x, point.y, ground);
       if (!projected) {
         continue;
       }

@@ -35,13 +35,18 @@ function tone(context, { frequency, duration, type = 'sine', gain = 0.3, sweepTo
   oscillator.stop(start + duration);
 }
 
-function noiseBurst(context, { duration, gain = 0.3, filterFrequency = 2000, filterSweepTo, delay = 0 }) {
+function noiseBurst(context, {
+  duration, gain = 0.3, filterType = 'lowpass', filterFrequency = 2000, filterQ, filterSweepTo, delay = 0,
+}) {
   const start = context.currentTime + delay;
   const source = context.createBufferSource();
   source.buffer = noiseBuffer(context, duration);
   const filter = context.createBiquadFilter();
-  filter.type = 'lowpass';
+  filter.type = filterType;
   filter.frequency.setValueAtTime(filterFrequency, start);
+  if (filterQ) {
+    filter.Q.setValueAtTime(filterQ, start);
+  }
   if (filterSweepTo) {
     filter.frequency.exponentialRampToValueAtTime(filterSweepTo, start + duration);
   }
@@ -82,10 +87,21 @@ const EFFECTS = {
     tone(context, { frequency: 659.25, duration: 0.15, type: 'sine', gain: 0.25 * volume, delay: 0.12 });
     tone(context, { frequency: 783.99, duration: 0.25, type: 'sine', gain: 0.28 * volume, delay: 0.24 });
   },
-  // A short horn call: a company mustered and marching out.
+  // A ragged battle cry from the company as it musters: a few rasping
+  // throat tones rising together under a shout-shaped noise formant, rather
+  // than a horn call.
   attack(context, volume) {
-    tone(context, { frequency: 110, sweepTo: 160, duration: 0.18, type: 'sawtooth', gain: 0.22 * volume });
-    tone(context, { frequency: 90, duration: 0.12, type: 'sine', gain: 0.3 * volume, delay: 0.16 });
+    tone(context, { frequency: 170, sweepTo: 340, duration: 0.26, type: 'sawtooth', gain: 0.16 * volume });
+    tone(context, { frequency: 145, sweepTo: 300, duration: 0.28, type: 'sawtooth', gain: 0.14 * volume, delay: 0.015 });
+    tone(context, { frequency: 200, sweepTo: 380, duration: 0.24, type: 'sawtooth', gain: 0.12 * volume, delay: 0.03 });
+    noiseBurst(context, {
+      duration: 0.3,
+      gain: 0.22 * volume,
+      filterType: 'bandpass',
+      filterFrequency: 700,
+      filterSweepTo: 1700,
+      filterQ: 3,
+    });
   },
   // A quick metallic clang: blade or arrow striking stone or flesh.
   clash(context, volume) {

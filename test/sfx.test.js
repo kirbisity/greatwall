@@ -34,7 +34,7 @@ function stubAudioContext() {
       return { buffer: null, connect() {}, start() {}, stop() {} };
     },
     createBiquadFilter() {
-      return { type: 'lowpass', frequency: param(), connect() {} };
+      return { type: 'lowpass', frequency: param(), Q: param(), connect() {} };
     },
     createBuffer(channels, length) {
       return { getChannelData: () => new Float32Array(length) };

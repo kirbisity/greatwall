@@ -10,12 +10,12 @@ export const BUILDINGS = {
 };
 
 import { scalePlan } from './helpers.js';
+import chinesePagoda from './chinese-pagoda.js';
 import chineseTemple from './chinese-temple.js';
 import japanHouse from './japan-house.js';
 import japanLarge from './japan-large.js';
 import japanMedium from './japan-medium.js';
 import japanSmall from './japan-small.js';
-import mogaoGrotto from './mogao-grotto.js';
 import waysideShrine from './shrine.js';
 
 // The island's keeps are drawn at the size their proportions read best and
@@ -33,8 +33,12 @@ export const JAPAN_BUILDINGS = {
 /** What an island settlement fills its platforms with. */
 export const JAPAN_HOUSE = japanHouse;
 
-// A small cultural landmark per level, standing apart from the city --
-// see LEVELS' own `landmark` field and Renderer#collectLandmark.
-export const CHINESE_TEMPLE = chineseTemple;
-export const MOGAO_GROTTO = mogaoGrotto;
+// Small cultural landmarks, standing apart from the city -- see LEVELS'
+// own `landmarks` field and Renderer#collectLandmarks.
+export const CHINESE_PAGODA = chinesePagoda;
+// The Northern March scatters a few of these as modest wayside shrines;
+// the Dust Sea raises one on its own, only a little smaller than the
+// plan was drawn at.
+export const CHINESE_TEMPLE_MINI = scalePlan(chineseTemple, 0.6);
+export const CHINESE_TEMPLE_SMALL = scalePlan(chineseTemple, 0.85);
 export const WAYSIDE_SHRINE = waysideShrine;

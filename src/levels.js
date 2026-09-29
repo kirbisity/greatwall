@@ -1,5 +1,5 @@
 import {
-  CHINESE_TEMPLE, JAPAN_BUILDINGS, JAPAN_HOUSE, MOGAO_GROTTO, WAYSIDE_SHRINE,
+  CHINESE_PAGODA, CHINESE_TEMPLE_MINI, CHINESE_TEMPLE_SMALL, JAPAN_BUILDINGS, JAPAN_HOUSE, WAYSIDE_SHRINE,
 } from './buildings/index.js';
 
 /**
@@ -98,11 +98,15 @@ export const LEVELS = [
       color: '#3d6e8e',
       bankColor: '#8d8460',
     },
-    // A wayside temple in the clear ground south of the city -- far
-    // enough that it never competes with the walls for the eye, standing
-    // apart from the raid the same way it would stand apart from any
-    // passing army.
-    landmark: { structure: CHINESE_TEMPLE, x: 100, y: 40 },
+    // A slender pagoda and a couple of modest wayside shrines, scattered
+    // through the clear ground around the city -- far enough that none of
+    // them competes with the walls for the eye, standing apart from the
+    // raid the same way they would stand apart from any passing army.
+    landmarks: [
+      { structure: CHINESE_PAGODA, x: 100, y: 40 },
+      { structure: CHINESE_TEMPLE_MINI, x: -160, y: 60 },
+      { structure: CHINESE_TEMPLE_MINI, x: 200, y: 140 },
+    ],
   },
   {
     id: 'dust-sea',
@@ -126,9 +130,11 @@ export const LEVELS = [
     // ground ever turns white, without either needing to know this is a
     // desert specifically; they only ever read the temperature.
     climate: { offset: 20 },
-    // A cliff shrine off in the dunes, well clear of the oasis and the
+    // A wayside temple off in the dunes, well clear of the oasis and the
     // city both -- see Terrain#pondAt for where the oasis itself sits.
-    landmark: { structure: MOGAO_GROTTO, x: -170, y: 90 },
+    landmarks: [
+      { structure: CHINESE_TEMPLE_SMALL, x: -170, y: 90 },
+    ],
   },
   {
     id: 'shiro-island',
@@ -263,9 +269,14 @@ export const LEVELS = [
     },
     // Sea air: thinner and cooler than the dust, and never quite absent.
     mist: { color: '196, 214, 226', blend: 0.45, density: 1.25, start: 0.8 },
-    // A wayside shrine along the shore path, clear of the hill and its
-    // walls -- see Terrain#hillAt for the rise the keep itself stands on.
-    landmark: { structure: WAYSIDE_SHRINE, x: 150, y: 120 },
+    // A few wayside shrines along the shore paths, clear of the hill and
+    // its walls -- see Terrain#hillAt for the rise the keep itself stands
+    // on -- so a raid from any quarter passes near one of them.
+    landmarks: [
+      { structure: WAYSIDE_SHRINE, x: 150, y: 120 },
+      { structure: WAYSIDE_SHRINE, x: -150, y: 80 },
+      { structure: WAYSIDE_SHRINE, x: 0, y: -170 },
+    ],
   },
 ];
 

@@ -424,5 +424,21 @@ export class Guard extends Company {
     // Picked out by a tap on the map -- see Game#selectGuardsNear -- so the
     // next tap knows to command it rather than pick out something new.
     this.selected = false;
+    // True only for the Emperor: never breaks off to hunt a raider on its
+    // own, and never auto-recalled home -- see Game#guardDestination.
+    this.followsOrdersOnly = false;
+  }
+}
+
+/**
+ * The one company every level fields the same way -- mustered free, its
+ * stats scaled to the castle's current tier at the moment it musters (see
+ * Game#spawnEmperor), strictly commanded rather than hunting on its own,
+ * and fatal to lose: see Game#isDefeated.
+ */
+export class Emperor extends Guard {
+  constructor(position = { x: 0, y: 0 }) {
+    super('EMPEROR', position);
+    this.followsOrdersOnly = true;
   }
 }

@@ -6,6 +6,7 @@ import {
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  EMPEROR_TIER_MULTIPLIER,
   FPS,
   GUARD_TYPES,
   RAIDER_SPAWN_INTERVAL_SECONDS,
@@ -279,10 +280,10 @@ test('game over is held off for BREACH.collapseSeconds after the last castle fal
 
 // --- dispatching the imperial army in tiers --------------------------------
 
-test('a level 1 city can only field its light company', () => {
+test('a level 1 city can only field its light company (plus the Emperor, offered everywhere)', () => {
   const game = new Game({ random: fixedRandom() });
   const options = game.dispatchOptions();
-  assert.deepEqual(options.map((option) => option.id), CASTLE_GUARD_TIERS.CC0);
+  assert.deepEqual(options.map((option) => option.id), [...CASTLE_GUARD_TIERS.CC0, 'EMPEROR']);
 });
 
 test('each upgrade unlocks the next guard tier without losing the ones below it', () => {
@@ -294,9 +295,9 @@ test('each upgrade unlocks the next guard tier without losing the ones below it'
   game.upgradeCastle(0);
   seenAtEachLevel.push(game.dispatchOptions().map((option) => option.id));
   assert.deepEqual(seenAtEachLevel, [
-    CASTLE_GUARD_TIERS.CC0,
-    CASTLE_GUARD_TIERS.CC1,
-    CASTLE_GUARD_TIERS.CC2,
+    [...CASTLE_GUARD_TIERS.CC0, 'EMPEROR'],
+    [...CASTLE_GUARD_TIERS.CC1, 'EMPEROR'],
+    [...CASTLE_GUARD_TIERS.CC2, 'EMPEROR'],
   ]);
 });
 
@@ -319,6 +320,108 @@ test('sendGuard refuses a company the treasury cannot afford', () => {
   assert.equal(result.sent, false);
   assert.equal(result.status, 'poor');
   assert.equal(game.guards.length, 0);
+});
+
+// --- the Emperor: one free, unique, strictly-commanded company ------------
+
+test('the Emperor costs nothing to muster', () => {
+  const game = new Game({ random: fixedRandom() });
+  const before = game.tokens;
+  const result = game.sendGuard('EMPEROR');
+  assert.equal(result.sent, true);
+  assert.equal(game.tokens, before, 'mustering it should not have spent a thing');
+});
+
+test('the Emperor is never offered again once mustered, and a second launch is refused', () => {
+  const game = new Game({ random: fixedRandom() });
+  assert.ok(game.dispatchOptions().some((option) => option.id === 'EMPEROR'));
+
+  game.sendGuard('EMPEROR');
+  assert.ok(!game.dispatchOptions().some((option) => option.id === 'EMPEROR'), 'should be gone from the list');
+
+  const second = game.sendGuard('EMPEROR');
+  assert.equal(second.sent, false);
+  assert.equal(second.status, 'unique');
+});
+
+test('the Emperor is about a medium company\'s own stats, but with three times the health', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  const medium = GUARD_TYPES.IG0; // the level's own medium tier, at CC0
+  assert.equal(emperor.type.maxHealth, medium.maxHealth * 3);
+  assert.equal(emperor.health, emperor.type.maxHealth);
+});
+
+test('the Emperor moves faster than every ordinary guard tier', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  const fastestOrdinary = Math.max(...Object.values(GUARD_TYPES)
+    .filter((type) => type !== GUARD_TYPES.EMPEROR)
+    .map((type) => type.speed));
+  assert.ok(emperor.type.speed > fastestOrdinary, `${emperor.type.speed} should outrun ${fastestOrdinary}`);
+});
+
+test('the Emperor\'s own stats scale up with the castle\'s tier, at the moment it musters', () => {
+  for (const [typeId, multiplier] of Object.entries(EMPEROR_TIER_MULTIPLIER)) {
+    const game = new Game({ random: fixedRandom() });
+    game.tokens = 100000;
+    while (game.castles[0].typeId !== typeId) {
+      game.upgradeCastle(0);
+    }
+    const emperor = game.sendGuard('EMPEROR').guard;
+    assert.equal(emperor.type.maxHealth, Math.round(GUARD_TYPES.EMPEROR.maxHealth * multiplier), typeId);
+  }
+});
+
+test('mustering the Emperor never mutates the shared base stats other games read', () => {
+  const first = new Game({ random: fixedRandom() });
+  first.tokens = 100000;
+  first.upgradeCastle(0);
+  first.upgradeCastle(0);
+  first.sendGuard('EMPEROR'); // at CC2, its strongest tier
+
+  const second = new Game({ random: fixedRandom() });
+  const freshOption = second.dispatchOptions().find((option) => option.id === 'EMPEROR');
+  assert.equal(freshOption.maxHealth, GUARD_TYPES.EMPEROR.maxHealth, 'a new game at CC0 should see the true base stats');
+});
+
+test('the Emperor never breaks off to hunt a raider on its own, even one right beside it', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  emperor.orders = { ...emperor.home };
+  game.raiders = [new Raider('CR0', { ...emperor.position })];
+
+  assert.deepEqual(game.guardDestination(emperor), emperor.orders, 'should hold its order, not chase the raider');
+  assert.equal(emperor.quarry, null);
+});
+
+test('an ordinary guard still hunts nearby raiders exactly as before -- only the Emperor is exempt', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG_LIGHT').guard;
+  const raider = new Raider('CR0', { x: guard.position.x + 50, y: guard.position.y });
+  game.raiders = [raider];
+  assert.deepEqual(game.guardDestination(guard), raider.position);
+});
+
+test('losing the Emperor ends the game, even with the castle still standing', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  assert.equal(game.isDefeated, false);
+
+  emperor.health = -1;
+  assert.equal(game.castles[0].health >= 0, true, 'the castle itself is untouched');
+  assert.equal(game.isDefeated, true, 'losing the Emperor alone should be enough');
+});
+
+test('the Emperor still fights back if a raider actually reaches it, despite never hunting', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  const raider = new Raider('CR0', { ...emperor.position });
+  game.raiders = [raider];
+
+  game.step();
+  assert.ok(emperor.foes.size > 0 || raider.foes.size > 0, 'proximity alone should still lock them into melee');
 });
 
 // --- mustering stands idle until selected and sent ------------------------

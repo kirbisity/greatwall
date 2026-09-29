@@ -334,6 +334,14 @@ const FORMATIONS = {
       weapon: spearArm(2.6),
     }),
   }),
+  // A single mounted figure, not a company -- the Emperor musters alone.
+  // The same horseman a raiding cavalry rides, sabre and all, the same way
+  // every other tier already shares its formation builder rather than
+  // carrying its own bespoke geometry.
+  EMPEROR: () => ({
+    places: [{ x: 0, y: 0 }],
+    figure: horseman({ weapon: sabreArm() }),
+  }),
 };
 
 /**

@@ -172,7 +172,15 @@ test('the attack tool asks for a company first, then to tap one to select it', (
     },
   });
   input.hud.showActionHint = (text) => hints.push(text);
-  input.hud.showDispatchMenu = (opts, screen, onPick) => onPick(options[0].id);
+  // A real showDispatchMenu only wires up a click handler and returns --
+  // onPick fires later, once, when the player actually taps a button.
+  let picked = false;
+  input.hud.showDispatchMenu = (opts, screen, onPick) => {
+    if (!picked) {
+      picked = true;
+      onPick(options[0].id);
+    }
+  };
 
   input.selectTool('attack');
 
@@ -184,7 +192,13 @@ test('the attack tool asks for a company first, then to tap one to select it', (
 
 test('picking a tier spawns a company right away, without needing a map tap', () => {
   const { input, spawned } = attackReady();
-  input.hud.showDispatchMenu = (opts, screen, onPick) => onPick('IG0');
+  let picked = false;
+  input.hud.showDispatchMenu = (opts, screen, onPick) => {
+    if (!picked) {
+      picked = true;
+      onPick('IG0');
+    }
+  };
   input.selectTool('attack');
   assert.deepEqual(spawned, ['IG0']);
 });
@@ -200,11 +214,20 @@ test('picking a tier the treasury cannot afford says so and musters nobody', () 
 
 test('the tier picker stays open after a pick, so several companies can be mustered in a row', () => {
   const hidden = [];
-  const { input } = attackReady();
+  const { input, spawned } = attackReady();
   input.hud.hideDispatchMenu = () => hidden.push(true);
-  input.hud.showDispatchMenu = (opts, screen, onPick) => { onPick('IG0'); onPick('IG0'); };
+  // A real showDispatchMenu just wires up a handler and waits -- picking
+  // happens later, as its own separate click, not nested inside the call
+  // that rendered the button.
+  let latestPick = null;
+  input.hud.showDispatchMenu = (opts, screen, onPick) => { latestPick = onPick; };
   input.selectTool('attack');
+
+  latestPick('IG0');
+  latestPick('IG0');
+
   assert.equal(hidden.length, 0, 'mustering should not close the picker');
+  assert.equal(spawned.length, 2, 'both picks should have mustered a company');
 });
 
 test('an empty-handed tap selects whatever companies are nearby', () => {

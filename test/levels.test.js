@@ -322,6 +322,20 @@ test('every guard a level can field is a real company with a portrait and a mode
   }
 });
 
+test('the Emperor has a real mounted model and a price of nothing, in every level alike', async () => {
+  const { compileUnit } = await import('../src/units.js');
+  const model = compileUnit('EMPEROR');
+  assert.ok(model, 'EMPEROR has no formation to muster');
+  assert.equal(model.figures.length, 1, 'a single rider, not a company');
+  for (const level of LEVELS) {
+    const game = new Game({ random: fixedRandom(), level });
+    const option = game.dispatchOptions().find((candidate) => candidate.id === 'EMPEROR');
+    assert.ok(option, `${level.id} should offer the Emperor`);
+    assert.equal(option.cost, 0);
+    assert.ok(option.avatar, 'missing its portrait path');
+  }
+});
+
 test('no wall can be laid in the water, on either water level', () => {
   for (const level of LEVELS.filter((one) => one.river || one.sea)) {
     const game = new Game({ random: fixedRandom(), level });

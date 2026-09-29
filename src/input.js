@@ -242,8 +242,7 @@ export class Input {
 
   /** Show the tier picker above the castle, so an order carries a company. */
   openDispatchMenu() {
-    const options = this.game.dispatchOptions();
-    if (options.length === 0) {
+    if (this.game.dispatchOptions().length === 0) {
       return;
     }
     // Anchored to the Attack button itself, not the castle -- a fixed
@@ -255,18 +254,36 @@ export class Input {
       ? { x: rect.left + rect.width / 2, y: rect.top }
       : { x: this.camera.width / 2, y: this.camera.height / 2 };
     this.hud.showActionHint('Choose a company to muster');
-    // Left open rather than hidden after a pick, so several companies can be
-    // mustered in a row -- tapping the map (see handleAttackTap) is what
-    // closes it, once the player has moved on to selecting and sending them.
+    this.refreshDispatchMenu(screen);
+  }
+
+  /**
+   * (Re)draws the tier picker against whatever is on offer right now, so a
+   * one-time option -- the Emperor among them -- disappears the moment it
+   * is spent rather than sitting there clickable with nothing left to give.
+   * Left open after a pick rather than hidden, so several companies can be
+   * mustered in a row -- tapping the map (see handleAttackTap) is what
+   * closes it, once the player has moved on to selecting and sending them.
+   */
+  refreshDispatchMenu(screen) {
+    const options = this.game.dispatchOptions();
+    if (options.length === 0) {
+      this.hud.hideDispatchMenu();
+      return;
+    }
     this.hud.showDispatchMenu(options, screen, (typeId) => {
       const option = options.find((candidate) => candidate.id === typeId);
       const result = this.game.sendGuard(typeId);
       if (!result.sent) {
-        this.hud.showMessage(`${option.name} costs $${option.cost} to muster`);
+        const reason = result.status === 'unique'
+          ? `Only one ${option.name} can ever be mustered`
+          : `${option.name} costs $${option.cost} to muster`;
+        this.hud.showMessage(reason);
         return;
       }
       this.hud.showActionHint('Tap a company to select it, then tap again to send it');
       this.onChange();
+      this.refreshDispatchMenu(screen);
     });
   }
 

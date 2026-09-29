@@ -273,6 +273,9 @@ export const AVATARS = {
   japanLight: 'images/unit_avatar/avatar_japanese_light.png',
   japanRegular: 'images/unit_avatar/avatar_japanese_regular.png',
   japanHeavy: 'images/unit_avatar/avatar_japanese_heavy.png',
+  // Not shipped yet -- the portrait quietly goes undrawn (see Renderer#drawAvatar)
+  // until a real file lands here, the same as any other missing image would.
+  emperor: 'images/unit_avatar/avatar_emperor.png',
 };
 
 export const AVATAR = {
@@ -366,6 +369,15 @@ export const GUARD_TYPES = {
     name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42, attack: 3,
     defense: 6, range: 3, cost: 680, avatar: AVATARS.japanHeavy,
   },
+  // The one company every level fields the same way -- see Game#dispatchOptions
+  // and #spawnEmperor. About a regular guard's own stats, but with three
+  // times the health, and free to muster since only one is ever on offer.
+  // These are its stats at a castle's first tier; EMPEROR_TIER_MULTIPLIER
+  // scales attack, defense and health up as the city grows.
+  EMPEROR: {
+    name: 'The Emperor', speed: 10, maxHealth: 90, attack: 3,
+    defense: 4, range: 2, cost: 0, avatar: AVATARS.emperor,
+  },
 };
 
 /** Which guard tiers a castle can field, unlocked as it grows. */
@@ -374,6 +386,9 @@ export const CASTLE_GUARD_TIERS = {
   CC1: ['IG_LIGHT', 'IG0'],
   CC2: ['IG_LIGHT', 'IG0', 'IG_HEAVY'],
 };
+
+/** How much stronger the Emperor's own base stats grow at each castle tier. */
+export const EMPEROR_TIER_MULTIPLIER = { CC0: 1, CC1: 1.3, CC2: 1.6 };
 
 // One row per season; the last row repeats once the seasons run past it.
 export const SEASON_RAIDER_MIX = [

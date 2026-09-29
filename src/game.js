@@ -1,4 +1,6 @@
-import { Castle, Guard, House, Raider, Wall } from './entities.js';
+import {
+  Castle, Emperor, Guard, House, Raider, Wall,
+} from './entities.js';
 import {
   closestPointOnSquare,
   distance,
@@ -20,6 +22,7 @@ import {
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  EMPEROR_TIER_MULTIPLIER,
   FEAR,
   FPS,
   TERRAIN,
@@ -166,6 +169,11 @@ export class Game {
     // its cached landscape is stale -- see Renderer#drawGround.
     this.terrainRevision = 0;
     this.guards = [];
+    // The one Emperor a game gets -- see dispatchOptions/spawnEmperor.
+    // Mustered only stays true for the run it happened on: a fresh level
+    // (or a restart) gets its own free launch back.
+    this.emperor = null;
+    this.emperorMustered = false;
     this.walls = [];
     this.houses = [];
     this.houseSpawnCountdown = HOUSES.spawnIntervalSeconds;
@@ -253,7 +261,7 @@ export class Game {
   }
 
   get isDefeated() {
-    return this.castles.some((castle) => castle.health < 0);
+    return this.castles.some((castle) => castle.health < 0) || (this.emperor !== null && !this.emperor.isAlive);
   }
 
   /** How far through its burning the city is, 0 to 1. */
@@ -376,7 +384,8 @@ export class Game {
     // the game-over screen actually waits on: see BREACH.collapseSeconds.
     if (this.isDefeated) {
       if (this.breachSeconds === null) {
-        this.onEffect('destroyed', this.castles.find((castle) => castle.health < 0)?.position);
+        const fallen = this.castles.find((castle) => castle.health < 0);
+        this.onEffect('destroyed', fallen?.position ?? this.emperor?.position);
       }
       this.breachSeconds = Math.min(BREACH.collapseSeconds, (this.breachSeconds ?? 0) + 1 / FPS);
     }
@@ -647,11 +656,33 @@ export class Game {
       return [];
     }
     const tierIds = this.guardTiers[castle.typeId] ?? [];
-    return tierIds.map((id) => ({ id, ...GUARD_TYPES[id] }));
+    const options = tierIds.map((id) => ({ id, ...GUARD_TYPES[id] }));
+    // Offered the same way in every level, on top of whatever that level's
+    // own tiers are -- and only for as long as this game has not already
+    // spent its one launch. See spawnEmperor.
+    if (!this.emperorMustered) {
+      options.push({ id: 'EMPEROR', ...this.emperorStats(castle) });
+    }
+    return options;
+  }
+
+  /** The Emperor's own stats at a castle's current tier -- see spawnEmperor. */
+  emperorStats(castle = this.castles[0]) {
+    const base = GUARD_TYPES.EMPEROR;
+    const multiplier = EMPEROR_TIER_MULTIPLIER[castle?.typeId] ?? 1;
+    return {
+      ...base,
+      maxHealth: Math.round(base.maxHealth * multiplier),
+      attack: Math.round(base.attack * multiplier),
+      defense: Math.round(base.defense * multiplier),
+    };
   }
 
   /** Send a company of the given tier to hold a patch of ground. */
   sendGuard(typeId) {
+    if (typeId === 'EMPEROR') {
+      return this.spawnEmperor();
+    }
     const home = this.castles[0];
     if (!home) {
       return { sent: false, status: 'nocity' };
@@ -673,6 +704,35 @@ export class Game {
     this.guards.push(guard);
     this.onEffect('attack', home.position);
     return { sent: true, guard };
+  }
+
+  /**
+   * Muster the one Emperor a game gets: free, scaled to the castle's
+   * current tier, and never on offer again once launched (see
+   * dispatchOptions). Strictly commanded rather than hunting on its own
+   * (see guardDestination), and losing it ends the game the same way
+   * losing the castle does (see isDefeated).
+   */
+  spawnEmperor() {
+    const home = this.castles[0];
+    if (!home) {
+      return { sent: false, status: 'nocity' };
+    }
+    if (this.emperorMustered) {
+      return { sent: false, status: 'unique' };
+    }
+    const emperor = new Emperor(home.position);
+    // A fresh object, scaled to this tier -- never the shared GUARD_TYPES
+    // entry itself, or mustering would permanently inflate every future
+    // game's own starting stats.
+    emperor.type = this.emperorStats(home);
+    emperor.health = emperor.type.maxHealth;
+    emperor.home = { ...home.position };
+    this.guards.push(emperor);
+    this.emperor = emperor;
+    this.emperorMustered = true;
+    this.onEffect('attack', home.position);
+    return { sent: true, guard: emperor };
   }
 
   /**
@@ -738,6 +798,15 @@ export class Game {
    * ordered ground, and goes home when there is nothing left to do.
    */
   guardDestination(guard) {
+    // The Emperor: no hunting, no auto-recall, no yo-yoing off a leash --
+    // it goes exactly where it was last commanded and stays there until
+    // ordered elsewhere (see Emperor#followsOrdersOnly). It will still
+    // trade blows if a raider actually reaches it -- that is handled
+    // through the same proximity-based melee every company shares, not
+    // through this destination at all.
+    if (guard.followsOrdersOnly) {
+      return guard.orders;
+    }
     if (guard.quarry && !guard.quarry.isAlive) {
       guard.quarry = null;
     }

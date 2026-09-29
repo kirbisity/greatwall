@@ -319,7 +319,7 @@ test('a mouse click does not bother capturing the pointer', () => {
   assert.equal(captured.length, 0);
 });
 
-test('one finger dragging the map pans it, smoothed to iron out touch jitter', () => {
+test('one finger dragging the map pans it, eased in gently rather than snapped onto', () => {
   const { input, calls } = gestureInput();
   input.handlePointerDown(finger(1, 300, 300));
   input.handlePointerMove(finger(1, 340, 310));
@@ -327,21 +327,48 @@ test('one finger dragging the map pans it, smoothed to iron out touch jitter', (
 
   assert.equal(calls.pan.length, 1);
   assert.deepEqual(calls.pan[0].from, { x: 300, y: 300 });
-  // Eased towards the new point rather than snapping straight onto it --
-  // see TOUCH_PAN_SMOOTHING -- but still most of the way there in one step.
-  assert.ok(calls.pan[0].to.x > 310 && calls.pan[0].to.x < 340, `x landed at ${calls.pan[0].to.x}`);
-  assert.ok(calls.pan[0].to.y > 302 && calls.pan[0].to.y < 310, `y landed at ${calls.pan[0].to.y}`);
+  // The very first sample of a drag is the least steady moment of one -- a
+  // thumb settling reads as a little back-and-forth before it commits to a
+  // direction -- so it starts well short of the new point, not most of the
+  // way there. See PAN_RAMP_START.
+  assert.ok(calls.pan[0].to.x > 300 && calls.pan[0].to.x < 315, `x landed at ${calls.pan[0].to.x}`);
+  assert.ok(calls.pan[0].to.y > 300 && calls.pan[0].to.y < 303, `y landed at ${calls.pan[0].to.y}`);
   assert.equal(calls.release, 1, 'lifting the finger lets the camera coast');
 });
 
-test('a finger held still after a move settles onto it within a few samples', () => {
+test('a finger held still after a move settles onto it within a dozen samples', () => {
   const { input, calls } = gestureInput();
   input.handlePointerDown(finger(1, 0, 0));
-  for (let sample = 0; sample < 8; sample += 1) {
+  for (let sample = 0; sample < 12; sample += 1) {
     input.handlePointerMove(finger(1, 100, 0));
   }
   const last = calls.pan.at(-1).to;
   assert.ok(Math.abs(last.x - 100) < 1, `should have converged onto the finger, landed at ${last.x}`);
+});
+
+test('the pan eases in gently at first, then settles into a steady rate', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  for (let sample = 0; sample < 10; sample += 1) {
+    input.handlePointerMove(finger(1, 100, 0));
+  }
+  // What fraction of the remaining gap to the finger a sample closed --
+  // this is exactly the smoothing rate panMap used for it, independent of
+  // how far the gap itself had already shrunk by that point.
+  const rate = (call) => (call.to.x - call.from.x) / (100 - call.from.x);
+  assert.ok(rate(calls.pan[0]) < 0.15, `the very first sample should be gentle, was ${rate(calls.pan[0])}`);
+  assert.ok(rate(calls.pan.at(-1)) > 0.5, `once ramped up, the rate should have reached its full steady value, was ${rate(calls.pan.at(-1))}`);
+});
+
+test('a finger settling with a little back-and-forth barely moves the camera at all', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  // A thumb landing rarely reports a clean, single direction straight away.
+  for (const x of [4, -3, 5, -2]) {
+    input.handlePointerMove(finger(1, x, 0));
+  }
+  const net = calls.pan.reduce((total, call) => total + (call.to.x - call.from.x), 0);
+  assert.ok(Math.abs(net) < 1, `four samples of shake should net to almost nothing, was ${net}`);
 });
 
 test('a new drag starts smoothing fresh from wherever the finger actually lands', () => {

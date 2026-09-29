@@ -36,10 +36,18 @@ const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
 
 // How much of a finger's newest reported position replaces the smoothed one
-// each sample -- 1 would be no smoothing at all, and this is deliberately
-// close to that: just enough to round off sample noise, not slow enough to
-// feel like the ground is trailing the finger. See Input#panMap.
+// each sample, once the gesture is under way -- 1 would be no smoothing at
+// all, and this is deliberately close to that: just enough to round off
+// sample noise, not slow enough to feel like the ground is trailing the
+// finger. See Input#panMap.
 const TOUCH_PAN_SMOOTHING = 0.55;
+// A touch landing is the least steady moment of a drag -- a thumb settling
+// still reads as a few pixels of back-and-forth before it commits to a
+// direction. Starting this gently and ramping up to TOUCH_PAN_SMOOTHING
+// over PAN_RAMP_SAMPLES samples absorbs that shake instead of panning the
+// camera along with it, without adding any lag a deliberate swipe can feel.
+const PAN_RAMP_START = 0.12;
+const PAN_RAMP_SAMPLES = 6;
 
 // Anything a gesture can start on that is interface rather than map. A drag
 // that begins on a button, the dock or a menu must not move the camera or
@@ -77,6 +85,9 @@ export class Input {
     // at the start of every drag so a new gesture starts from exactly where
     // the finger landed, not wherever the last one left off.
     this.smoothedTouch = null;
+    // How many pan samples into the current drag -- see panMap's own ramp
+    // from PAN_RAMP_START up to TOUCH_PAN_SMOOTHING.
+    this.panRampStep = 0;
     this.zoomAnchor = null;
     this.chainPoint = null;
     // Every point along the Build tool's current drag, in world ground
@@ -396,10 +407,14 @@ export class Input {
     }
     if (!this.smoothedTouch) {
       this.smoothedTouch = { ...previous };
+      this.panRampStep = 0;
     }
+    const ramp = Math.min(1, this.panRampStep / PAN_RAMP_SAMPLES);
+    const smoothing = PAN_RAMP_START + (TOUCH_PAN_SMOOTHING - PAN_RAMP_START) * ramp;
+    this.panRampStep += 1;
     const from = { ...this.smoothedTouch };
-    this.smoothedTouch.x += (this.pointer.x - this.smoothedTouch.x) * TOUCH_PAN_SMOOTHING;
-    this.smoothedTouch.y += (this.pointer.y - this.smoothedTouch.y) * TOUCH_PAN_SMOOTHING;
+    this.smoothedTouch.x += (this.pointer.x - this.smoothedTouch.x) * smoothing;
+    this.smoothedTouch.y += (this.pointer.y - this.smoothedTouch.y) * smoothing;
     this.camera.panFrom(from, this.smoothedTouch, { direct: true });
   }
 

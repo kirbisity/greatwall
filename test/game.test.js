@@ -883,11 +883,11 @@ test('unitSize counts the figures a type\'s own formation actually musters', () 
 test('a fresh battle starts with every stat at zero', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
   assert.deepEqual(game.battleStats, {
-    kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0,
+    kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0, enemyLossByType: {}, playerLossByType: {},
   });
 });
 
-test('trackBattleLosses tallies kills, deaths, and each side\'s strength cut down, weighted by company size', () => {
+test('trackBattleLosses tallies kills, deaths, and each side\'s individual soldiers lost, by type', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
   const raider = new Raider('IR0', { x: 0, y: 100 });
   const guard = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }).guard;
@@ -901,37 +901,55 @@ test('trackBattleLosses tallies kills, deaths, and each side\'s strength cut dow
 
   assert.equal(game.battleStats.kills, 0, 'the raider is only wounded');
   assert.equal(game.battleStats.deaths, 1, 'the guard fell');
-  assert.equal(game.battleStats.enemyLoss, 4 * unitSize('IR0'));
-  const guardHealthLost = before.get(guard) - guard.health;
-  assert.equal(game.battleStats.playerLoss, guardHealthLost * unitSize('IG_LIGHT'));
+  const enemyIndividuals = (4 / RAIDER_TYPES.IR0.maxHealth) * unitSize('IR0');
+  assert.equal(game.battleStats.enemyLoss, enemyIndividuals);
+  assert.equal(game.battleStats.enemyLossByType.IR0, enemyIndividuals);
+  // Capped at the guard's own max health -- the killing blow drove it well
+  // past zero, but none of that overkill is a soldier it never had.
+  const guardHealthLost = before.get(guard) - Math.max(guard.health, 0);
+  const playerIndividuals = (guardHealthLost / GUARD_TYPES.IG_LIGHT.maxHealth) * unitSize('IG_LIGHT');
+  assert.equal(game.battleStats.playerLoss, playerIndividuals);
+  assert.equal(game.battleStats.playerLossByType.IG_LIGHT, playerIndividuals);
 });
 
-test('trackBattleLosses counts a kill once a company\'s health actually crosses zero', () => {
+test('a company wiped out entirely loses exactly its own full headcount, not a fraction of it', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
   const raider = new Raider('CR0', { x: 0, y: 100 });
   game.raiders = [raider];
   const before = new Map([[raider, raider.health]]);
-  raider.health = -3;
+  raider.health = -3; // however far past zero, the company is entirely gone
 
   game.trackBattleLosses(before);
 
   assert.equal(game.battleStats.kills, 1);
-  assert.equal(game.battleStats.enemyLoss, (before.get(raider) - raider.health) * unitSize('CR0'));
+  const fullLoss = (before.get(raider) / RAIDER_TYPES.CR0.maxHealth) * unitSize('CR0');
+  assert.ok(game.battleStats.enemyLoss >= unitSize('CR0') - 0.001, 'overkill should not undercount the headcount lost');
+  assert.equal(game.battleStats.enemyLoss, fullLoss);
 });
 
-test('losses accumulate across several frames rather than only counting the last one', () => {
+test('losses accumulate across several frames, and split cleanly between types that both took losses', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
-  const raider = new Raider('IR0', { x: 0, y: 100 });
-  game.raiders = [raider];
+  const swordsman = new Raider('IR0', { x: 0, y: 100 });
+  const spearman = new Raider('IR1', { x: 40, y: 100 });
+  game.raiders = [swordsman, spearman];
 
   let before = game.snapshotHealth();
-  raider.health -= 3;
+  swordsman.health -= 3;
   game.trackBattleLosses(before);
 
   before = game.snapshotHealth();
-  raider.health -= 5;
+  swordsman.health -= 5;
+  spearman.health -= 2;
   game.trackBattleLosses(before);
 
-  assert.equal(game.battleStats.enemyLoss, (3 + 5) * unitSize('IR0'));
+  const swordsmanLoss = (8 / RAIDER_TYPES.IR0.maxHealth) * unitSize('IR0');
+  const spearmanLoss = (2 / RAIDER_TYPES.IR1.maxHealth) * unitSize('IR1');
+  const close = (actual, expected) => assert.ok(
+    Math.abs(actual - expected) < 1e-9,
+    `expected close to ${expected}, got ${actual}`,
+  );
+  close(game.battleStats.enemyLossByType.IR0, swordsmanLoss);
+  close(game.battleStats.enemyLossByType.IR1, spearmanLoss);
+  close(game.battleStats.enemyLoss, swordsmanLoss + spearmanLoss);
   assert.equal(game.battleStats.kills, 0);
 });

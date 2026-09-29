@@ -29,11 +29,14 @@ test('a menu wider than the screen keeps its start on screen', () => {
   assert.equal(-40 + dx, 8, 'its first option must be reachable even if its last is not');
 });
 
-test('formatBattleStats shows kills, losses and K/D, rounding each side\'s strength cut down', () => {
+test('formatBattleStats shows companies destroyed/lost and K/D, rounding each side\'s soldiers lost', () => {
   const text = formatBattleStats({
     kills: 9, deaths: 2, enemyLoss: 131.6, playerLoss: 27.2,
   });
-  assert.equal(text, 'Kills 9 · Losses 2 · K/D 4.50\nEnemy strength cut down: 132\nYour strength lost: 27');
+  assert.equal(
+    text,
+    'Companies destroyed 9 · Companies lost 2 · K/D 4.50\nEnemy soldiers lost: 132\nYour soldiers lost: 27',
+  );
 });
 
 test('formatBattleStats reads K/D as a clean win with no losses at all', () => {

@@ -753,7 +753,41 @@ test('beginPlacement shows the roster dock; endPlacement puts it away and clears
   shown[0]('IG0');
   assert.equal(input.pendingUnit, 'IG0', 'picking a roster button should be wired straight to selectPendingUnit');
 
+  const cursors = [];
+  input.hud.setCursor = (cursor) => cursors.push(cursor);
   input.endPlacement();
   assert.equal(hidden.length, 1, 'Start Battle should put the dock away');
   assert.equal(input.pendingUnit, null, 'and drop whatever was still pending');
+  assert.ok(cursors.at(-1).includes('attackBtn'), 'no Attack tool to pick in this mode, but the cursor should still say a tap commands');
+});
+
+test('once a battle has started, a tap always selects or commands -- no Attack tool needed to turn that on', () => {
+  const selected = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      started: true,
+      selectedGuards: [],
+      selectGuardsNear: (point) => { selected.push(point); return []; },
+    },
+  });
+  // Left on 'move' the whole time -- there is no Attack button in this mode
+  // to switch it (see Hud's own siegeOnlyToolIds) -- yet a tap still commands.
+  assert.equal(input.tool, 'move');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 1, 'the tap should have gone to handleAttackTap regardless of the active tool');
+  assert.deepEqual(selected[0], { x: 400, y: 300 });
+});
+
+test('before the battle starts, a tap does not fall into command mode -- that would fight the placement flow', () => {
+  const selected = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      started: false,
+      selectGuardsNear: (point) => { selected.push(point); return []; },
+    },
+  });
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 0, 'nothing to command yet -- the placement phase owns taps until Start Battle');
 });

@@ -1,5 +1,5 @@
 import {
-  AUDIO_VOLUME_STEP, BATTLE, GUARD_TYPES, INITIAL_SOUND_LEVEL, SEASONS,
+  AUDIO_VOLUME_STEP, BATTLE, GUARD_TYPES, INITIAL_SOUND_LEVEL, RAIDER_TYPES, SEASONS,
 } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
 import { Sfx } from './sfx.js';
@@ -62,19 +62,20 @@ export function clampIntoView(box, view, margin) {
 const MENU_MARGIN = 8;
 
 /**
- * Kills, losses, and each side's strength actually cut down, for the open
- * battleground mode's own end-of-round screen -- see Game#trackBattleLosses
- * for how "strength" weighs a company's own size into the number, so
- * felling a company of eight outweighs a lone rider losing the same
- * fraction of its own health.
+ * Companies destroyed, companies lost, and the K/D between them, for the
+ * open battleground mode's own end-of-round screen. The two loss lines
+ * beneath are a different, finer-grained count: individual soldiers, not
+ * companies -- see Game#trackBattleLosses for how that number is worked
+ * out, and Hud#renderBattleBreakdown for the same figure broken down by
+ * which type it came from.
  */
 export function formatBattleStats(stats) {
   const kd = stats.deaths === 0
     ? (stats.kills > 0 ? '∞' : '0.00')
     : (stats.kills / stats.deaths).toFixed(2);
-  return `Kills ${stats.kills} · Losses ${stats.deaths} · K/D ${kd}\n`
-    + `Enemy strength cut down: ${Math.round(stats.enemyLoss)}\n`
-    + `Your strength lost: ${Math.round(stats.playerLoss)}`;
+  return `Companies destroyed ${stats.kills} · Companies lost ${stats.deaths} · K/D ${kd}\n`
+    + `Enemy soldiers lost: ${Math.round(stats.enemyLoss)}\n`
+    + `Your soldiers lost: ${Math.round(stats.playerLoss)}`;
 }
 
 function element(id) {
@@ -126,7 +127,16 @@ export class Hud {
     this.battleBudgetReadout = element('battleBudgetReadout');
     this.battleBudgetValue = element('battleBudgetValue');
     this.startBattleButton = element('startBattleBtn');
-    this.siegeOnlyToolIds = ['upgradeTool', 'fortifyTool', 'repairTool', 'destroyTool'];
+    // Every tool that means nothing without a castle, plus Attack: the open
+    // battleground mode has nothing to muster once the fight starts, so
+    // commanding a company is just how tapping the field always behaves
+    // there -- see Input#handleClick. No button to pick that behaviour, so
+    // none needed to show it is on.
+    this.siegeOnlyToolIds = ['upgradeTool', 'fortifyTool', 'repairTool', 'destroyTool', 'attackTool'];
+    this.battleResultModal = element('battleResult');
+    this.battleResultTitle = element('battleResultTitle');
+    this.battleResultSummary = element('battleResultSummary');
+    this.battleResultBreakdown = element('battleResultBreakdown');
 
     this.sfx = new Sfx();
     this.soundLevel = INITIAL_SOUND_LEVEL;
@@ -206,9 +216,12 @@ export class Hud {
   /**
    * The open battleground mode swaps out a good part of the chrome: no
    * treasury or income or season to show, no upgrade/fortify/repair/raze
-   * tools (there is no castle and no stone to work), the Build tool reads
-   * as earthworks instead of walls, and the Attack tool -- for commanding a
-   * placed line -- only makes sense once the placement phase is over.
+   * tools (there is no castle and no stone to work), and no Attack tool
+   * either -- once the fight starts there is nothing left to muster, so
+   * commanding a placed company is just how tapping the field behaves the
+   * whole time, with no button needed to turn that on (see Input#handleClick).
+   * The Build tool -- earthworks here, not stone -- only makes sense before
+   * that, during placement.
    */
   applyMode(game) {
     const isBattle = game.mode === 'battle';
@@ -219,13 +232,7 @@ export class Hud {
         button.style.display = isBattle ? 'none' : '';
       }
     }
-    if (!isBattle) {
-      this.buildToolButton.style.display = '';
-      this.attackToolButton.style.display = '';
-      return;
-    }
-    this.buildToolButton.style.display = game.started ? 'none' : '';
-    this.attackToolButton.style.display = game.started ? '' : 'none';
+    this.buildToolButton.style.display = (isBattle && game.started) ? 'none' : '';
   }
 
   /** Light up the button for the active tool and dim the rest. */
@@ -507,13 +514,78 @@ export class Hud {
     this.battleBudgetValue.innerText = `${Math.max(0, Math.trunc(game.battleBudget))} / ${BATTLE.budget}`;
   }
 
+  /**
+   * The open battleground mode's own end-of-round screen: shown over the
+   * field itself -- see #battleResult in the markup -- rather than the main
+   * menu, so the line as it stood at the last moment is still visible
+   * behind it. Start's own label is set here too, ready for whenever the
+   * player does go back to the menu (see App#continueFromBattleResult).
+   */
   showBattleResult(won, seconds, stats) {
     this.startButton.innerText = 'Start';
+    this.battleResultTitle.innerText = won ? 'Victory' : 'Defeat';
     const headline = won
-      ? `Victory! The enemy line broke after ${seconds}s.`
-      : 'Defeat. Your line was overrun.';
-    this.menuInfo.innerText = `${headline}\n${formatBattleStats(stats)}`;
-    this.openMenu();
+      ? `The enemy line broke after ${seconds}s.`
+      : `Your line was overrun after ${seconds}s.`;
+    this.battleResultSummary.innerText = `${headline}\n${formatBattleStats(stats)}`;
+    this.renderBattleBreakdown(stats);
+    this.battleResultModal.style.display = 'block';
+  }
+
+  closeBattleResult() {
+    this.battleResultModal.style.display = 'none';
+  }
+
+  /** Each side's losses, broken down by type -- a small avatar per type, and how many of it fell. */
+  renderBattleBreakdown(stats) {
+    this.battleResultBreakdown.replaceChildren(
+      this.buildBattleBreakdownColumn('Enemy losses', stats.enemyLossByType, RAIDER_TYPES),
+      this.buildBattleBreakdownColumn('Your losses', stats.playerLossByType, GUARD_TYPES),
+    );
+  }
+
+  buildBattleBreakdownColumn(title, lossByType, typeTable) {
+    const column = document.createElement('div');
+    column.className = 'battleBreakdownColumn';
+    const heading = document.createElement('h3');
+    heading.innerText = title;
+    column.append(heading);
+
+    // Under half a soldier is a graze, not a loss worth a line of its own.
+    const entries = Object.entries(lossByType)
+      .filter(([, lost]) => lost >= 0.5)
+      .sort((first, second) => second[1] - first[1]);
+    if (entries.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'battleBreakdownEmpty';
+      empty.innerText = 'None';
+      column.append(empty);
+      return column;
+    }
+
+    const rows = document.createElement('div');
+    rows.className = 'battleBreakdownRow';
+    for (const [typeId, lost] of entries) {
+      const type = typeTable[typeId];
+      const row = document.createElement('div');
+      row.className = 'battleBreakdownItem';
+      if (type?.avatar) {
+        const avatar = document.createElement('img');
+        // A portrait that has not actually shipped yet (see AVATARS in
+        // config.js) quietly goes undrawn, the same as everywhere else a
+        // company's avatar is shown -- not a broken-image icon.
+        avatar.addEventListener('error', () => avatar.remove(), { once: true });
+        avatar.src = type.avatar;
+        avatar.alt = '';
+        row.append(avatar);
+      }
+      const label = document.createElement('span');
+      label.innerText = `${type?.name ?? typeId} ×${Math.round(lost)}`;
+      row.append(label);
+      rows.append(row);
+    }
+    column.append(rows);
+    return column;
   }
 
   markStarted() {

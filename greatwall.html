@@ -172,6 +172,20 @@
 		<p id="storyText"></p>
 	</div>
 
+	<!-- The open battleground mode's own end-of-round screen: shown over the
+	     field itself rather than the main menu, so the line as it stood at
+	     the last moment is still visible behind it. -->
+	<div id="battleResult" class="modal">
+		<div class="modal-content battleResultContent">
+			<h2 id="battleResultTitle" class="panelTitle"></h2>
+			<p id="battleResultSummary" class="battleResultSummary"></p>
+			<div id="battleResultBreakdown" class="battleBreakdown"></div>
+			<div class="menuList">
+				<button id="battleResultContinue" class="menuItem menuItem-primary">Continue</button>
+			</div>
+		</div>
+	</div>
+
 	<audio id="backgroundmusic"></audio>
 
 	<script type="module" src="src/main.js"></script>

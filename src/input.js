@@ -267,6 +267,9 @@ export class Input {
     this.pendingUnit = null;
     this.hud.hideBattlePrep();
     this.resetTool();
+    // No Attack tool to pick in this mode (see handleClick) -- but a tap
+    // still commands a company from here on, so the cursor should say so.
+    this.hud.setCursor(CURSORS.attack);
   }
 
   /** Show the tier picker above the castle, so an order carries a company. */
@@ -353,6 +356,17 @@ export class Input {
     if (this.pendingUnit && this.tool === 'move') {
       this.trackPointer(event);
       this.placePendingUnit();
+      this.onChange();
+      return;
+    }
+    // Once the open battleground mode's fight has actually started there is
+    // nothing left to muster, so a tap always means select-or-send -- the
+    // same behaviour the Attack tool gives a siege, just always on here
+    // rather than something to pick. See Hud's own siegeOnlyToolIds, which
+    // is why there is no button for this in this mode to begin with.
+    if (this.game.mode === 'battle' && this.game.started) {
+      this.trackPointer(event);
+      this.handleAttackTap(this.pointerOnGround());
       this.onChange();
       return;
     }

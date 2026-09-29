@@ -253,6 +253,66 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	display: none;
 }
 
+/* Shown over the field itself, not the main menu -- see Hud#showBattleResult. */
+.battleResultContent {
+	background: var(--panel);
+	border-color: var(--bronze-deep);
+	text-align: center;
+}
+
+.battleResultSummary {
+	margin: 0 0 20px;
+	font-size: 15px;
+	line-height: 1.9;
+	color: var(--parchment-dim);
+	white-space: pre-line;
+}
+
+.battleBreakdown {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 24px;
+	justify-content: center;
+	margin-bottom: 4px;
+}
+
+.battleBreakdownColumn { flex: 1 1 200px; max-width: 260px; }
+
+.battleBreakdownColumn h3 {
+	margin: 0 0 10px;
+	font-family: var(--display);
+	font-size: 12px;
+	letter-spacing: .12em;
+	text-transform: uppercase;
+	color: var(--bronze);
+}
+
+.battleBreakdownEmpty { margin: 0; font-size: 13px; color: var(--parchment-dim); opacity: .7; }
+
+.battleBreakdownRow { display: flex; flex-direction: column; gap: 8px; }
+
+.battleBreakdownItem {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 4px 8px;
+	border-radius: 3px;
+	background: rgba(0, 0, 0, .2);
+	font-size: 13px;
+	text-align: left;
+	color: var(--parchment);
+}
+
+.battleBreakdownItem img {
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	object-fit: cover;
+	object-position: top center;
+	background: rgba(0, 0, 0, .3);
+	flex: none;
+}
+
 .is-battleMode .readout-battle { display: flex; }
 
 /* --- dispatch menu ------------------------------------------------------ */

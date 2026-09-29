@@ -215,11 +215,14 @@ export class Game {
       this.spawnBattleLine();
       // Tallied live as the fight goes, since a company's own health is
       // gone the instant it dies -- see trackBattleLosses. `loss` on each
-      // side is health actually lost weighted by how many figures muster in
-      // that company, so cutting down a company of eight reads as a bigger
-      // blow than felling a lone rider.
+      // side is in individual soldiers, not companies: the fraction of a
+      // company's health actually lost, times how many figures muster in
+      // it, so a company ground down to a sliver of health reads as most
+      // of its own troops down even while it is still technically standing.
+      // The `ByType` maps break that same figure down by which type it
+      // came from, for the end-of-round drill-down (see Hud#showBattleResult).
       this.battleStats = {
-        kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0,
+        kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0, enemyLossByType: {}, playerLossByType: {},
       };
     }
   }
@@ -664,29 +667,42 @@ export class Game {
   /**
    * Folds this frame's fighting into the open battleground mode's running
    * stats: a kill or death for every company that died since `before`, and
-   * on each side the health actually lost, weighted by how many figures
-   * muster in that company -- so a company of eight cut down counts for
-   * more than a lone rider losing the same fraction of its own health.
+   * on each side how many individual soldiers that amounts to -- the
+   * fraction of a company's own health actually lost, times how many
+   * figures muster in it (see units#unitSize), so a company ground down to
+   * a sliver of health reads as most of its own troops down even while it
+   * is technically still standing.
    */
   trackBattleLosses(before) {
     for (const raider of this.raiders) {
-      const lost = (before.get(raider) ?? raider.health) - raider.health;
-      if (lost > 0) {
-        this.battleStats.enemyLoss += lost * unitSize(raider.typeId);
-      }
+      const priorHealth = before.get(raider) ?? raider.health;
+      this.tallyBattleLoss(raider, priorHealth, 'enemyLoss', 'enemyLossByType');
       if (!raider.isAlive) {
         this.battleStats.kills += 1;
       }
     }
     for (const guard of this.guards) {
-      const lost = (before.get(guard) ?? guard.health) - guard.health;
-      if (lost > 0) {
-        this.battleStats.playerLoss += lost * unitSize(guard.typeId);
-      }
+      const priorHealth = before.get(guard) ?? guard.health;
+      this.tallyBattleLoss(guard, priorHealth, 'playerLoss', 'playerLossByType');
       if (!guard.isAlive) {
         this.battleStats.deaths += 1;
       }
     }
+  }
+
+  /** One company's share of a battle stat: individuals lost this frame, added to the running total and its own type's own line. */
+  tallyBattleLoss(company, priorHealth, totalKey, byTypeKey) {
+    // Capped at the company's own max health: a killing blow can carry a
+    // company's health well past zero, and none of that overkill is a
+    // soldier this company never actually had.
+    const lost = Math.min(priorHealth, company.type.maxHealth) - Math.max(company.health, 0);
+    if (lost <= 0) {
+      return;
+    }
+    const individuals = (lost / company.type.maxHealth) * unitSize(company.typeId);
+    this.battleStats[totalKey] += individuals;
+    const byType = this.battleStats[byTypeKey];
+    byType[company.typeId] = (byType[company.typeId] ?? 0) + individuals;
   }
 
   /**

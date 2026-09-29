@@ -97,6 +97,7 @@ class App {
     bind('fortifyTool', () => this.input.selectTool('fortify'));
     bind('upgradeTool', () => this.input.selectTool('upgrade'));
     bind('startBattleBtn', () => this.beginBattle());
+    bind('battleResultContinue', () => this.continueFromBattleResult());
     bind('attackTool', (event) => {
       // Without this, the same click bubbles to the map's own click handler,
       // which reads the tool as already 'attack' and fires an order at
@@ -245,7 +246,13 @@ class App {
   battleOver(won) {
     this.pause();
     this.needsNewGame = true;
+    this.input.resetTool();
     this.hud.showBattleResult(won, this.game.seconds, this.game.battleStats);
+  }
+
+  /** Continue past the battle result screen and back to the main menu. */
+  continueFromBattleResult() {
+    this.openMenu();
   }
 
   /** Start Battle: closes the placement phase and lets the line advance. */
@@ -262,6 +269,7 @@ class App {
     this.input.resetTool();
     this.hud.closeHelp();
     this.hud.closeMessage();
+    this.hud.closeBattleResult();
     this.hud.openMenu();
   }
 

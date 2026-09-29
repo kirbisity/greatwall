@@ -400,13 +400,13 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .modal.infomodal { background: transparent; padding: 0; pointer-events: none; }
 
 .infomodal-content {
-	pointer-events: auto;
+	pointer-events: none;
 	position: fixed;
 	top: 84px;
 	right: 22px;
 	width: min(330px, 76vw);
 	margin: 0;
-	padding: 16px 44px 16px 18px;
+	padding: 16px 18px;
 	font-size: 16px;
 	line-height: 1.45;
 	color: var(--parchment);
@@ -441,7 +441,6 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	padding: 20px 44px 20px 24px;
 	font-size: 16px;
 	line-height: 1.6;
-	font-style: italic;
 	color: var(--parchment);
 	background: var(--panel);
 	border: 1px solid var(--bronze-deep);
@@ -449,7 +448,7 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	box-shadow: var(--lift);
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 3s ease-in;
+	transition: opacity .6s ease-in;
 }
 
 .storyBanner.is-shown { opacity: 1; pointer-events: auto; }

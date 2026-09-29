@@ -21,7 +21,13 @@ class App {
     loadSettings();
     this.hud = new Hud();
     this.camera = new Camera(window.innerWidth, window.innerHeight);
-    this.game = new Game({ onMessage: (text) => this.hud.showMessage(text) });
+    this.game = new Game({
+      onMessage: (text) => this.hud.showMessage(text),
+      onEffect: (name) => {
+        this.hud.playEffect(name);
+        this.hud.closeStory();
+      },
+    });
     this.renderer = new Renderer(
       {
         terrain: document.getElementById('background'),
@@ -73,7 +79,6 @@ class App {
     bind('menuBtn', () => this.openMenu());
     bind('help', () => this.openHelp());
     bind('helpClose', () => this.closeHelp());
-    bind('infoClose', () => this.hud.closeMessage());
     bind('storyClose', () => this.hud.closeStory());
     bind('move', () => this.input.resetTool());
     bind('zoom', () => this.input.selectTool('zoom'));

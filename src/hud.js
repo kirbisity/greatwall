@@ -1,12 +1,15 @@
 import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL, SEASONS } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
+import { Sfx } from './sfx.js';
 
 const SOUND_LEVEL_STEP = 20;
 const MAX_SOUND_LEVEL = 100;
-const TOAST_DURATION_MS = 5200;
+// The hint toast carries no close button -- it is meant to be glanced at,
+// not read, so it clears itself almost immediately.
+const TOAST_DURATION_MS = 900;
 // Long enough to read the longest of the level stories at a relaxed pace,
-// on top of the 3 seconds (see greatwall.css's own .storyBanner) it takes
-// just to fade all the way in.
+// on top of the fade-in (see greatwall.css's own .storyBanner) it takes to
+// appear -- but any game action (see main.js's own onEffect) clears it early.
 const STORY_DURATION_MS = 15000;
 
 /** Which button lights up for each tool. */
@@ -82,7 +85,9 @@ export class Hud {
       element('dispatchOption2'),
     ];
 
+    this.sfx = new Sfx();
     this.soundLevel = INITIAL_SOUND_LEVEL;
+    this.sfx.setVolume(this.soundLevel / MAX_SOUND_LEVEL);
     this.shownTokens = null;
     this.shownIncome = null;
     this.shownIncomeFormula = null;
@@ -353,6 +358,12 @@ export class Hud {
   cycleSoundLevel() {
     this.soundLevel = this.soundLevel > 0 ? this.soundLevel - SOUND_LEVEL_STEP : MAX_SOUND_LEVEL;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
+    this.sfx.setVolume(this.soundLevel / MAX_SOUND_LEVEL);
     this.soundButton.innerText = this.soundLevel === 0 ? 'Sound Off' : `Sound: ${this.soundLevel}`;
+  }
+
+  /** Sound effects for game actions -- see sfx.js for how each one is built. */
+  playEffect(name) {
+    this.sfx.play(name);
   }
 }

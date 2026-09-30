@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
-import { Castle, Emperor, Raider, Wall } from '../src/entities.js';
+import {
+  Castle, Emperor, Guard, Raider, Wall,
+} from '../src/entities.js';
 import { LEVELS } from '../src/levels.js';
-import { unitSize } from '../src/units.js';
+import { compileUnit, unitSize } from '../src/units.js';
 import {
   BATTLE,
   BREACH,
@@ -11,6 +13,7 @@ import {
   CASTLE_TYPES,
   EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
+  FACTIONS,
   FEAR,
   FPS,
   GUARD_TYPES,
@@ -688,7 +691,7 @@ test('placing a company spends its cost from the budget and stands it exactly wh
   assert.equal(result.placed, true);
   assert.equal(game.guards.length, 1);
   assert.deepEqual(game.guards[0].position, point);
-  const entry = BATTLE.roster.find((one) => one.id === 'IG_LIGHT');
+  const entry = game.battleRoster.find((one) => one.id === 'IG_LIGHT');
   assert.equal(game.battleBudget, BATTLE.budget - entry.cost);
 });
 
@@ -793,7 +796,7 @@ test('the open battleground mode never touches the treasury, seasons or the raid
 
 test('the Emperor is on the open battleground roster too: free, unique, and its own model', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
-  const entry = BATTLE.roster.find((one) => one.id === 'EMPEROR');
+  const entry = game.battleRoster.find((one) => one.id === 'EMPEROR');
   assert.ok(entry, 'expected the Emperor on the battle roster');
   assert.equal(entry.cost, 0);
 
@@ -952,4 +955,83 @@ test('losses accumulate across several frames, and split cleanly between types t
   close(game.battleStats.enemyLossByType.IR1, spearmanLoss);
   close(game.battleStats.enemyLoss, swordsmanLoss + spearmanLoss);
   assert.equal(game.battleStats.kills, 0);
+});
+
+// --- factions in the open battleground mode ---------------------------------
+
+test('unless told otherwise the imperial army meets the steppe horde', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.deepEqual(game.factions, { player: 'imperial', enemy: 'steppe' });
+});
+
+test('the player is offered only the roster of the faction they chose', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'japan', enemy: 'steppe' },
+  });
+  const point = { x: 0, y: BATTLE.baselineY - 10 };
+  assert.equal(game.placeGuard('IG0', point).status, 'unknown', 'an imperial company is not on offer');
+  const placed = game.placeGuard('JG_SAMURAI', point);
+  assert.equal(placed.placed, true);
+  const cost = FACTIONS.japan.roster.find((entry) => entry.id === 'JG_SAMURAI').cost;
+  assert.equal(game.battleBudget, BATTLE.budget - cost);
+});
+
+test('the steppe horde can be fielded by the player, cavalry and all', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'steppe', enemy: 'imperial' },
+  });
+  const result = game.placeGuard('CR0', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, true);
+  assert.equal(result.guard.type.cavalry, true);
+});
+
+test('the enemy draws up its line from the faction it was given', () => {
+  for (const [enemy, allowed] of [
+    ['imperial', ['IG_LIGHT', 'IG0', 'IG_HEAVY']],
+    ['japan', ['JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI']],
+    ['steppe', ['IR0', 'IR1', 'CR0', 'CR1']],
+  ]) {
+    const game = new Game({
+      random: fixedRandom(0.5), level: BATTLE_LEVEL, factions: { player: 'imperial', enemy },
+    });
+    assert.ok(game.raiders.length > 0);
+    for (const raider of game.raiders) {
+      assert.ok(allowed.includes(raider.typeId), `${enemy} should not field ${raider.typeId}`);
+    }
+  }
+});
+
+test('both sides may choose the same faction', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'japan', enemy: 'japan' },
+  });
+  assert.equal(game.placeGuard('JG_SOHEI', { x: 0, y: BATTLE.baselineY - 10 }).placed, true);
+  assert.ok(game.raiders.every((raider) => raider.typeId.startsWith('JG_')));
+});
+
+test('an unknown faction falls back to the default for its side', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'atlantis', enemy: 'japan' },
+  });
+  assert.deepEqual(game.factions, { player: 'imperial', enemy: 'japan' });
+});
+
+test('the Emperor answers to the imperial army alone', () => {
+  for (const [id, faction] of Object.entries(FACTIONS)) {
+    const offered = faction.roster.some((entry) => entry.id === 'EMPEROR');
+    assert.equal(offered, id === 'imperial', `${id} and the Emperor`);
+  }
+});
+
+test('every faction is fully playable: known types, portraits and models, on either side', () => {
+  for (const [id, faction] of Object.entries(FACTIONS)) {
+    const types = [...faction.roster.map((entry) => entry.id), ...faction.line.infantry, ...faction.line.flank];
+    assert.ok(faction.name && faction.blurb, `${id} needs a name and a description`);
+    assert.ok(faction.line.infantry.length > 0 && faction.line.flank.length > 0, `${id} needs a full line`);
+    for (const typeId of types) {
+      assert.doesNotThrow(() => new Raider(typeId), `${typeId} as an enemy`);
+      assert.doesNotThrow(() => new Guard(typeId), `${typeId} as a player company`);
+      assert.ok(compileUnit(typeId), `${typeId} needs a model`);
+    }
+  }
 });

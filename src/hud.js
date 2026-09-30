@@ -1,5 +1,5 @@
 import {
-  AUDIO_VOLUME_STEP, BATTLE, GUARD_TYPES, INITIAL_SOUND_LEVEL, RAIDER_TYPES, SEASONS,
+  AUDIO_VOLUME_STEP, BATTLE, FACTIONS, INITIAL_SOUND_LEVEL, SEASONS, UNIT_TYPES,
 } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
 import { Sfx } from './sfx.js';
@@ -98,6 +98,7 @@ export class Hud {
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
     this.levelList = element('levelList');
+    this.battleSetup = element('battleSetup');
     this.settings = element('settingMenu');
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
@@ -304,6 +305,60 @@ export class Hud {
     });
   }
 
+  /**
+   * The open battleground mode's welcome text and army choice, shown in the
+   * main menu under the level picker: the level's story, then a row of
+   * factions and a description for each side. `onPick(side, factionId)` is
+   * told about every change; this only redraws what it is handed back.
+   */
+  showBattleSetup(level, factions, onPick) {
+    this.battleSetup.replaceChildren();
+    const story = document.createElement('p');
+    story.className = 'battleStory';
+    story.innerText = level.story ?? '';
+    this.battleSetup.append(story);
+
+    const sides = document.createElement('div');
+    sides.className = 'factionSides';
+    for (const [side, heading] of [['player', 'Your army'], ['enemy', 'The enemy']]) {
+      sides.append(this.buildFactionSide(side, heading, factions[side], onPick));
+    }
+    this.battleSetup.append(sides);
+    this.battleSetup.style.display = 'block';
+  }
+
+  hideBattleSetup() {
+    this.battleSetup.style.display = 'none';
+  }
+
+  buildFactionSide(side, heading, chosen, onPick) {
+    const column = document.createElement('div');
+    column.className = `factionSide factionSide-${side}`;
+    const title = document.createElement('h3');
+    title.className = 'factionHeading';
+    title.innerText = heading;
+    const chips = document.createElement('div');
+    chips.className = 'factionChips';
+    for (const [id, faction] of Object.entries(FACTIONS)) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = id === chosen ? 'factionChip is-chosen' : 'factionChip';
+      chip.dataset.faction = id;
+      chip.innerText = faction.name;
+      chip.addEventListener('click', () => onPick(side, id));
+      chips.append(chip);
+    }
+    const faction = FACTIONS[chosen];
+    const blurb = document.createElement('p');
+    blurb.className = 'factionBlurb';
+    blurb.innerText = faction.blurb;
+    const units = document.createElement('p');
+    units.className = 'factionUnits';
+    units.innerText = faction.roster.map((entry) => UNIT_TYPES[entry.id].name).join(' \u00b7 ');
+    column.append(title, chips, blurb, units);
+    return column;
+  }
+
   openSettings() {
     this.settings.style.height = '100%';
   }
@@ -501,8 +556,8 @@ export class Hud {
    */
   showBattlePrep(game, onPick) {
     this.battleDock.replaceChildren();
-    for (const entry of BATTLE.roster) {
-      const type = GUARD_TYPES[entry.id];
+    for (const entry of game.battleRoster) {
+      const type = UNIT_TYPES[entry.id];
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'toolButton battleUnitButton';
@@ -562,8 +617,8 @@ export class Hud {
   /** Each side's losses, broken down by type -- a small avatar per type, and how many of it fell. */
   renderBattleBreakdown(stats) {
     this.battleResultBreakdown.replaceChildren(
-      this.buildBattleBreakdownColumn('Enemy losses', stats.enemyLossByType, RAIDER_TYPES),
-      this.buildBattleBreakdownColumn('Your losses', stats.playerLossByType, GUARD_TYPES),
+      this.buildBattleBreakdownColumn('Enemy losses', stats.enemyLossByType, UNIT_TYPES),
+      this.buildBattleBreakdownColumn('Your losses', stats.playerLossByType, UNIT_TYPES),
     );
   }
 
@@ -613,6 +668,11 @@ export class Hud {
 
   markStarted() {
     this.startButton.innerText = 'Continue';
+  }
+
+  /** The menu's main button, for a level picked but not yet begun. */
+  markUnstarted() {
+    this.startButton.innerText = 'Start';
   }
 
   // --- audio --------------------------------------------------------------

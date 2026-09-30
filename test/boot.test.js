@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { LEVELS } from '../src/levels.js';
 
 /**
  * Boots main.js against a stub DOM whose element ids come from the real page,
@@ -33,6 +34,7 @@ function stubElement(id) {
   return {
     id,
     style: {},
+    dataset: {},
     className: '',
     classList: {
       toggle: (name, on) => { if (on) { classes.add(name); } else { classes.delete(name); } },
@@ -97,8 +99,11 @@ function installDom() {
   return { elements, documentListeners, windowListeners, frames };
 }
 
+let bootedDom = null;
+
 test('the app boots, plays frames and reacts to input without touching a missing element', async () => {
   const dom = installDom();
+  bootedDom = dom;
   const { app } = await import('../src/main.js');
 
   // Pointer events, so a finger reaches the same handlers a mouse does.
@@ -167,4 +172,35 @@ test('the app boots, plays frames and reacts to input without touching a missing
 
   dom.documentListeners.get('keydown')({ key: 'Escape' });
   assert.equal(app.running, false, 'escape pauses and opens the menu');
+});
+
+test('the open field is set up in the menu -- story and both armies -- and begins without a popup', async () => {
+  const dom = bootedDom;
+  const { app } = await import('../src/main.js');
+  const openFieldIndex = LEVELS.findIndex((level) => level.mode === 'battle');
+
+  const levelButtons = dom.elements.get('levelList').children;
+  levelButtons[openFieldIndex].listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetup').style.display, 'block', 'the setup panel shows for the open field');
+  assert.equal(app.game.mode, 'siege', 'picking the level waits for Start rather than beginning it');
+  const [story, sides] = dom.elements.get('battleSetup').children;
+  assert.equal(story.innerText, LEVELS[openFieldIndex].story, 'the story is told in the menu');
+  const [player] = sides.children;
+  const chipFor = (column, id) => column.children[1].children.find((chip) => chip.dataset.faction === id);
+  assert.match(player.children[2].innerText, /Drilled/, 'the chosen faction is described');
+
+  chipFor(player, 'japan').listeners.get('click')();
+  chipFor(dom.elements.get('battleSetup').children[1].children[1], 'imperial').listeners.get('click')();
+  assert.deepEqual(app.chosenFactions(), { player: 'japan', enemy: 'imperial' });
+
+  dom.elements.get('startBtn2').listeners.get('click')();
+  assert.equal(app.game.mode, 'battle');
+  assert.deepEqual(app.game.factions, { player: 'japan', enemy: 'imperial' });
+  assert.ok(app.game.raiders.every((raider) => raider.typeId.startsWith('IG_') || raider.typeId === 'IG0'));
+  assert.equal(dom.elements.get('storyBanner').classList.contains('is-shown'), false, 'no story popup over the field');
+  assert.notEqual(dom.elements.get('helpInfo').style.display, 'block', 'no wall-building help over the field');
+
+  dom.elements.get('menuBtn').listeners.get('click')();
+  levelButtons[0].listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetup').style.display, 'none', 'a siege level has no armies to pick');
 });

@@ -25,8 +25,10 @@ import {
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  DEFAULT_FACTIONS,
   EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
+  FACTIONS,
   FEAR,
   FPS,
   TERRAIN,
@@ -120,6 +122,7 @@ export class Game {
     random = Math.random,
     seed = 1,
     level = LEVELS[0],
+    factions = DEFAULT_FACTIONS,
   } = {}) {
     this.onMessage = onMessage;
     this.onEffect = onEffect;
@@ -130,7 +133,7 @@ export class Game {
     this.seed = seed;
     this.wallHintShown = false;
     this.upgradeHintShown = false;
-    this.loadLevel(level);
+    this.loadLevel(level, factions);
   }
 
   /**
@@ -138,8 +141,14 @@ export class Game {
    * a level's ground is fixed for its whole run, but the Game itself carries
    * on -- input and the renderer hold onto this object.
    */
-  loadLevel(level) {
+  loadLevel(level, factions = DEFAULT_FACTIONS) {
     this.level = level;
+    // Who fields what in the open battleground mode -- see FACTIONS. An id
+    // this game has never heard of falls back to the default for that side.
+    this.factions = {
+      player: FACTIONS[factions.player] ? factions.player : DEFAULT_FACTIONS.player,
+      enemy: FACTIONS[factions.enemy] ? factions.enemy : DEFAULT_FACTIONS.enemy,
+    };
     // The one flag that turns the whole game from a siege into the open
     // battleground mode -- see restart, and every `this.mode === 'battle'`
     // branch below it.
@@ -615,17 +624,19 @@ export class Game {
 
   /**
    * Draw up the enemy line for the open battleground mode: infantry across
-   * the centre, up front, cavalry held behind on both flanks. Randomised a
+   * the centre, up front, and the faction's flank companies (cavalry, where
+   * it has any) held behind on both wings. Randomised a
    * little every game -- how many of each, and a jitter on every position --
    * so the line is recognisable but never quite the same shape twice.
    */
   spawnBattleLine() {
+    const { infantry: infantryTypes, flank: flankTypes } = FACTIONS[this.factions.enemy].line;
     const [infantryMin, infantryMax] = BATTLE.infantryCountRange;
     const infantryCount = infantryMin + Math.floor(this.random() * (infantryMax - infantryMin + 1));
     for (let index = 0; index < infantryCount; index += 1) {
       const spread = (index - (infantryCount - 1) / 2) * BATTLE.infantrySpacing;
       this.spawnBattleCompany(
-        BATTLE.infantryTypes[Math.floor(this.random() * BATTLE.infantryTypes.length)],
+        infantryTypes[Math.floor(this.random() * infantryTypes.length)],
         spread,
         BATTLE.enemyBaselineY,
       );
@@ -636,7 +647,7 @@ export class Game {
       for (let index = 0; index < cavalryPerSide; index += 1) {
         const flankX = side * (BATTLE.cavalryFlankOffset + index * BATTLE.cavalrySpacing);
         this.spawnBattleCompany(
-          BATTLE.cavalryTypes[Math.floor(this.random() * BATTLE.cavalryTypes.length)],
+          flankTypes[Math.floor(this.random() * flankTypes.length)],
           flankX,
           BATTLE.enemyBaselineY + BATTLE.cavalryDepthOffset,
         );
@@ -930,9 +941,14 @@ export class Game {
     return { sent: true, guard: emperor };
   }
 
+  /** What the player's chosen faction offers for points, in this mode. */
+  get battleRoster() {
+    return FACTIONS[this.factions.player].roster;
+  }
+
   /** This mode's roster entry for a type id, or null if it is not on offer. */
   battleRosterEntry(typeId) {
-    return BATTLE.roster.find((entry) => entry.id === typeId) ?? null;
+    return this.battleRoster.find((entry) => entry.id === typeId) ?? null;
   }
 
   /** Whether a point falls inside the player's own deployment band, south of the start line. */

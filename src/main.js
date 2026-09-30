@@ -4,6 +4,7 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { LEVELS } from './levels.js';
+import { DEFAULT_FACTIONS, FACTIONS } from './config.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 import { clamp, distance } from './geometry.js';
 
@@ -121,13 +122,50 @@ class App {
     });
   }
 
-  /** Picking a level starts it: there is nothing to unlock, so nothing to wait for. */
+  /**
+   * Picking a siege level starts it: there is nothing to unlock, so nothing
+   * to wait for. The open battleground waits for Start instead, since it
+   * has armies to choose first -- see showBattleSetup.
+   */
   showLevels() {
     this.hud.showLevels(LEVELS, this.chosenLevel, (index) => {
       this.chosenLevel = index;
       this.showLevels();
+      if (LEVELS[index].mode === 'battle') {
+        this.needsNewGame = true;
+        this.hud.markUnstarted();
+        return;
+      }
       this.restart();
     });
+    this.showBattleSetup();
+  }
+
+  /** The open battleground's welcome text and army pickers, under the level list. */
+  showBattleSetup() {
+    const level = LEVELS[this.chosenLevel];
+    if (level.mode !== 'battle') {
+      this.hud.hideBattleSetup();
+      return;
+    }
+    this.hud.showBattleSetup(level, this.chosenFactions(), (side, factionId) => {
+      settings.factions = { ...this.chosenFactions(), [side]: factionId };
+      saveSettings();
+      // The enemy line is drawn up when a game begins, so a new choice
+      // means a new game -- but only once Start is pressed.
+      this.needsNewGame = true;
+      this.hud.markUnstarted();
+      this.showBattleSetup();
+    });
+  }
+
+  /** The saved army choices, with anything unrecognised put back to the default. */
+  chosenFactions() {
+    const saved = settings.factions ?? {};
+    return {
+      player: FACTIONS[saved.player] ? saved.player : DEFAULT_FACTIONS.player,
+      enemy: FACTIONS[saved.enemy] ? saved.enemy : DEFAULT_FACTIONS.enemy,
+    };
   }
 
   /** 1 at the camera's own focus point, fading to 0 by EFFECT_HEARING_RADIUS out. */
@@ -185,6 +223,13 @@ class App {
     if (this.needsNewGame) {
       this.newGame();
       this.hud.markStarted();
+      if (this.game.mode === 'battle') {
+        // The welcome text and the wall-building help both live elsewhere for
+        // this mode (the menu's own setup panel), so straight on to placement.
+        this.hud.closeMenu();
+        this.enterField();
+        return;
+      }
       this.openHelp();
       this.hud.closeMenu();
       return;
@@ -215,11 +260,15 @@ class App {
   }
 
   newGame() {
-    this.game.loadLevel(LEVELS[this.chosenLevel]);
+    this.game.loadLevel(LEVELS[this.chosenLevel], this.chosenFactions());
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
     this.hud.playLevelMusic(this.game.level.music);
-    this.hud.showStory(this.game.level.story);
+    // The open battleground's story is told in the menu instead -- see
+    // showBattleSetup -- so it never pops up over the field itself.
+    if (this.game.mode !== 'battle') {
+      this.hud.showStory(this.game.level.story);
+    }
     this.hud.showThreats(this.game.threatBearings);
     this.draw();
   }

@@ -1,6 +1,6 @@
 import { distance } from './geometry.js';
 import {
-  CASTLE_REBUILD, CASTLE_TYPES, GUARD_TYPES, HOUSES, MOMENTUM, RAIDER_TYPES, WALL, WALL_TIERS,
+  CASTLE_REBUILD, CASTLE_TYPES, HOUSES, MOMENTUM, UNIT_TYPES, WALL, WALL_TIERS,
 } from './config.js';
 
 export class Wall {
@@ -391,7 +391,7 @@ class Company {
 
 export class Raider extends Company {
   constructor(typeId, position = { x: 0, y: 0 }) {
-    const type = RAIDER_TYPES[typeId];
+    const type = UNIT_TYPES[typeId];
     if (!type) {
       throw new Error(`Unknown raider type: ${typeId}`);
     }
@@ -444,7 +444,7 @@ export class House {
 
 export class Guard extends Company {
   constructor(typeId, position = { x: 0, y: 0 }) {
-    const type = GUARD_TYPES[typeId];
+    const type = UNIT_TYPES[typeId];
     if (!type) {
       throw new Error(`Unknown guard type: ${typeId}`);
     }

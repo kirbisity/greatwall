@@ -491,18 +491,6 @@ export const EMPEROR_TIER_MULTIPLIER = { CC0: 1, CC1: 1.3, CC2: 1.6 };
  */
 export const BATTLE = {
   budget: 32,
-  // Reuses the imperial guard tiers rather than inventing a parallel unit
-  // list -- same stats, same avatar, same 3D model, just priced in points
-  // instead of coin, since there is no income to spend coin out of.
-  // The Emperor is on offer here too, free and unique the same way it is in
-  // a siege (see Game#placeGuard) -- no castle tier to scale it off in this
-  // mode, so it fields at its plain base stats.
-  roster: [
-    { id: 'IG_LIGHT', cost: 3 },
-    { id: 'IG0', cost: 5 },
-    { id: 'IG_HEAVY', cost: 8 },
-    { id: 'EMPEROR', cost: 0 },
-  ],
   // North is +y (see Game#spawnPoint's own bearing convention); the player
   // deploys south of the start line, the enemy is drawn up north of it.
   fieldHalfWidth: 220,
@@ -513,11 +501,11 @@ export const BATTLE = {
   // into the player's own ground a raider's marching order aims, so it
   // always has ground to charge across rather than stopping at y 0.
   fieldHalfDepth: 260,
+  // What a line is made of -- which infantry across the centre, which
+  // companies on the flanks -- is the faction's own: see FACTIONS.
   infantryCountRange: [6, 9],
-  infantryTypes: ['IR0', 'IR0', 'IR1'],
   infantrySpacing: 24,
   cavalryPerSideRange: [1, 3],
-  cavalryTypes: ['CR0', 'CR1'],
   cavalrySpacing: 22,
   cavalryFlankOffset: 90,
   cavalryDepthOffset: 40,
@@ -525,6 +513,58 @@ export const BATTLE = {
   // in a perfect row -- see Game#spawnBattleLine.
   formationJitter: 18,
 };
+
+/** Every unit type by id, whichever side of a field it is fielded for. */
+export const UNIT_TYPES = { ...RAIDER_TYPES, ...GUARD_TYPES };
+
+/**
+ * The armies the open battleground mode lets either side field. A faction is
+ * a roster and a battle line, not a side: the player and the enemy each pick
+ * one (see Game#loadLevel), and both may pick the same.
+ *
+ * `roster` is what the player can buy with BATTLE.budget, priced in points.
+ * `line` is what the enemy draws up when it fields the faction: `infantry`
+ * is drawn from across the centre, `flank` from the companies held back
+ * on either wing. The Emperor is imperial alone, free and unique (see
+ * Game#placeGuard).
+ */
+export const FACTIONS = {
+  imperial: {
+    name: 'Imperial Army',
+    blurb: 'Drilled and well armoured, with no horse at all. A set wall of heavy guards turns any charge -- but it must stand still to do it. The Emperor may take the field with them.',
+    roster: [
+      { id: 'IG_LIGHT', cost: 3 },
+      { id: 'IG0', cost: 5 },
+      { id: 'IG_HEAVY', cost: 8 },
+      { id: 'EMPEROR', cost: 0 },
+    ],
+    line: { infantry: ['IG_LIGHT', 'IG_LIGHT', 'IG0'], flank: ['IG0', 'IG_HEAVY'] },
+  },
+  steppe: {
+    name: 'Steppe Horde',
+    blurb: 'Fast riders and cheap foot. Saber cavalry run down anything that flees; heavy lancers ride through light infantry, but break on a braced spear wall.',
+    roster: [
+      { id: 'IR0', cost: 3 },
+      { id: 'IR1', cost: 5 },
+      { id: 'CR0', cost: 6 },
+      { id: 'CR1', cost: 9 },
+    ],
+    line: { infantry: ['IR0', 'IR0', 'IR1'], flank: ['CR0', 'CR1'] },
+  },
+  japan: {
+    name: 'Island Clans',
+    blurb: 'Ashigaru and sohei carry spears and turn a charge when they stand set; samurai retainers hit hardest of any foot. The heavier ranks are slow to break.',
+    roster: [
+      { id: 'JG_ASHIGARU', cost: 3 },
+      { id: 'JG_SAMURAI', cost: 5 },
+      { id: 'JG_SOHEI', cost: 8 },
+    ],
+    line: { infantry: ['JG_ASHIGARU', 'JG_ASHIGARU', 'JG_SAMURAI'], flank: ['JG_SAMURAI', 'JG_SOHEI'] },
+  },
+};
+
+/** Who fights whom until the player says otherwise. */
+export const DEFAULT_FACTIONS = { player: 'imperial', enemy: 'steppe' };
 
 /**
  * Earthworks: the low ramps the Build tool throws up in the open battleground

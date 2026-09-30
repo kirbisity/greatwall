@@ -515,6 +515,60 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .levelBlurb { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; opacity: .8; }
 
+/* --- open field setup: the story and each side's army ------------------- */
+
+.battleSetup {
+	display: none;
+	width: min(680px, 90vw);
+	margin: 22px auto 0;
+	padding: 18px 20px 20px;
+	border: 1px solid var(--bronze-dark);
+	border-radius: 4px;
+	background: rgba(16, 13, 9, .55);
+	text-align: left;
+}
+
+.battleStory { margin: 0 0 16px; font-size: 15px; line-height: 1.6; font-style: italic; color: var(--parchment-dim); text-align: center; }
+
+.factionSides { display: flex; flex-wrap: wrap; gap: 20px; }
+
+.factionSide { flex: 1 1 260px; min-width: 0; }
+
+.factionHeading {
+	margin: 0 0 8px;
+	font-family: var(--display);
+	font-size: 14px;
+	font-weight: 600;
+	letter-spacing: .14em;
+	text-transform: uppercase;
+}
+
+.factionSide-player .factionHeading { color: #6fa3dd; }
+.factionSide-enemy .factionHeading { color: #d9705c; }
+
+.factionChips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.factionChip {
+	padding: 7px 11px;
+	font-family: var(--display);
+	font-size: 12px;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+	color: var(--parchment-dim);
+	background: none;
+	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+.factionChip:hover { color: var(--parchment); border-color: var(--bronze); }
+
+.factionChip.is-chosen { color: var(--ink); border-color: var(--bronze); background: linear-gradient(180deg, #e2c866, var(--bronze-deep)); }
+
+.factionBlurb { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--parchment); }
+
+.factionUnits { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--parchment-dim); opacity: .85; }
+
 /* --- modals ------------------------------------------------------------ */
 
 .modal {

@@ -254,7 +254,7 @@ export class Input {
   beginPlacement() {
     this.resetTool();
     this.hud.showBattlePrep(this.game, (typeId) => this.selectPendingUnit(typeId));
-    this.hud.showActionHint('Tap a company below, then tap the field to place it');
+    this.hud.showActionHint('Pick a company, then tap the field');
   }
 
   selectPendingUnit(typeId) {

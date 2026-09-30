@@ -1071,3 +1071,33 @@ test('every battle map leaves the two baselines clear enough to fight over', () 
     assert.ok(game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }), `${id} lets a company be placed`);
   }
 });
+
+test('a battle map pins its own weather for the whole fight', () => {
+  const frost = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'frost' });
+  frost.seconds = 500;
+  assert.equal(frost.seasonPhase, BATTLE_MAPS.frost.weather.season + 0.5, 'the season never turns mid-fight');
+  assert.equal(frost.mist, BATTLE_MAPS.frost.weather.mist);
+  assert.equal(frost.rain, 0);
+
+  const moor = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'moor' });
+  assert.ok(moor.rain > 0, 'the moor is rained on');
+
+  const siege = new Game({ random: fixedRandom() });
+  assert.equal(siege.battleWeather, null, 'a siege keeps the calendar');
+  assert.equal(siege.rain, 0);
+});
+
+test('every battle map names its weather, and the mountain maps keep a clearing for the armies', () => {
+  for (const [id, map] of Object.entries(BATTLE_MAPS)) {
+    assert.ok(map.weather?.label, `${id} has a weather label`);
+    assert.ok(map.weather.icon, `${id} has a weather icon`);
+    assert.ok(map.tag, `${id} has a short tag`);
+    if (map.land.mountainChance > 0.5) {
+      assert.ok(map.land.mountainClearing, `${id} leaves the middle open`);
+    }
+  }
+  const pass = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'pass' });
+  const clearing = pass.terrain.land.mountainClearing;
+  const nearby = pass.terrain.mountainsWithin(-clearing.halfWidth, clearing.minY, clearing.halfWidth, clearing.maxY);
+  assert.equal(nearby.filter((mountain) => Math.abs(mountain.x) < clearing.halfWidth && mountain.y > clearing.minY && mountain.y < clearing.maxY).length, 0);
+});

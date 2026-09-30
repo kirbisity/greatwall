@@ -389,7 +389,30 @@ export class Game {
    * first frame keeps exactly the same shape it always had, just shifted.
    */
   get seasonPhase() {
+    const pinned = this.battleWeather?.season;
+    if (pinned !== undefined) {
+      return pinned + 0.5;
+    }
     return this.seconds / SEASON_LENGTH_SECONDS + 0.5;
+  }
+
+  /** The chosen battle map's fixed weather, or null in a siege. */
+  get battleWeather() {
+    return this.mode === 'battle' ? BATTLE_MAPS[this.battleMap]?.weather ?? null : null;
+  }
+
+  /** Standing haze over the field: the map's own in a battle, else the level's. */
+  get mist() {
+    return this.battleWeather ? this.battleWeather.mist ?? null : this.level.mist;
+  }
+
+  get climate() {
+    return this.battleWeather ? this.battleWeather.climate ?? null : this.level.climate;
+  }
+
+  /** 0 to 1: how hard it rains. */
+  get rain() {
+    return this.battleWeather?.rain ?? 0;
   }
 
   wallCost(length) {

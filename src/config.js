@@ -540,6 +540,8 @@ export const UNIT_TYPES = { ...RAIDER_TYPES, ...GUARD_TYPES };
 export const FACTIONS = {
   imperial: {
     name: 'Imperial Army',
+    tag: 'Drilled heavy foot',
+    avatar: AVATARS.imperialRegular,
     blurb: 'Drilled and well armoured, with no horse at all. A set wall of heavy guards turns any charge -- but it must stand still to do it. The Emperor may take the field with them.',
     roster: [
       { id: 'IG_LIGHT', cost: 3 },
@@ -551,6 +553,8 @@ export const FACTIONS = {
   },
   steppe: {
     name: 'Steppe Horde',
+    tag: 'Fast riders',
+    avatar: AVATARS.steppeRegular,
     blurb: 'Fast riders and cheap foot. Saber cavalry run down anything that flees; heavy lancers ride through light infantry, but break on a braced spear wall.',
     roster: [
       { id: 'IR0', cost: 3 },
@@ -562,6 +566,8 @@ export const FACTIONS = {
   },
   japan: {
     name: 'Island Clans',
+    tag: 'Spears and samurai',
+    avatar: AVATARS.japanRegular,
     blurb: 'Ashigaru and sohei carry spears and turn a charge when they stand set; samurai retainers hit hardest of any foot. The heavier ranks are slow to break.',
     roster: [
       { id: 'JG_ASHIGARU', cost: 3 },
@@ -572,41 +578,178 @@ export const FACTIONS = {
   },
 };
 
-/** Who fights whom until the player says otherwise. */
 /**
  * The grounds the open battleground can be fought over: each patches the
- * level's own flat field (see levels.js) with hills or woodland. Hills tire
- * whoever climbs them and trees slow whoever pushes through, so the ground
+ * level's own flat field (see levels.js) with hills, woodland or mountains,
+ * and sets the weather over it. Hills tire whoever climbs them, trees slow
+ * whoever pushes through, and a peak has to be marched round, so the ground
  * decides who gains from a charge. `land` is read by Terrain like a level's.
+ *
+ * `weather` is fixed for the whole fight: `season` pins the sky and the
+ * ground's colour to one of SEASONS (by index) so a map looks the same from
+ * first frame to last, `mist` and `climate` are a level's own (see
+ * levels.js), and `rain` (0 to 1) is how hard it falls. `label` and `icon`
+ * are only for the setup page. `tag` is that page's short caption.
  */
+const MOUNTAIN_FLANKS = { halfWidth: 150, minY: -170, maxY: 280 };
+
 export const BATTLE_MAPS = {
   plains: {
     name: 'Open Plains',
+    tag: 'Flat and bare',
     blurb: 'Flat, bare ground. Nothing but the enemy between the lines.',
     land: {},
+    weather: { label: 'Clear', icon: 'sun', season: 0 },
   },
   downs: {
     name: 'Rolling Downs',
+    tag: 'Long slopes',
     blurb: 'Long slopes. Whoever holds the rise is fresh; whoever climbs it is not.',
     land: {
       hillScale: 380, hillHeight: 36, detailHeight: 2, slopeRelief: 3,
     },
+    weather: { label: 'Autumn', icon: 'leaf', season: 2 },
   },
   greenwood: {
     name: 'The Greenwood',
+    tag: 'Thick woods',
     blurb: 'Thick stands of trees that drag at any company pushing through them.',
     land: { forestThreshold: 0.42, forestScale: 200 },
+    weather: {
+      label: 'Morning mist',
+      icon: 'fog',
+      season: 0,
+      mist: { color: '186, 206, 190', blend: 0.55, density: 1.7, start: 0.45 },
+    },
   },
   highlands: {
     name: 'Windswept Highlands',
+    tag: 'Steep, windy hills',
     blurb: 'Steep, broken hills with woods in the hollows. Hard going for everyone.',
     land: {
       hillScale: 320, hillHeight: 52, detailHeight: 3, slopeRelief: 4, forestThreshold: 0.68,
+    },
+    weather: {
+      label: 'High wind',
+      icon: 'wind',
+      season: 0,
+      mist: { color: '208, 216, 224', blend: 0.3, density: 1.1, start: 0.8, windSpeed: 4.5 },
+    },
+  },
+  pass: {
+    name: 'Mountain Pass',
+    tag: 'Peaks on both flanks',
+    blurb: 'A road between two ranges. Bare rock, sudden slopes, and nowhere to go but forward.',
+    land: {
+      hillScale: 360,
+      hillHeight: 18,
+      slopeRelief: 3,
+      mountainChance: 0.9,
+      mountainSpacing: 250,
+      mountainMinRadius: 55,
+      mountainMaxRadius: 105,
+      mountainMinHeight: 60,
+      mountainMaxHeight: 105,
+      mountainClearing: MOUNTAIN_FLANKS,
+      rockThreshold: 0.6,
+      dirtThreshold: 0.5,
+      forestThreshold: 0.75,
+    },
+    weather: {
+      label: 'Overcast',
+      icon: 'cloud',
+      season: 0,
+      mist: { color: '168, 178, 192', blend: 0.6, density: 1.9, start: 0.4, windSpeed: 2 },
+    },
+  },
+  frost: {
+    name: 'Frozen Peaks',
+    tag: 'Snowbound mountains',
+    blurb: 'Snow on every ridge and more falling. The cold does not care who holds the high ground.',
+    land: {
+      hillScale: 340,
+      hillHeight: 22,
+      slopeRelief: 3.2,
+      mountainChance: 0.9,
+      mountainSpacing: 250,
+      mountainMinRadius: 60,
+      mountainMaxRadius: 110,
+      mountainMinHeight: 70,
+      mountainMaxHeight: 115,
+      mountainClearing: MOUNTAIN_FLANKS,
+      snowPatchThreshold: -0.5,
+      rockThreshold: 0.66,
+      forestThreshold: 0.72,
+    },
+    weather: {
+      label: 'Snowfall',
+      icon: 'snow',
+      season: 3,
+      climate: { offset: -8 },
+      mist: { color: '226, 232, 240', blend: 0.5, density: 1.4, start: 0.5, windSpeed: 2.5 },
+    },
+  },
+  badlands: {
+    name: 'Scorched Badlands',
+    tag: 'Dry mesas and heat',
+    blurb: 'Cracked clay and broad mesas under a white sun. No shade, no water, no mercy.',
+    land: {
+      grassColor: '#c9b078',
+      mossColor: '#b8975c',
+      dirtColor: '#a07a48',
+      rockColor: '#9a8570',
+      hillScale: 420,
+      hillHeight: 20,
+      detailHeight: 1.5,
+      slopeRelief: 2.4,
+      mountainChance: 0.8,
+      mountainSpacing: 260,
+      mountainMinRadius: 60,
+      mountainMaxRadius: 120,
+      mountainMinHeight: 35,
+      mountainMaxHeight: 70,
+      mountainShapeScale: 1.3,
+      mountainSkirt: 50,
+      mountainClearing: MOUNTAIN_FLANKS,
+      ridge: { angle: 35, scale: 90, alongScale: 420, height: 9 },
+      forestThreshold: 1,
+      turnsInAutumn: false,
+    },
+    weather: {
+      label: 'Scorching heat',
+      icon: 'heat',
+      season: 1,
+      climate: { offset: 20 },
+      mist: { color: '232, 204, 140', blend: 0.6, density: 1.8, start: 0.35, windSpeed: 2.5 },
+    },
+  },
+  moor: {
+    name: 'Stormy Moor',
+    tag: 'Rain and mud',
+    blurb: 'Rough heath under a low, dark sky. The rain will not let up.',
+    land: {
+      grassColor: '#66714a',
+      mossColor: '#4b5a42',
+      dirtColor: '#6b5b45',
+      rockColor: '#7d7a72',
+      hillScale: 300,
+      hillHeight: 26,
+      detailHeight: 3,
+      slopeRelief: 3.4,
+      forestThreshold: 0.86,
+    },
+    weather: {
+      label: 'Heavy rain',
+      icon: 'rain',
+      season: 0,
+      rain: 1,
+      mist: { color: '118, 132, 146', blend: 0.65, density: 2.1, start: 0.35, windSpeed: 3.5 },
     },
   },
 };
 export const DEFAULT_BATTLE_MAP = 'plains';
 
+/** Who fights whom until the player says otherwise. */
 export const DEFAULT_FACTIONS = { player: 'imperial', enemy: 'steppe' };
 
 /**
@@ -759,6 +902,10 @@ export const TERRAIN = {
   // How far out from a settlement mountains are worth asking about at all --
   // comfortably past where a raider could ever spawn.
   mountainFieldRadius: 500,
+  // A rectangle -- `{ halfWidth, minY, maxY }` -- no mountain may reach into.
+  // Null leaves them wherever the lattice puts them; the open battleground's
+  // mountain maps use it to keep the ground between the lines passable.
+  mountainClearing: null,
 
   // Mesh drawn for the ground: a fixed-size tile in world units, a quarter
   // the size of the old zoom-compensated cell. It is not resized for the
@@ -917,6 +1064,20 @@ export const SNOW_MAX_SIZE = 0.4;
 export const SNOW_MIN_FALL = 3;
 export const SNOW_MAX_FALL = 7;
 export const SNOW_DRIFT = 4;
+
+/**
+ * Falling rain, laid out exactly as snow is (see Atmosphere#placeRain) but
+ * fast and streaked: each drop is a short vertical line in the world, so a
+ * closer one draws longer on screen. Only a battle map with `rain` set in
+ * BATTLE_MAPS ever shows it.
+ */
+export const RAIN_COUNT = 170;
+export const RAIN_FIELD = 90;
+export const RAIN_ALTITUDE_TOP = 24;
+export const RAIN_ALTITUDE_BOTTOM = 0;
+export const RAIN_FALL = 42;
+export const RAIN_STREAK = 2.4;
+export const RAIN_SLANT = 0.35;
 
 export const HEALTH_COLORS = [
   { above: 0.66, color: '#7fb069' },

@@ -5,6 +5,13 @@ import {
   CLOUD_LAYERS,
   CLOUD_SPRITE,
   FOG,
+  RAIN_ALTITUDE_BOTTOM,
+  RAIN_ALTITUDE_TOP,
+  RAIN_COUNT,
+  RAIN_FALL,
+  RAIN_FIELD,
+  RAIN_SLANT,
+  RAIN_STREAK,
   SEASONS,
   SNOW_ALTITUDE_BOTTOM,
   SNOW_ALTITUDE_TOP,
@@ -74,6 +81,13 @@ export class Atmosphere {
       driftPhase: random() * Math.PI * 2,
       driftRate: 0.3 + random() * 0.4,
       alpha: 0.4 + random() * 0.5,
+    }));
+    this.raindrops = Array.from({ length: RAIN_COUNT }, () => ({
+      x: random(),
+      y: random(),
+      z: random(),
+      speed: 0.8 + random() * 0.4,
+      alpha: 0.25 + random() * 0.35,
     }));
   }
 
@@ -284,6 +298,59 @@ export class Atmosphere {
       context.beginPath();
       context.arc(flake.x, flake.y, flake.size, 0, Math.PI * 2);
       context.fill();
+    }
+    context.globalAlpha = 1;
+  }
+
+  /**
+   * Each drop as a short line on screen, from its top to its foot. Tiled and
+   * wrapped around the camera's focus like the snow, and slanted a little
+   * the way wind-driven rain is. `intensity` (0 to 1) is how many of the
+   * drops are falling at all.
+   */
+  placeRain(intensity = 0) {
+    if (intensity <= 0) {
+      return [];
+    }
+    const view = this.camera.view;
+    const { width, height } = this.camera;
+    const focus = this.camera.focus;
+    const half = RAIN_FIELD / 2;
+    const fallRange = RAIN_ALTITUDE_TOP - RAIN_ALTITUDE_BOTTOM;
+    const shown = Math.ceil(this.raindrops.length * Math.min(1, intensity));
+    const placed = [];
+    for (let index = 0; index < shown; index += 1) {
+      const drop = this.raindrops[index];
+      const fallen = wrap(drop.z * fallRange + this.drift * RAIN_FALL * drop.speed, fallRange);
+      const topZ = RAIN_ALTITUDE_TOP - fallen;
+      const worldX = focus.x + wrap(drop.x * RAIN_FIELD - focus.x + half, RAIN_FIELD) - half;
+      const worldY = focus.y + wrap(drop.y * RAIN_FIELD - focus.y + half, RAIN_FIELD) - half;
+      const top = projectPoint(view, worldX, worldY, topZ);
+      const foot = projectPoint(view, worldX + RAIN_SLANT * RAIN_STREAK, worldY, topZ - RAIN_STREAK);
+      if (!top || !foot) {
+        continue;
+      }
+      if (top.x < 0 || top.x > width || top.y < 0 || top.y > height) {
+        continue;
+      }
+      placed.push({ from: top, to: foot, alpha: drop.alpha });
+    }
+    return placed;
+  }
+
+  drawRain(context, intensity = 0) {
+    const drops = this.placeRain(intensity);
+    if (drops.length === 0) {
+      return;
+    }
+    context.strokeStyle = '#cfdae6';
+    context.lineWidth = 1;
+    for (const drop of drops) {
+      context.globalAlpha = drop.alpha;
+      context.beginPath();
+      context.moveTo(drop.from.x, drop.from.y);
+      context.lineTo(drop.to.x, drop.to.y);
+      context.stroke();
     }
     context.globalAlpha = 1;
   }

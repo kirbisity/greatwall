@@ -664,9 +664,10 @@ export class Renderer {
     // with the same haze that dims everything else out there.
     if (settings.atmosphere) {
       this.drawShimmer(view, game);
-      this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawSnow(this.overlay, game.seasonPhase, game.level.climate);
+      this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.mist);
+      this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.mist);
+      this.atmosphere.drawSnow(this.overlay, game.seasonPhase, game.climate);
+      this.atmosphere.drawRain(this.overlay, game.rain);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
@@ -713,7 +714,7 @@ export class Renderer {
     // A winter's own settling, quantised the same coarse way autumn's turn
     // already is -- see Season#snowCoverAt for how a level's own climate
     // can hold this at zero the whole year round.
-    const snowCover = snowCoverAt(game.seasonPhase, game.level.climate);
+    const snowCover = snowCoverAt(game.seasonPhase, game.climate);
     const settled = Math.round(snowCover * GOLD_STEPS) / GOLD_STEPS;
     // Reshaped ground is part of what the mesh draws, so a platform climbing
     // has to count as a change the same way the camera moving does. The
@@ -721,7 +722,7 @@ export class Renderer {
     // whole new Terrain, and without the id here that swap can go
     // unnoticed if the camera happens to end up back where it started,
     // leaving the previous level's ground painted under the new one.
-    const key = `${game.level.id}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${settled}|${game.terrainRevision}`;
+    const key = `${game.level.id}|${game.battleMap}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${settled}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }

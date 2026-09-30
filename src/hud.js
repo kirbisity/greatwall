@@ -1,7 +1,8 @@
 import {
-  AUDIO_VOLUME_STEP, BATTLE, BATTLE_MAPS, FACTIONS, INITIAL_SOUND_LEVEL, SEASONS, UNIT_TYPES,
+  AUDIO_VOLUME_STEP, AVATARS, BATTLE, BATTLE_MAPS, FACTIONS, INITIAL_SOUND_LEVEL, SEASONS, UNIT_TYPES,
 } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
+import { iconSource } from './menuIcons.js';
 import { Sfx } from './sfx.js';
 
 const SOUND_LEVEL_STEP = 20;
@@ -138,6 +139,9 @@ export class Hud {
     // commanding a company is just how tapping the field always behaves
     // there -- see Input#handleClick. No button to pick that behaviour, so
     // none needed to show it is on.
+    // The top bar's undo and help buttons have nothing to offer a battle: the
+    // field is set out with a tap, and its one hint sits over the dock.
+    this.siegeOnlyViewToolIds = ['undo', 'help'];
     this.siegeOnlyToolIds = ['upgradeTool', 'fortifyTool', 'repairTool', 'destroyTool', 'attackTool'];
     this.battleResultModal = element('battleResult');
     this.battleResultTitle = element('battleResultTitle');
@@ -232,7 +236,7 @@ export class Hud {
   applyMode(game) {
     const isBattle = game.mode === 'battle';
     document.body?.classList?.toggle('is-battleMode', isBattle);
-    for (const id of this.siegeOnlyToolIds) {
+    for (const id of [...this.siegeOnlyToolIds, ...this.siegeOnlyViewToolIds]) {
       const button = document.getElementById(id);
       if (button) {
         button.style.display = isBattle ? 'none' : '';
@@ -319,9 +323,17 @@ export class Hud {
     this.battleSetupStory.innerText = level.story ?? '';
     this.battleSetupBody.replaceChildren();
     this.battleSetupBody.append(
-      this.buildSetupSection('setupSection-map', 'The ground', this.buildMapCards(level, choice.map, onPick)),
-      this.buildSetupSection('setupSection-player', 'Your army', this.buildFactionCards('player', choice.factions.player, onPick)),
-      this.buildSetupSection('setupSection-enemy', 'The enemy', this.buildFactionCards('enemy', choice.factions.enemy, onPick)),
+      this.buildSetupSection(
+        'setupSection-map', 'The ground', this.buildMapCards(level, choice.map, onPick), this.mapCaption(choice.map),
+      ),
+      this.buildSetupSection(
+        'setupSection-player', 'Your army', this.buildFactionCards('player', choice.factions.player, onPick),
+        this.buildRosterStrip(choice.factions.player),
+      ),
+      this.buildSetupSection(
+        'setupSection-enemy', 'The enemy', this.buildFactionCards('enemy', choice.factions.enemy, onPick),
+        this.buildRosterStrip(choice.factions.enemy),
+      ),
     );
   }
 
@@ -338,72 +350,128 @@ export class Hud {
     this.battleSetupButton.style.display = visible ? 'block' : 'none';
   }
 
-  buildSetupSection(className, heading, cards) {
+  buildSetupSection(className, heading, cards, ...extras) {
     const section = document.createElement('section');
     section.className = `setupSection ${className}`;
     const title = document.createElement('h3');
     title.className = 'setupHeading';
     title.innerText = heading;
-    section.append(title, cards);
+    section.append(title, cards, ...extras);
     return section;
   }
 
-  buildSetupCard(chosen, kind, id) {
+  buildSetupCard(chosen, kind, id, tooltip = '') {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = chosen ? 'setupCard is-chosen' : 'setupCard';
     card.dataset.kind = kind;
     card.dataset.id = id;
+    card.title = tooltip;
     return card;
   }
 
-  buildCardText(name, blurb, detail = null) {
-    const text = document.createElement('span');
-    text.className = 'setupCardText';
-    const title = document.createElement('span');
-    title.className = 'setupCardName';
-    title.innerText = name;
-    const body = document.createElement('span');
-    body.className = 'setupCardBlurb';
-    body.innerText = blurb;
-    text.append(title, body);
-    if (detail) {
-      const units = document.createElement('span');
-      units.className = 'setupCardUnits';
-      units.innerText = detail;
-      text.append(units);
-    }
-    return text;
+  buildCaption(text) {
+    const caption = document.createElement('p');
+    caption.className = 'setupCaption';
+    caption.innerText = text;
+    return caption;
   }
 
   buildMapCards(level, chosen, onPick) {
     const row = document.createElement('div');
-    row.className = 'setupCards';
+    row.className = 'setupCards setupCards-maps';
     for (const [id, map] of Object.entries(BATTLE_MAPS)) {
-      const card = this.buildSetupCard(id === chosen, 'map', id);
+      const card = this.buildSetupCard(id === chosen, 'map', id, map.blurb);
+      card.className += ' mapCard';
+      const frame = document.createElement('span');
+      frame.className = 'mapFrame';
       const thumb = document.createElement('canvas');
       thumb.className = 'levelThumb setupThumb';
-      paintLevelThumbnail(thumb, { land: { ...level.land, ...map.land } }, { marked: false, relief: true });
-      card.append(thumb, this.buildCardText(map.name, map.blurb));
+      paintLevelThumbnail(
+        thumb,
+        { land: { ...level.land, ...map.land }, weather: map.weather },
+        { marked: false, relief: true, detail: 3 },
+      );
+      frame.append(thumb);
+      const icon = iconSource(map.weather?.icon);
+      if (icon) {
+        const badge = document.createElement('img');
+        badge.className = 'weatherBadge';
+        badge.src = icon;
+        badge.alt = map.weather.label;
+        frame.append(badge);
+      }
+      const name = document.createElement('span');
+      name.className = 'setupCardName';
+      name.innerText = map.name;
+      card.append(frame, name);
       card.addEventListener('click', () => onPick('map', id));
       row.append(card);
     }
     return row;
   }
 
+  mapCaption(chosen) {
+    const map = BATTLE_MAPS[chosen];
+    return this.buildCaption(map ? `${map.tag} \u00b7 ${map.weather?.label ?? ''}` : '');
+  }
+
   buildFactionCards(side, chosen, onPick) {
     const row = document.createElement('div');
-    row.className = 'setupCards';
+    row.className = 'setupCards setupCards-armies';
     for (const [id, faction] of Object.entries(FACTIONS)) {
-      const card = this.buildSetupCard(id === chosen, side, id);
-      const roster = faction.roster
-        .map((entry) => `${UNIT_TYPES[entry.id].name} ${entry.cost}`)
-        .join(' \u00b7 ');
-      card.append(this.buildCardText(faction.name, faction.blurb, roster));
+      const card = this.buildSetupCard(id === chosen, side, id, faction.blurb);
+      card.className += ' armyCard';
+      const portrait = document.createElement('img');
+      portrait.className = 'armyPortrait';
+      portrait.src = faction.avatar;
+      portrait.alt = '';
+      const name = document.createElement('span');
+      name.className = 'setupCardName';
+      name.innerText = faction.name;
+      const tag = document.createElement('span');
+      tag.className = 'setupCardTag';
+      tag.innerText = faction.tag;
+      const text = document.createElement('span');
+      text.className = 'setupCardText';
+      text.append(name, tag);
+      card.append(portrait, text);
       card.addEventListener('click', () => onPick(side, id));
       row.append(card);
     }
     return row;
+  }
+
+  /** The chosen army's companies, one portrait apiece with its point cost. */
+  buildRosterStrip(factionId) {
+    const strip = document.createElement('div');
+    strip.className = 'rosterStrip';
+    for (const entry of FACTIONS[factionId]?.roster ?? []) {
+      const type = UNIT_TYPES[entry.id];
+      const chip = document.createElement('span');
+      chip.className = 'rosterChip';
+      chip.title = `${type?.name ?? entry.id} - ${entry.cost} points`;
+      chip.append(this.buildUnitPortrait(entry.id, 'rosterPortrait'));
+      const cost = document.createElement('span');
+      cost.className = 'rosterCost';
+      cost.innerText = entry.cost === 0 ? 'free' : `${entry.cost}`;
+      chip.append(cost);
+      strip.append(chip);
+    }
+    return strip;
+  }
+
+  /** A unit's portrait -- the imperial heavy's stands in where a type has none yet. */
+  buildUnitPortrait(typeId, className) {
+    const portrait = document.createElement('img');
+    portrait.className = className;
+    portrait.alt = '';
+    portrait.src = UNIT_TYPES[typeId]?.avatar ?? AVATARS.imperialHeavy;
+    portrait.onerror = () => {
+      portrait.onerror = null;
+      portrait.src = AVATARS.imperialHeavy;
+    };
+    return portrait;
   }
 
   openSettings() {
@@ -611,10 +679,11 @@ export class Hud {
       button.type = 'button';
       button.className = 'toolButton battleUnitButton';
       button.dataset.unit = entry.id;
-      const name = document.createElement('span');
-      name.className = 'toolName';
-      name.innerText = `${type?.name ?? entry.id}\n${entry.cost}pt`;
-      button.append(name);
+      button.title = `${type?.name ?? entry.id} - ${entry.cost} points`;
+      const cost = document.createElement('span');
+      cost.className = 'battleCost';
+      cost.innerText = entry.cost === 0 ? 'free' : `${entry.cost}`;
+      button.append(this.buildUnitPortrait(entry.id, 'battlePortrait'), cost);
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         onPick(entry.id);

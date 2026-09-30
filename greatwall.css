@@ -210,7 +210,7 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	flex-wrap: wrap;
 	gap: 8px;
 	justify-content: center;
-	padding: 10px;
+	padding: 8px;
 	max-width: min(560px, 92vw);
 	background: var(--panel);
 	border: var(--frame);
@@ -218,7 +218,32 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	box-shadow: var(--lift);
 }
 
-.battleUnitButton { width: 90px; }
+/* One portrait and its point cost per company; the full name is the tooltip. */
+.battleUnitButton {
+	width: 66px;
+	gap: 4px;
+	padding: 6px 4px 6px;
+}
+
+.battleUnitButton .battlePortrait { height: 44px; width: auto; max-width: 100%; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+.battleUnitButton:hover .battlePortrait,
+.battleUnitButton.is-active .battlePortrait { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+
+.battleCost {
+	min-width: 34px;
+	padding: 0 7px;
+	font-family: var(--display);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .06em;
+	line-height: 16px;
+	text-align: center;
+	color: var(--bronze);
+	background: rgba(14, 11, 8, .8);
+	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 8px;
+}
+
 
 .battleStartBtn {
 	display: none;
@@ -519,68 +544,175 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 #battleSetupPage { z-index: 12; }
 
-.battleSetupContent { padding-top: 6vh; }
+.battleSetupContent { padding-top: 4.5vh; }
+
+.battleSetupContent .panelTitle { margin-bottom: 8px; }
 
 .battleStory {
-	width: min(680px, 90vw);
-	margin: 14px auto 22px;
-	font-size: 15px;
-	line-height: 1.6;
+	width: min(640px, 90vw);
+	margin: 0 auto 18px;
+	font-size: 14px;
+	line-height: 1.5;
 	font-style: italic;
 	color: var(--parchment-dim);
+	opacity: .85;
 }
 
-.battleSetupBody { width: min(1080px, 94vw); margin: 0 auto; text-align: left; }
+/* The ground across the top; the two armies side by side beneath it. */
+.battleSetupBody {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 14px;
+	width: min(1080px, 94vw);
+	margin: 0 auto;
+	text-align: left;
+}
 
-.setupSection { margin-bottom: 22px; }
+.setupSection {
+	padding: 12px 14px 14px;
+	background: linear-gradient(180deg, rgba(38, 32, 22, .62), rgba(14, 11, 8, .72));
+	border: 1px solid rgba(138, 109, 36, .32);
+	border-radius: 6px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(236, 224, 196, .05);
+}
+
+.setupSection-map { grid-column: 1 / -1; }
 
 .setupHeading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
 	margin: 0 0 10px;
 	font-family: var(--display);
-	font-size: 14px;
+	font-size: 12px;
 	font-weight: 600;
-	letter-spacing: .14em;
+	letter-spacing: .2em;
 	text-transform: uppercase;
 	color: var(--bronze);
 }
 
-.setupSection-player .setupHeading { color: #6fa3dd; }
-.setupSection-enemy .setupHeading { color: #d9705c; }
+/* A hairline after the heading, fading out towards the panel's edge. */
+.setupHeading::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: linear-gradient(90deg, rgba(138, 109, 36, .5), transparent);
+}
 
-.setupCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.setupSection-player { --side: #6fa3dd; }
+.setupSection-enemy { --side: #d9705c; }
+.setupSection-player .setupHeading,
+.setupSection-enemy .setupHeading { color: var(--side); }
+
+.setupCards { display: grid; gap: 10px; }
+.setupCards-maps { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
+.setupCards-armies { grid-template-columns: repeat(3, 1fr); }
 
 .setupCard {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
-	padding: 12px;
+	align-items: center;
+	gap: 6px;
+	padding: 7px;
 	font: inherit;
-	text-align: left;
+	text-align: center;
 	color: var(--parchment-dim);
 	background: rgba(16, 13, 9, .55);
-	border: 1px solid rgba(138, 109, 36, .45);
-	border-radius: 4px;
+	border: 1px solid rgba(138, 109, 36, .3);
+	border-radius: 5px;
 	cursor: pointer;
+	transition: var(--ease);
 }
 
-.setupCard:hover { color: var(--parchment); border-color: var(--bronze); }
+.setupCard:hover {
+	color: var(--parchment);
+	border-color: var(--bronze-deep);
+	transform: translateY(-2px);
+}
 
 .setupCard.is-chosen {
 	color: var(--parchment);
 	border-color: var(--bronze);
-	background: linear-gradient(180deg, rgba(120, 92, 30, .45), rgba(16, 13, 9, .6));
-	box-shadow: 0 0 0 1px var(--bronze) inset;
+	background: linear-gradient(180deg, rgba(120, 92, 30, .5), rgba(30, 24, 12, .7));
+	box-shadow: var(--glow), 0 0 0 1px var(--bronze) inset;
 }
 
-.setupThumb { width: 100%; height: 84px; }
+.setupCard.is-chosen .setupCardName { color: var(--bronze); }
 
-.setupCardText { display: flex; flex-direction: column; gap: 5px; }
+.setupCardName {
+	font-family: var(--display);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .08em;
+	line-height: 1.25;
+	text-transform: uppercase;
+}
 
-.setupCardName { font-family: var(--display); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+.setupCardTag { font-size: 12px; font-style: italic; opacity: .75; }
 
-.setupCardBlurb { font-size: 13px; line-height: 1.5; }
+/* A map: its picture, with the weather it is fought in pinned to a corner. */
+.mapFrame { position: relative; display: block; width: 100%; line-height: 0; }
+.setupThumb { width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 3px; }
 
-.setupCardUnits { font-size: 11px; line-height: 1.5; opacity: .8; }
+.weatherBadge {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 22px;
+	height: 22px;
+	padding: 3px;
+	background: rgba(14, 11, 8, .78);
+	border: 1px solid rgba(201, 162, 39, .55);
+	border-radius: 50%;
+}
+
+.setupCaption {
+	margin: 10px 0 0;
+	font-size: 14px;
+	font-style: italic;
+	text-align: center;
+	color: var(--parchment-dim);
+}
+
+/* An army: a portrait over its name. */
+.armyCard { padding-top: 8px; }
+.armyPortrait { height: 52px; width: auto; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .6)); }
+.armyCard .setupCardText { display: flex; flex-direction: column; gap: 2px; }
+.setupSection-player .setupCard.is-chosen,
+.setupSection-enemy .setupCard.is-chosen { border-color: var(--side); box-shadow: 0 0 12px rgba(0, 0, 0, .5), 0 0 0 1px var(--side) inset; }
+
+/* What the chosen army fields, at a glance. */
+.rosterStrip { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
+
+.rosterChip {
+	position: relative;
+	display: grid;
+	place-items: end center;
+	width: 52px;
+	height: 44px;
+	background: rgba(16, 13, 9, .6);
+	border: 1px solid rgba(138, 109, 36, .28);
+	border-radius: 4px;
+}
+
+.rosterPortrait { position: absolute; inset: 2px 2px 12px; width: calc(100% - 4px); height: calc(100% - 14px); object-fit: contain; }
+
+.rosterCost {
+	position: relative;
+	padding: 0 6px;
+	margin-bottom: 2px;
+	font-family: var(--display);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: .04em;
+	line-height: 14px;
+	color: var(--bronze);
+	background: rgba(14, 11, 8, .85);
+	border-radius: 7px;
+}
+
+.battleSetupContent .menuList { flex-direction: row; justify-content: center; margin-top: 20px; }
+.battleSetupContent .menuItem { width: min(220px, 42vw); padding: 11px 14px; font-size: 15px; }
 
 /* --- modals ------------------------------------------------------------ */
 
@@ -898,8 +1030,14 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 }
 
 
-@media (max-width: 600px) {
-	.setupCards { grid-template-columns: 1fr; }
-	.setupCard { flex-direction: row; align-items: flex-start; }
-	.setupThumb { flex: none; width: 96px; height: 72px; }
+@media (max-width: 760px) {
+	.battleSetupBody { grid-template-columns: 1fr; }
+	.setupCards-maps { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (max-width: 480px) {
+	.setupCards-maps { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+	.setupCards-maps .setupCardName { font-size: 9px; letter-spacing: 0; }
+	.armyPortrait { height: 42px; }
+	.setupCardTag { display: none; }
 }

@@ -5,7 +5,7 @@ import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { LEVELS } from './levels.js';
 import {
-  BATTLE_MAPS, DEFAULT_BATTLE_MAP, DEFAULT_FACTIONS, FACTIONS,
+  BATTLE, BATTLE_MAPS, DEFAULT_BATTLE_MAP, DEFAULT_FACTIONS, FACTIONS,
 } from './config.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 import { clamp, distance } from './geometry.js';
@@ -162,6 +162,8 @@ class App {
     this.hud.showBattleSetup(LEVELS[this.chosenLevel], this.chosenSetup(), (kind, id) => {
       if (kind === 'map') {
         settings.battleMap = id;
+      } else if (kind === 'budget') {
+        settings.battleBudget = Number(id);
       } else {
         settings.factions = { ...this.chosenFactions(), [kind]: id };
       }
@@ -170,17 +172,27 @@ class App {
       // new choice means a new game -- but only once Start is pressed.
       this.needsNewGame = true;
       this.hud.markUnstarted();
-      this.showBattleSetup();
+      // The slider is still under the finger; redrawing it would drop the grip.
+      if (kind !== 'budget') {
+        this.showBattleSetup();
+      }
     });
   }
 
   chosenSetup() {
-    return { factions: this.chosenFactions(), map: this.chosenMap() };
+    return { factions: this.chosenFactions(), map: this.chosenMap(), budget: this.chosenBudget() };
   }
 
   /** The saved map, with anything unrecognised put back to the default. */
   chosenMap() {
     return BATTLE_MAPS[settings.battleMap] ? settings.battleMap : DEFAULT_BATTLE_MAP;
+  }
+
+  /** The saved points budget, kept inside the slider's own range. */
+  chosenBudget() {
+    const { min, max } = BATTLE.budgetRange;
+    const saved = Number(settings.battleBudget);
+    return Number.isFinite(saved) ? clamp(saved, min, max) : BATTLE.budget;
   }
 
   /** The saved army choices, with anything unrecognised put back to the default. */
@@ -291,7 +303,7 @@ class App {
   }
 
   newGame() {
-    this.game.loadLevel(LEVELS[this.chosenLevel], this.chosenFactions(), this.chosenMap());
+    this.game.loadLevel(LEVELS[this.chosenLevel], this.chosenFactions(), this.chosenMap(), this.chosenBudget());
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
     this.hud.playLevelMusic(this.game.level.music);

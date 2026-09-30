@@ -3,6 +3,7 @@ import {
 } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
 import { iconSource } from './menuIcons.js';
+import { unitSize } from './units.js';
 import { Sfx } from './sfx.js';
 
 const SOUND_LEVEL_STEP = 20;
@@ -73,9 +74,10 @@ export function formatBattleStats(stats) {
   const kd = stats.playerLoss === 0
     ? (stats.enemyLoss > 0 ? '∞' : '0.00')
     : (stats.enemyLoss / stats.playerLoss).toFixed(2);
+  const outOf = (fielded) => (fielded > 0 ? ` of ${fielded}` : '');
   return `Enemy companies destroyed ${stats.kills} · Your companies lost ${stats.deaths}\n`
-    + `Enemy soldiers lost: ${Math.round(stats.enemyLoss)}\n`
-    + `Your soldiers lost: ${Math.round(stats.playerLoss)}\n`
+    + `Enemy soldiers lost: ${Math.round(stats.enemyLoss)}${outOf(stats.enemyFielded)}\n`
+    + `Your soldiers lost: ${Math.round(stats.playerLoss)}${outOf(stats.playerFielded)}\n`
     + `K/D ${kd}`;
 }
 
@@ -326,6 +328,7 @@ export class Hud {
       this.buildSetupSection(
         'setupSection-map', 'The ground', this.buildMapCards(level, choice.map, onPick), this.mapCaption(choice.map),
       ),
+      this.buildSetupSection('setupSection-budget', 'Army size', this.buildBudgetSlider(choice.budget, onPick)),
       this.buildSetupSection(
         'setupSection-player', 'Your army', this.buildFactionCards('player', choice.factions.player, onPick),
         this.buildRosterStrip(choice.factions.player),
@@ -368,6 +371,30 @@ export class Hud {
     card.dataset.id = id;
     card.title = tooltip;
     return card;
+  }
+
+  /** Both sides field this many points -- the enemy line is drawn up to match. */
+  buildBudgetSlider(value, onPick) {
+    const { min, max, step } = BATTLE.budgetRange;
+    const row = document.createElement('div');
+    row.className = 'budgetRow';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.className = 'budgetSlider';
+    slider.min = min;
+    slider.max = max;
+    slider.step = step;
+    slider.value = value;
+    slider.setAttribute?.('aria-label', 'Points each side fields');
+    const readout = document.createElement('span');
+    readout.className = 'budgetValue';
+    readout.innerText = `${value} points a side`;
+    slider.addEventListener('input', () => {
+      readout.innerText = `${slider.value} points a side`;
+      onPick('budget', slider.value);
+    });
+    row.append(slider, readout);
+    return row;
   }
 
   buildCaption(text) {
@@ -442,6 +469,14 @@ export class Hud {
     return row;
   }
 
+  /** How many soldiers muster in one company of this type. */
+  buildSizeBadge(typeId) {
+    const badge = document.createElement('span');
+    badge.className = 'unitSizeBadge';
+    badge.innerText = `${unitSize(typeId)}`;
+    return badge;
+  }
+
   /** The chosen army's companies, one portrait apiece with its point cost. */
   buildRosterStrip(factionId) {
     const strip = document.createElement('div');
@@ -450,8 +485,8 @@ export class Hud {
       const type = UNIT_TYPES[entry.id];
       const chip = document.createElement('span');
       chip.className = 'rosterChip';
-      chip.title = `${type?.name ?? entry.id} - ${entry.cost} points`;
-      chip.append(this.buildUnitPortrait(entry.id, 'rosterPortrait'));
+      chip.title = `${type?.name ?? entry.id} - ${entry.cost} points, ${unitSize(entry.id)} soldiers`;
+      chip.append(this.buildUnitPortrait(entry.id, 'rosterPortrait'), this.buildSizeBadge(entry.id));
       const cost = document.createElement('span');
       cost.className = 'rosterCost';
       cost.innerText = entry.cost === 0 ? 'free' : `${entry.cost}`;
@@ -679,11 +714,11 @@ export class Hud {
       button.type = 'button';
       button.className = 'toolButton battleUnitButton';
       button.dataset.unit = entry.id;
-      button.title = `${type?.name ?? entry.id} - ${entry.cost} points`;
+      button.title = `${type?.name ?? entry.id} - ${entry.cost} points, ${unitSize(entry.id)} soldiers`;
       const cost = document.createElement('span');
       cost.className = 'battleCost';
       cost.innerText = entry.cost === 0 ? 'free' : `${entry.cost}`;
-      button.append(this.buildUnitPortrait(entry.id, 'battlePortrait'), cost);
+      button.append(this.buildUnitPortrait(entry.id, 'battlePortrait'), this.buildSizeBadge(entry.id), cost);
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         onPick(entry.id);
@@ -707,7 +742,7 @@ export class Hud {
   }
 
   updateBattleBudget(game) {
-    this.battleBudgetValue.innerText = `${Math.max(0, Math.trunc(game.battleBudget))} / ${BATTLE.budget}`;
+    this.battleBudgetValue.innerText = `${Math.max(0, Math.trunc(game.battleBudget))} / ${game.battleBudgetLimit}`;
   }
 
   /**

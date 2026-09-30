@@ -191,6 +191,12 @@ test('the open field has its own setup page -- story, map and both armies -- and
   assert.equal(dom.elements.get('battleSetupStory').innerText, LEVELS[openFieldIndex].story, 'the story is told on the page');
   assert.equal(cardsFor('setupSection-map').length, Object.keys(BATTLE_MAPS).length, 'a card for every map');
 
+  const slider = dom.elements.get('battleSetupBody').children
+    .find((section) => section.className.includes('setupSection-budget')).children[1].children[0];
+  slider.value = '48';
+  slider.listeners.get('input')();
+  assert.equal(app.chosenBudget(), 48, 'the slider sets the points each side fields');
+
   cardFor('setupSection-map', 'greenwood').listeners.get('click')();
   cardFor('setupSection-player', 'japan').listeners.get('click')();
   cardFor('setupSection-enemy', 'imperial').listeners.get('click')();
@@ -208,6 +214,7 @@ test('the open field has its own setup page -- story, map and both armies -- and
   assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
   assert.equal(app.game.mode, 'battle');
   assert.equal(app.game.battleMap, 'greenwood');
+  assert.equal(app.game.battleBudget, 48, 'the player gets the chosen budget');
   assert.deepEqual(app.game.factions, { player: 'japan', enemy: 'imperial' });
   assert.ok(app.game.raiders.every((raider) => raider.typeId.startsWith('IG_') || raider.typeId === 'IG0'));
   assert.equal(dom.elements.get('storyBanner').classList.contains('is-shown'), false, 'no story popup over the field');

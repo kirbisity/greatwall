@@ -2,6 +2,7 @@ import {
   Castle, Emperor, Guard, House, Raider, Wall,
 } from './entities.js';
 import {
+  clamp,
   closestPointOnSquare,
   distance,
   distanceSquared,
@@ -134,6 +135,7 @@ export class Game {
     level = LEVELS[0],
     factions = DEFAULT_FACTIONS,
     battleMap = DEFAULT_BATTLE_MAP,
+    budget = BATTLE.budget,
   } = {}) {
     this.onMessage = onMessage;
     this.onEffect = onEffect;
@@ -144,7 +146,7 @@ export class Game {
     this.seed = seed;
     this.wallHintShown = false;
     this.upgradeHintShown = false;
-    this.loadLevel(level, factions, battleMap);
+    this.loadLevel(level, factions, battleMap, budget);
   }
 
   /**
@@ -152,8 +154,9 @@ export class Game {
    * a level's ground is fixed for its whole run, but the Game itself carries
    * on -- input and the renderer hold onto this object.
    */
-  loadLevel(level, factions = DEFAULT_FACTIONS, battleMap = DEFAULT_BATTLE_MAP) {
+  loadLevel(level, factions = DEFAULT_FACTIONS, battleMap = DEFAULT_BATTLE_MAP, budget = BATTLE.budget) {
     this.level = level;
+    this.chosenBudget = budget;
     // Which ground the open battleground is fought over -- see BATTLE_MAPS.
     this.battleMap = BATTLE_MAPS[battleMap] ? battleMap : DEFAULT_BATTLE_MAP;
     // Who fields what in the open battleground mode -- see FACTIONS. An id
@@ -233,7 +236,10 @@ export class Game {
     // moment Start Battle is pressed: the field is drawn up before then,
     // but nothing moves and nothing more may be placed after.
     if (this.mode === 'battle') {
-      this.battleBudget = BATTLE.budget;
+      // Both sides field this many points: the player spends it placing
+      // companies, the enemy line is drawn up to use as much of it as it can.
+      this.battleBudgetLimit = clamp(this.chosenBudget, BATTLE.budgetRange.min, BATTLE.budgetRange.max);
+      this.battleBudget = this.battleBudgetLimit;
       this.placementLog = [];
       this.started = false;
       this.spawnBattleLine();
@@ -247,6 +253,7 @@ export class Game {
       // came from, for the end-of-round drill-down (see Hud#showBattleResult).
       this.battleStats = {
         kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0, enemyLossByType: {}, playerLossByType: {},
+        enemyFielded: 0, playerFielded: 0,
       };
     }
   }
@@ -317,6 +324,7 @@ export class Game {
   climbPace(company) {
     const speed = Math.hypot(company.velocity.x, company.velocity.y);
     if (speed === 0) {
+      company.descent = 1;
       return 1;
     }
     const step = TERRAIN.climbSample;
@@ -325,8 +333,11 @@ export class Game {
     const aheadY = y + (company.velocity.y / speed) * step;
     const climb = (this.terrain.heightAt(aheadX, aheadY) - this.terrain.heightAt(x, y)) / step;
     if (climb <= 0) {
-      return 1;
+      const descent = this.mode === 'battle' ? Math.min(TERRAIN.maxDescentPace, 1 - climb * TERRAIN.descentDrag) : 1;
+      company.descent = descent;
+      return descent;
     }
+    company.descent = 1;
     return Math.max(TERRAIN.minClimbPace, 1 / (1 + climb * TERRAIN.climbDrag));
   }
 
@@ -662,36 +673,67 @@ export class Game {
   }
 
   /**
-   * Draw up the enemy line for the open battleground mode: infantry across
-   * the centre, up front, and the faction's flank companies (cavalry, where
-   * it has any) held behind on both wings. Randomised a
-   * little every game -- how many of each, and a jitter on every position --
-   * so the line is recognisable but never quite the same shape twice.
+   * Which companies the enemy fields for this battle's budget: picked at
+   * random from the faction's own infantry and flank pools, a little over a
+   * third of the points going on the flanks, until nothing in either pool
+   * is cheap enough for what is left -- so the line uses as much of the
+   * budget as it possibly can, and never more.
    */
-  spawnBattleLine() {
-    const { infantry: infantryTypes, flank: flankTypes } = FACTIONS[this.factions.enemy].line;
-    const [infantryMin, infantryMax] = BATTLE.infantryCountRange;
-    const infantryCount = infantryMin + Math.floor(this.random() * (infantryMax - infantryMin + 1));
-    for (let index = 0; index < infantryCount; index += 1) {
-      const spread = (index - (infantryCount - 1) / 2) * BATTLE.infantrySpacing;
-      this.spawnBattleCompany(
-        infantryTypes[Math.floor(this.random() * infantryTypes.length)],
-        spread,
-        BATTLE.enemyBaselineY,
-      );
-    }
-    const [cavalryMin, cavalryMax] = BATTLE.cavalryPerSideRange;
-    const cavalryPerSide = cavalryMin + Math.floor(this.random() * (cavalryMax - cavalryMin + 1));
-    for (const side of [-1, 1]) {
-      for (let index = 0; index < cavalryPerSide; index += 1) {
-        const flankX = side * (BATTLE.cavalryFlankOffset + index * BATTLE.cavalrySpacing);
-        this.spawnBattleCompany(
-          flankTypes[Math.floor(this.random() * flankTypes.length)],
-          flankX,
-          BATTLE.enemyBaselineY + BATTLE.cavalryDepthOffset,
-        );
+  enemyLineup() {
+    const { line, roster } = FACTIONS[this.factions.enemy];
+    const costOf = (typeId) => roster.find((entry) => entry.id === typeId).cost;
+    const lineup = { infantry: [], flank: [] };
+    let remaining = this.battleBudgetLimit;
+    let spent = 0;
+    let flankSpent = 0;
+    for (;;) {
+      const affordable = (pool) => pool.filter((typeId) => costOf(typeId) <= remaining);
+      const infantryChoices = affordable(line.infantry);
+      const flankChoices = affordable(line.flank);
+      if (infantryChoices.length === 0 && flankChoices.length === 0) {
+        return lineup;
+      }
+      const wantsFlank = spent > 0 && flankSpent / spent < BATTLE.flankShare;
+      const useFlank = flankChoices.length > 0 && (wantsFlank || infantryChoices.length === 0);
+      const group = useFlank ? 'flank' : 'infantry';
+      const choices = useFlank ? flankChoices : infantryChoices;
+      const typeId = choices[Math.floor(this.random() * choices.length)];
+      lineup[group].push(typeId);
+      remaining -= costOf(typeId);
+      spent += costOf(typeId);
+      if (useFlank) {
+        flankSpent += costOf(typeId);
       }
     }
+  }
+
+  /**
+   * Draw up the enemy line for the open battleground mode: infantry across
+   * the centre, up front, and the faction's flank companies (cavalry, where
+   * it has any) held behind on both wings -- as many of each as the budget
+   * buys (see enemyLineup), in extra ranks once a row is full. A jitter on
+   * every position keeps the line recognisable but never quite the same
+   * shape twice.
+   */
+  spawnBattleLine() {
+    const { infantry, flank } = this.enemyLineup();
+    infantry.forEach((typeId, index) => {
+      const rank = Math.floor(index / BATTLE.infantryPerRank);
+      const inRank = Math.min(BATTLE.infantryPerRank, infantry.length - rank * BATTLE.infantryPerRank);
+      const spread = (index % BATTLE.infantryPerRank - (inRank - 1) / 2) * BATTLE.infantrySpacing;
+      this.spawnBattleCompany(typeId, spread, BATTLE.enemyBaselineY + rank * BATTLE.rankDepth);
+    });
+    flank.forEach((typeId, index) => {
+      const side = index % 2 === 0 ? -1 : 1;
+      const slot = Math.floor(index / 2);
+      const column = slot % BATTLE.flankPerRank;
+      const rank = Math.floor(slot / BATTLE.flankPerRank);
+      this.spawnBattleCompany(
+        typeId,
+        side * (BATTLE.cavalryFlankOffset + column * BATTLE.cavalrySpacing),
+        BATTLE.enemyBaselineY + BATTLE.cavalryDepthOffset + rank * BATTLE.rankDepth,
+      );
+    });
   }
 
   /** One company of the enemy line, jittered off its formation slot and aimed south. */
@@ -1083,6 +1125,8 @@ export class Game {
       return false;
     }
     this.started = true;
+    this.battleStats.playerFielded = this.guards.reduce((total, guard) => total + unitSize(guard.typeId), 0);
+    this.battleStats.enemyFielded = this.raiders.reduce((total, raider) => total + unitSize(raider.typeId), 0);
     return true;
   }
 
@@ -1128,8 +1172,11 @@ export class Game {
       guard.recalled = false;
       guard.selected = false;
       guard.holding = false;
+      // A fresh order overrides a stagger too: the company shakes off
+      // whatever a charge did to it and moves.
+      guard.recoverySeconds = 0;
       // A fresh order takes the company's whole attention until it gets
-      // there -- see guardDestination.
+      // there, and then it stands hold -- see guardDestination.
       guard.arrived = false;
     });
   }
@@ -1243,6 +1290,14 @@ export class Game {
     return closest;
   }
 
+  /** A company that reaches its ordered ground stands hold there until commanded again. */
+  settleOnArrival(guard) {
+    guard.arrived = true;
+    guard.holding = true;
+    guard.quarry = null;
+    guard.halt();
+  }
+
   /**
    * A company runs down the nearest raider it can see, falls back on its
    * ordered ground, and goes home when there is nothing left to do.
@@ -1254,6 +1309,10 @@ export class Game {
     // trade blows if a raider actually reaches it -- that is handled
     // through the same proximity-based melee every company shares, not
     // through this destination at all.
+    if (!guard.arrived && distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2) {
+      this.settleOnArrival(guard);
+      return guard.position;
+    }
     if (guard.followsOrdersOnly) {
       return guard.orders;
     }
@@ -1275,12 +1334,8 @@ export class Game {
     // away from that point must not immediately read as "order still open"
     // and snap it back.
     if (!guard.arrived) {
-      if (distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2) {
-        guard.arrived = true;
-      } else {
-        guard.quarry = null;
-        return guard.orders;
-      }
+      guard.quarry = null;
+      return guard.orders;
     }
 
     // Once past the leash it heads home and stays deaf to the hunt until it
@@ -1334,6 +1389,10 @@ export class Game {
       guard.destination = guard.routed
         ? this.routedDestination(guard)
         : this.guardDestination(guard);
+      if (guard.holding) {
+        guard.halt();
+        continue;
+      }
       this.trackProgress(guard, 1 / FPS);
       steerCompany(guard, navigation, this.random);
       guard.gatherPace(1 / FPS);

@@ -57,3 +57,11 @@ test('formatBattleStats reads K/D as a clean win with no losses at all', () => {
   });
   assert.match(nothingHappened, /K\/D 0\.00/);
 });
+
+test('formatBattleStats says how many soldiers each side fielded, when known', () => {
+  const text = formatBattleStats({
+    kills: 2, deaths: 1, enemyLoss: 130, playerLoss: 40, enemyFielded: 240, playerFielded: 180,
+  });
+  assert.match(text, /Enemy soldiers lost: 130 of 240/);
+  assert.match(text, /Your soldiers lost: 40 of 180/);
+});

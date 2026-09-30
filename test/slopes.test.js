@@ -96,3 +96,25 @@ test('a real hillside slows a company by a real amount', () => {
   assert.ok(climbing < descending * 0.8,
     `climbing the hill gave ${climbing.toFixed(2)} against ${descending.toFixed(2)} coming down`);
 });
+
+test('in the open battleground a descent quickens a company and its charge, capped', async () => {
+  const { chargeSpeed } = await import('../src/melee.js');
+  const { Raider } = await import('../src/entities.js');
+  const battle = LEVELS.find((level) => level.mode === 'battle');
+  const game = new Game({ random: () => 0.5, level: battle });
+  game.terrain.heightAt = (x) => x * 0.3;
+  game.terrain.forestAt = () => 0;
+
+  const downhill = game.paceOn(heading(-1, 0));
+  assert.ok(downhill > 1, `coming down should quicken, it gave ${downhill.toFixed(2)}`);
+  assert.equal(game.paceOn(heading(0, 1)), 1, 'holding a contour is still ordinary going');
+
+  game.terrain.heightAt = (x) => x * 20;
+  assert.equal(game.paceOn(heading(-1, 0)), TERRAIN.maxDescentPace, 'a cliff is no catapult');
+
+  const charger = new Raider('CR0');
+  charger.momentum = 1;
+  const level = chargeSpeed(charger);
+  charger.descent = 1.3;
+  assert.ok(Math.abs(chargeSpeed(charger) - level * 1.3) < 1e-9, 'a charge that comes downhill hits harder');
+});

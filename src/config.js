@@ -252,7 +252,17 @@ export const MASS = {
   chargeAlignment: 0.5,
   bracedMomentum: 0.25,
   trampleMultiplier: 2,
-  tramplePush: 10,
+  // Knockback is a velocity that bleeds off at knockDecay per second, so the
+  // knocked company slides and slows instead of jumping; a shove of speed v
+  // carries it about v / knockDecay units. Every impulse scales with the
+  // mover's mass over the moved company's (clamped to knockMassRange).
+  knockDecay: 4,
+  knockMassRange: [0.5, 2],
+  trampleKnock: 90,
+  trampleSideways: 0.8,
+  counterChargeRebound: 80,
+  counterChargeShove: 25,
+  impactKnock: 45,
   trampleStaggerSeconds: 1,
   trampleMomentumKept: 0.7,
   counterChargeMultiplier: 4,
@@ -406,23 +416,23 @@ export const FLAG = {
  */
 export const RAIDER_TYPES = {
   CR0: {
-    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10,
-    attackAA: 2.5, attackNormal: 2.5, armor: 0.1, defense: 2, range: 5, lineOfSight: 40,
+    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 20,
+    attackAA: 1, attackNormal: 2, armor: 0.05, defense: 3, range: 5, lineOfSight: 40,
     mass: 2, cavalry: true, breaksAt: 0.6, avatar: AVATARS.steppeRegular,
   },
   IR0: {
     name: 'Steppe Light Infantry', speed: 7, maxHealth: 20,
-    attackAA: 1, attackNormal: 1, armor: 0.1, defense: 3, range: 2, lineOfSight: 30,
+    attackAA: 1, attackNormal: 1, armor: 0.05, defense: 3, range: 2, lineOfSight: 30,
     mass: 1, breaksAt: 0.7, avatar: AVATARS.steppeLight,
   },
   IR1: {
     name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20,
-    attackAA: 2, attackNormal: 1.5, armor: 0.4, defense: 5, range: 2, lineOfSight: 30,
+    attackAA: 1.5, attackNormal: 1.5, armor: 0.5, defense: 5, range: 2, lineOfSight: 30,
     mass: 2, breaksAt: 0.45, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
-    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10,
-    attackAA: 5, attackNormal: 3, armor: 0.7, defense: 2, range: 6, lineOfSight: 50,
+    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 20,
+    attackAA: 2, attackNormal: 3, armor: 0.5, defense: 3, range: 6, lineOfSight: 50,
     mass: 3, cavalry: true, breaksAt: 0.5, avatar: AVATARS.steppeHeavy,
   },
 };
@@ -436,18 +446,18 @@ export const STARTING_CASTLE_TYPE = 'CC0';
  */
 export const GUARD_TYPES = {
   IG_LIGHT: {
-    name: 'Imperial Light Guard', speed: 7, maxHealth: 25,
-    attackAA: 1.5, attackNormal: 1.5, armor: 0.1, defense: 4, range: 2, cost: 260,
+    name: 'Imperial Light Guard', speed: 7, maxHealth: 30,
+    attackAA: 1, attackNormal: 1.5, armor: 0.1, defense: 4, range: 2, cost: 260,
     holdBonus: 0.3, mass: 1, breaksAt: 0.6, avatar: AVATARS.imperialLight,
   },
   IG0: {
     name: 'Imperial Guardsman', speed: 6, maxHealth: 30,
-    attackAA: 1.75, attackNormal: 1.5, armor: 0.6, defense: 5, range: 2, cost: 450,
+    attackAA: 1.5, attackNormal: 1.5, armor: 0.6, defense: 5, range: 2, cost: 450,
     holdBonus: 0.3, mass: 2, breaksAt: 0.45, avatar: AVATARS.imperialRegular,
   },
   IG_HEAVY: {
-    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40,
-    attackAA: 2, attackNormal: 1.5, armor: 0.8, defense: 7, range: 2, cost: 680,
+    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 30,
+    attackAA: 2, attackNormal: 1.5, armor: 0.8, defense: 5, range: 2, cost: 680,
     holdBonus: 0.3, mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.imperialHeavy,
   },
   // The island garrison. Same three rungs at the same prices as the imperial
@@ -455,19 +465,19 @@ export const GUARD_TYPES = {
   // what the player can afford: the ashigaru trade a little armour for pace,
   // and the sohei a little pace for reach off the wall.
   JG_ASHIGARU: {
-    name: 'Ashigaru Spearman', speed: 8, maxHealth: 24,
-    attackAA: 0.75, attackNormal: 1.75, armor: 0.2, defense: 3, range: 3, cost: 260,
+    name: 'Ashigaru Spearman', speed: 7, maxHealth: 25,
+    attackAA: 0.5, attackNormal: 1.5, armor: 0.2, defense: 3, range: 2, cost: 260,
     mass: 1, spears: true, breaksAt: 0.4, avatar: AVATARS.japanLight,
   },
   JG_SAMURAI: {
     name: 'Samurai Retainer', speed: 6, maxHealth: 30,
-    attackAA: 1.5, attackNormal: 3, armor: 0.6, defense: 4, range: 2, cost: 450,
-    mass: 2, breaksAt: 0.2, avatar: AVATARS.japanRegular,
+    attackAA: 1, attackNormal: 2, armor: 0.6, defense: 4, range: 2, cost: 450,
+    mass: 2, breaksAt: 0.1, avatar: AVATARS.japanRegular,
   },
   JG_SOHEI: {
-    name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42,
-    attackAA: 2, attackNormal: 3.5, armor: 0.7, defense: 6, range: 3, cost: 680,
-    mass: 3, spears: true, breaksAt: 0.15, avatar: AVATARS.japanHeavy,
+    name: 'Sohei Warrior Monk', speed: 6, maxHealth: 30,
+    attackAA: 1, attackNormal: 3, armor: 0.7, defense: 6, range: 2, cost: 680,
+    mass: 2, spears: true, breaksAt: 0.05, avatar: AVATARS.japanHeavy,
   },
   // The one company every level fields the same way -- see Game#dispatchOptions
   // and #spawnEmperor. About a regular guard's own stats, but with three
@@ -499,7 +509,9 @@ export const EMPEROR_TIER_MULTIPLIER = { CC0: 1, CC1: 1.3, CC2: 1.6 };
  * Game#placeGuard and Game#spawnBattleLine.
  */
 export const BATTLE = {
+  // The points each side fields, unless the player slides it (see budgetRange).
   budget: 32,
+  budgetRange: { min: 16, max: 96, step: 4 },
   // North is +y (see Game#spawnPoint's own bearing convention); the player
   // deploys south of the start line, the enemy is drawn up north of it.
   fieldHalfWidth: 220,
@@ -512,11 +524,15 @@ export const BATTLE = {
   fieldHalfDepth: 260,
   // What a line is made of -- which infantry across the centre, which
   // companies on the flanks -- is the faction's own: see FACTIONS.
-  infantryCountRange: [6, 9],
+  // A line wider than this starts a second rank behind the first.
+  infantryPerRank: 9,
   infantrySpacing: 24,
-  cavalryPerSideRange: [1, 3],
+  rankDepth: 22,
+  // How much of the enemy's points go on its flank companies.
+  flankShare: 0.35,
+  flankPerRank: 6,
   cavalrySpacing: 22,
-  cavalryFlankOffset: 90,
+  cavalryFlankOffset: 125,
   cavalryDepthOffset: 40,
   // Random jitter applied to every spawn point, so the line never lines up
   // in a perfect row -- see Game#spawnBattleLine.
@@ -557,10 +573,10 @@ export const FACTIONS = {
     avatar: AVATARS.steppeRegular,
     blurb: 'Fast riders and cheap foot. Saber cavalry run down anything that flees; heavy lancers ride through light infantry, but break on a braced spear wall.',
     roster: [
-      { id: 'IR0', cost: 3 },
-      { id: 'IR1', cost: 5 },
-      { id: 'CR0', cost: 6 },
-      { id: 'CR1', cost: 9 },
+      { id: 'IR0', cost: 2 },
+      { id: 'IR1', cost: 4 },
+      { id: 'CR0', cost: 5 },
+      { id: 'CR1', cost: 8 },
     ],
     line: { infantry: ['IR0', 'IR0', 'IR1'], flank: ['CR0', 'CR1'] },
   },
@@ -601,59 +617,63 @@ export const BATTLE_MAPS = {
     land: {},
     weather: { label: 'Clear', icon: 'sun', season: 0 },
   },
-  downs: {
-    name: 'Rolling Downs',
-    tag: 'Long slopes',
-    blurb: 'Long slopes. Whoever holds the rise is fresh; whoever climbs it is not.',
-    land: {
-      hillScale: 380, hillHeight: 36, detailHeight: 2, slopeRelief: 3,
-    },
-    weather: { label: 'Autumn', icon: 'leaf', season: 2 },
-  },
   greenwood: {
     name: 'The Greenwood',
-    tag: 'Thick woods',
-    blurb: 'Thick stands of trees that drag at any company pushing through them.',
-    land: { forestThreshold: 0.42, forestScale: 200 },
+    tag: 'Thick woods, steady rain',
+    blurb: 'Dense stands of wet trees drag at any company pushing through them. Nobody sees far, and nobody moves fast.',
+    land: {
+      forestThreshold: 0.3,
+      forestScale: 170,
+      mossColor: '#3f5a37',
+      hillScale: 300,
+      hillHeight: 14,
+      slopeRelief: 3,
+    },
     weather: {
-      label: 'Morning mist',
-      icon: 'fog',
+      label: 'Steady rain',
+      icon: 'rain',
       season: 0,
-      mist: { color: '186, 206, 190', blend: 0.55, density: 1.7, start: 0.45 },
+      rain: 0.7,
+      mist: { color: '150, 172, 158', blend: 0.55, density: 1.7, start: 0.4, windSpeed: 1.5 },
     },
   },
-  highlands: {
-    name: 'Windswept Highlands',
-    tag: 'Steep, windy hills',
-    blurb: 'Steep, broken hills with woods in the hollows. Hard going for everyone.',
+  ridges: {
+    name: 'Razorback Ridges',
+    tag: 'Deep folds, steep drops',
+    blurb: 'Sharp ridges and deep gullies run across the field. Whoever charges down off a crest hits hardest; whoever climbs to meet it is broken on the way up.',
     land: {
-      hillScale: 320, hillHeight: 52, detailHeight: 3, slopeRelief: 4, forestThreshold: 0.68,
+      hillScale: 240,
+      hillHeight: 72,
+      detailHeight: 3,
+      slopeRelief: 5.5,
+      ridge: { angle: 0, scale: 85, alongScale: 520, height: 36 },
+      rockThreshold: 0.58,
+      forestThreshold: 0.8,
     },
-    weather: {
-      label: 'High wind',
-      icon: 'wind',
-      season: 0,
-      mist: { color: '208, 216, 224', blend: 0.3, density: 1.1, start: 0.8, windSpeed: 4.5 },
-    },
+    weather: { label: 'Golden dusk', icon: 'sun', season: 2 },
   },
   pass: {
     name: 'Mountain Pass',
     tag: 'Peaks on both flanks',
     blurb: 'A road between two ranges. Bare rock, sudden slopes, and nowhere to go but forward.',
     land: {
+      grassColor: '#8a8672',
+      mossColor: '#77735f',
+      dirtColor: '#6f6250',
+      rockColor: '#8d8b86',
       hillScale: 360,
-      hillHeight: 18,
+      hillHeight: 10,
       slopeRelief: 3,
-      mountainChance: 0.9,
-      mountainSpacing: 250,
-      mountainMinRadius: 55,
-      mountainMaxRadius: 105,
-      mountainMinHeight: 60,
-      mountainMaxHeight: 105,
+      mountainChance: 0.95,
+      mountainSpacing: 240,
+      mountainMinRadius: 60,
+      mountainMaxRadius: 115,
+      mountainMinHeight: 90,
+      mountainMaxHeight: 150,
       mountainClearing: MOUNTAIN_FLANKS,
-      rockThreshold: 0.6,
-      dirtThreshold: 0.5,
-      forestThreshold: 0.75,
+      rockThreshold: 0.35,
+      dirtThreshold: 0.25,
+      forestThreshold: 1,
     },
     weather: {
       label: 'Overcast',
@@ -662,31 +682,33 @@ export const BATTLE_MAPS = {
       mist: { color: '168, 178, 192', blend: 0.6, density: 1.9, start: 0.4, windSpeed: 2 },
     },
   },
-  frost: {
-    name: 'Frozen Peaks',
-    tag: 'Snowbound mountains',
-    blurb: 'Snow on every ridge and more falling. The cold does not care who holds the high ground.',
+  alpine: {
+    name: 'Snowcapped Summit',
+    tag: 'High peaks, deep snow',
+    blurb: 'A high col between towering white peaks. Every step is on a slope, and the wind never lets up.',
     land: {
-      hillScale: 340,
-      hillHeight: 22,
-      slopeRelief: 3.2,
-      mountainChance: 0.9,
-      mountainSpacing: 250,
-      mountainMinRadius: 60,
-      mountainMaxRadius: 110,
-      mountainMinHeight: 70,
-      mountainMaxHeight: 115,
-      mountainClearing: MOUNTAIN_FLANKS,
-      snowPatchThreshold: -0.5,
-      rockThreshold: 0.66,
-      forestThreshold: 0.72,
+      hillScale: 260,
+      hillHeight: 110,
+      detailHeight: 4,
+      slopeRelief: 5,
+      ridge: { angle: 90, scale: 90, alongScale: 500, height: 24 },
+      mountainChance: 0.95,
+      mountainSpacing: 230,
+      mountainMinRadius: 70,
+      mountainMaxRadius: 130,
+      mountainMinHeight: 120,
+      mountainMaxHeight: 190,
+      mountainClearing: { halfWidth: 120, minY: -170, maxY: 280 },
+      snowPatchThreshold: -0.8,
+      rockThreshold: 0.55,
+      forestThreshold: 0.8,
     },
     weather: {
-      label: 'Snowfall',
-      icon: 'snow',
+      label: 'Blizzard',
+      icon: 'wind',
       season: 3,
-      climate: { offset: -8 },
-      mist: { color: '226, 232, 240', blend: 0.5, density: 1.4, start: 0.5, windSpeed: 2.5 },
+      climate: { offset: -12 },
+      mist: { color: '214, 224, 238', blend: 0.3, density: 1.1, start: 0.8, windSpeed: 5 },
     },
   },
   badlands: {
@@ -721,29 +743,6 @@ export const BATTLE_MAPS = {
       season: 1,
       climate: { offset: 20 },
       mist: { color: '232, 204, 140', blend: 0.6, density: 1.8, start: 0.35, windSpeed: 2.5 },
-    },
-  },
-  moor: {
-    name: 'Stormy Moor',
-    tag: 'Rain and mud',
-    blurb: 'Rough heath under a low, dark sky. The rain will not let up.',
-    land: {
-      grassColor: '#66714a',
-      mossColor: '#4b5a42',
-      dirtColor: '#6b5b45',
-      rockColor: '#7d7a72',
-      hillScale: 300,
-      hillHeight: 26,
-      detailHeight: 3,
-      slopeRelief: 3.4,
-      forestThreshold: 0.86,
-    },
-    weather: {
-      label: 'Heavy rain',
-      icon: 'rain',
-      season: 0,
-      rain: 1,
-      mist: { color: '118, 132, 146', blend: 0.65, density: 2.1, start: 0.35, windSpeed: 3.5 },
     },
   },
 };
@@ -876,6 +875,11 @@ export const TERRAIN = {
   // Nothing is ever slowed past this, so no slope can leave a company
   // looking stuck.
   minClimbPace: 0.25,
+  // Open battleground only: coming down a slope quickens a company, and a
+  // charge that comes down one hits harder. Capped so the steepest ridge
+  // is a tactic rather than a catapult.
+  descentDrag: 0.9,
+  maxDescentPace: 1.4,
   // How far ahead the ground is sampled to work out that gradient. Short
   // enough to feel the slope underfoot rather than the hill as a whole.
   climbSample: 6,

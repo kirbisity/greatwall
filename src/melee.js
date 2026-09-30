@@ -20,7 +20,7 @@ import { addBlows, blowOf, scaleBlow } from './damage.js';
 
 /** How fast a company is going, as a share of a full-tilt cavalry charge. */
 export function chargeSpeed(company) {
-  return Math.min(1, company.momentum * company.type.speed / CHARGE.referenceSpeed);
+  return (company.descent ?? 1) * Math.min(1, company.momentum * company.type.speed / CHARGE.referenceSpeed);
 }
 
 /**
@@ -63,6 +63,45 @@ export function isBraced(company) {
     && (company.holding || company.momentum <= MASS.bracedMomentum);
 }
 
+/** The unit vector a company is moving along, or null if it is standing. */
+function headingOf(company) {
+  const speed = Math.hypot(company.velocity.x, company.velocity.y);
+  if (speed === 0) {
+    return null;
+  }
+  return { x: company.velocity.x / speed, y: company.velocity.y / speed };
+}
+
+/** How much a shove from `mover` carries against `moved`: heavier moves lighter further. */
+function massLeverage(mover, moved) {
+  const [least, most] = MASS.knockMassRange;
+  return Math.min(most, Math.max(least, mover.type.mass / moved.type.mass));
+}
+
+/** Add to a company's knock velocity; the shove plays out over the next few frames (see driftKnocked). */
+function knockAlong(company, direction, speed) {
+  company.knock.x += direction.x * speed;
+  company.knock.y += direction.y * speed;
+}
+
+/** Slide knocked companies along their knock and let it bleed off. */
+function driftKnocked(companies, seconds) {
+  const bleed = Math.exp(-MASS.knockDecay * seconds);
+  for (const company of companies) {
+    if (company.knock.x === 0 && company.knock.y === 0) {
+      continue;
+    }
+    company.position.x += company.knock.x * seconds;
+    company.position.y += company.knock.y * seconds;
+    company.knock.x *= bleed;
+    company.knock.y *= bleed;
+    if (Math.hypot(company.knock.x, company.knock.y) < 0.5) {
+      company.knock.x = 0;
+      company.knock.y = 0;
+    }
+  }
+}
+
 function tramples(cavalry, target) {
   return Boolean(cavalry.type.cavalry)
     && cavalry.type.mass >= MASS.heavy
@@ -83,16 +122,17 @@ function meetsSpears(cavalry, spears) {
  */
 function trample(cavalry, target) {
   target.takeHit(blowOf(cavalry.type, MASS.trampleMultiplier * chargeSpeed(cavalry)));
-  const speed = Math.hypot(cavalry.velocity.x, cavalry.velocity.y);
-  const aheadX = cavalry.velocity.x / speed;
-  const aheadY = cavalry.velocity.y / speed;
-  // Whichever side of the riders' line it already stood, it goes further that way.
+  const ahead = headingOf(cavalry);
+  // Whichever side of the riders' line it already stood, it is flung further that way.
   const side = Math.sign(
-    (target.position.x - cavalry.position.x) * -aheadY
-    + (target.position.y - cavalry.position.y) * aheadX,
+    (target.position.x - cavalry.position.x) * -ahead.y
+    + (target.position.y - cavalry.position.y) * ahead.x,
   ) || 1;
-  target.position.x += -aheadY * side * MASS.tramplePush;
-  target.position.y += aheadX * side * MASS.tramplePush;
+  const push = MASS.trampleKnock * chargeSpeed(cavalry) * massLeverage(cavalry, target);
+  knockAlong(target, {
+    x: ahead.x + -ahead.y * side * MASS.trampleSideways,
+    y: ahead.y + ahead.x * side * MASS.trampleSideways,
+  }, push / Math.hypot(1, MASS.trampleSideways));
   target.recoverySeconds = Math.max(target.recoverySeconds, MASS.trampleStaggerSeconds);
   cavalry.momentum *= MASS.trampleMomentumKept;
 }
@@ -100,6 +140,11 @@ function trample(cavalry, target) {
 /** Cavalry run onto set spears: stopped dead, its charge spent on the points. */
 function counterCharge(cavalry, spears, speed) {
   cavalry.takeHit(blowOf(spears.type, MASS.counterChargeMultiplier * speed));
+  const ahead = headingOf(cavalry);
+  if (ahead) {
+    knockAlong(cavalry, { x: -ahead.x, y: -ahead.y }, MASS.counterChargeRebound * speed * massLeverage(spears, cavalry));
+    knockAlong(spears, ahead, MASS.counterChargeShove * speed * massLeverage(cavalry, spears));
+  }
   cavalry.momentum = 0;
   cavalry.impact = 1;
 }
@@ -108,6 +153,14 @@ function counterCharge(cavalry, spears, speed) {
 function openBout(company, foe) {
   if (company.foes.size === 0) {
     company.impact = chargeImpact(company, foe);
+  }
+}
+
+/** A company meeting a foe at the charge shoves it back along its line as the two collide. */
+function shoveOnImpact(company, foe) {
+  const ahead = headingOf(company);
+  if (ahead && isCharging(company, foe)) {
+    knockAlong(foe, ahead, MASS.impactKnock * chargeSpeed(company) * massLeverage(company, foe));
   }
 }
 
@@ -124,6 +177,12 @@ function engage(guard, raider) {
   // the riders, and it is the pace they came in with that it punishes.
   const raiderOnSpears = meetsSpears(raider, guard) ? chargeSpeed(raider) : null;
   const guardOnSpears = meetsSpears(guard, raider) ? chargeSpeed(guard) : null;
+  if (raiderOnSpears === null) {
+    shoveOnImpact(raider, guard);
+  }
+  if (guardOnSpears === null) {
+    shoveOnImpact(guard, raider);
+  }
   openBout(guard, raider);
   openBout(raider, guard);
   guard.foes.add(raider);
@@ -287,6 +346,7 @@ export function resolveMelee(companies, seconds) {
     prunedFoes(company);
   }
 
+  driftKnocked(companies, seconds);
   closeIn(companies, seconds);
 
   const struck = new Map();

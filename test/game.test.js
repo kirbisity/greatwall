@@ -14,6 +14,7 @@ import {
   CASTLE_TYPES,
   EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
+  DEFAULT_FACTIONS,
   FACTIONS,
   FEAR,
   FPS,
@@ -507,7 +508,7 @@ test('a company under open orders beelines for them and ignores a raider that me
   assert.equal(guard.quarry, null, 'no quarry should be picked up while an order is still open');
 });
 
-test('once it reaches its order, a company goes back to hunting whatever is near, exactly as an idle one does', () => {
+test('once it reaches its order, a company stands hold there and ignores a raider that comes near', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 100000;
   const guard = game.sendGuard('IG0').guard;
@@ -516,30 +517,57 @@ test('once it reaches its order, a company goes back to hunting whatever is near
   guard.position = { ...target };
   game.raiders = [new Raider('CR0', { x: target.x + 50, y: target.y })];
 
-  assert.deepEqual(game.guardDestination(guard), game.raiders[0].position, 'arrived, and now free to run down what is close');
+  game.moveGuards();
+
   assert.equal(guard.arrived, true);
+  assert.equal(guard.holding, true, 'arrived, so it holds still rather than running the raider down');
+  assert.deepEqual(guard.position, target, 'and it did not budge');
+  assert.equal(guard.quarry, null);
 });
 
-test('the arrival flag is sticky -- chasing a raider away from the held point does not cancel the chase', () => {
+test('a company on hold that is released goes back to hunting whatever is near', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 100000;
   const guard = game.sendGuard('IG0').guard;
-  // Kept well inside IMPERIAL.leashRadius throughout -- this test is about
-  // the arrival flag, not the separate leash/recall mechanic.
-  const target = { x: 150, y: 40 };
+  const target = { x: 300, y: 40 };
   game.orderGuards([guard], target);
   guard.position = { ...target };
-  const raider = new Raider('CR0', { x: target.x + 70, y: target.y });
-  game.raiders = [raider];
+  game.raiders = [new Raider('CR0', { x: target.x + 50, y: target.y })];
+  game.moveGuards();
 
-  // First call settles it onto the hunt and sends it well clear of `target`.
-  assert.deepEqual(game.guardDestination(guard), raider.position);
-  guard.position = { x: target.x + 50, y: target.y };
+  game.toggleHold([guard]);
 
-  // Far past IMPERIAL.arriveRadius from `target` by now, but still mid-hunt
-  // -- this must still read as free to press the chase, not snap back to
-  // "the order is still open" just because it has drifted from that point.
-  assert.deepEqual(game.guardDestination(guard), raider.position, 'should still be free to press the chase');
+  assert.equal(guard.holding, false);
+  assert.deepEqual(game.guardDestination(guard), game.raiders[0].position);
+});
+
+test('a company keeps marching on its order until it arrives, then stands hold until commanded again', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  const target = { x: guard.position.x + 80, y: guard.position.y };
+  game.orderGuards([guard], target);
+  game.raiders = [new Raider('CR0', { x: guard.position.x + 40, y: guard.position.y + 60 })];
+
+  for (let frame = 0; frame < 60 * 60 && !guard.holding; frame += 1) {
+    game.moveGuards();
+  }
+
+  assert.equal(guard.holding, true, 'it made it to the ordered ground and stopped');
+  assert.ok(Math.hypot(guard.position.x - target.x, guard.position.y - target.y) < 40);
+
+  game.orderGuards([guard], { x: target.x, y: target.y + 100 });
+  assert.equal(guard.holding, false, 'a new command releases the hold');
+  assert.equal(guard.arrived, false);
+});
+
+test('a fresh order shakes off a stagger', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  guard.recoverySeconds = 1;
+  game.orderGuards([guard], { x: 300, y: 40 });
+  assert.equal(guard.recoverySeconds, 0);
 });
 
 test('a company left idle at home still hunts a raider that strays close, on its own', () => {
@@ -675,8 +703,8 @@ test('the enemy line fields infantry across the centre, up front, and cavalry be
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
   const infantry = game.raiders.filter((raider) => raider.typeId.startsWith('IR'));
   const cavalry = game.raiders.filter((raider) => raider.typeId.startsWith('CR'));
-  assert.ok(infantry.length >= BATTLE.infantryCountRange[0], 'a real line, not a token few');
-  assert.equal(cavalry.length, 2 * BATTLE.cavalryPerSideRange[0], 'one cluster per flank');
+  assert.ok(infantry.length >= 3, 'a real line, not a token few');
+  assert.ok(cavalry.length >= 2, 'cavalry on both flanks');
   const infantryMaxAbsX = Math.max(...infantry.map((raider) => Math.abs(raider.position.x)));
   const infantryMaxY = Math.max(...infantry.map((raider) => raider.position.y));
   for (const raider of cavalry) {
@@ -896,14 +924,25 @@ function distanceBetween(a, b) {
 
 test('unitSize counts the figures a type\'s own formation actually musters', () => {
   assert.equal(unitSize('EMPEROR'), 1, 'the Emperor rides alone');
-  assert.equal(unitSize('IG_LIGHT'), 20);
-  assert.equal(unitSize('IR0'), 14);
+  assert.equal(unitSize('IR0'), 18);
+});
+
+test('faction headcounts: imperial equal in every tier and largest, island clans thinning by tier, steppe fewest', () => {
+  const sizes = (ids) => ids.map((id) => unitSize(id));
+  const imperial = sizes(['IG_LIGHT', 'IG0', 'IG_HEAVY']);
+  const island = sizes(['JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI']);
+  const steppe = sizes(['IR0', 'IR1', 'CR0', 'CR1']);
+  assert.deepEqual(imperial, [48, 48, 48]);
+  assert.ok(island[0] > island[1] && island[1] > island[2], `island tiers should thin out: ${island}`);
+  assert.ok(Math.min(...imperial) >= Math.max(...island), 'imperial companies are never smaller than an island one');
+  assert.ok(Math.max(...steppe) < Math.min(...island), 'steppe companies are the smallest');
 });
 
 test('a fresh battle starts with every stat at zero', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
   assert.deepEqual(game.battleStats, {
     kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0, enemyLossByType: {}, playerLossByType: {},
+    enemyFielded: 0, playerFielded: 0,
   });
 });
 
@@ -1055,10 +1094,10 @@ test('every faction is fully playable: known types, portraits and models, on eit
 
 test('the open field takes its ground from the chosen map, and falls back to plains for an unknown one', () => {
   const flat = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
-  const hilly = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, battleMap: 'highlands' });
+  const hilly = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, battleMap: 'ridges' });
   assert.equal(flat.battleMap, 'plains');
-  assert.equal(hilly.battleMap, 'highlands');
-  assert.equal(hilly.terrain.land.hillHeight, BATTLE_MAPS.highlands.land.hillHeight);
+  assert.equal(hilly.battleMap, 'ridges');
+  assert.equal(hilly.terrain.land.hillHeight, BATTLE_MAPS.ridges.land.hillHeight);
   assert.notEqual(flat.terrain.land.hillHeight, hilly.terrain.land.hillHeight);
   hilly.loadLevel(BATTLE_LEVEL, undefined, 'no-such-map');
   assert.equal(hilly.battleMap, 'plains');
@@ -1073,14 +1112,14 @@ test('every battle map leaves the two baselines clear enough to fight over', () 
 });
 
 test('a battle map pins its own weather for the whole fight', () => {
-  const frost = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'frost' });
-  frost.seconds = 500;
-  assert.equal(frost.seasonPhase, BATTLE_MAPS.frost.weather.season + 0.5, 'the season never turns mid-fight');
-  assert.equal(frost.mist, BATTLE_MAPS.frost.weather.mist);
-  assert.equal(frost.rain, 0);
+  const alpine = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'alpine' });
+  alpine.seconds = 500;
+  assert.equal(alpine.seasonPhase, BATTLE_MAPS.alpine.weather.season + 0.5, 'the season never turns mid-fight');
+  assert.equal(alpine.mist, BATTLE_MAPS.alpine.weather.mist);
+  assert.equal(alpine.rain, 0);
 
-  const moor = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'moor' });
-  assert.ok(moor.rain > 0, 'the moor is rained on');
+  const greenwood = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'greenwood' });
+  assert.ok(greenwood.rain > 0, 'the greenwood is rained on');
 
   const siege = new Game({ random: fixedRandom() });
   assert.equal(siege.battleWeather, null, 'a siege keeps the calendar');
@@ -1100,4 +1139,52 @@ test('every battle map names its weather, and the mountain maps keep a clearing 
   const clearing = pass.terrain.land.mountainClearing;
   const nearby = pass.terrain.mountainsWithin(-clearing.halfWidth, clearing.minY, clearing.halfWidth, clearing.maxY);
   assert.equal(nearby.filter((mountain) => Math.abs(mountain.x) < clearing.halfWidth && mountain.y > clearing.minY && mountain.y < clearing.maxY).length, 0);
+});
+
+test('the battle maps range from flat plains to mountains, snow and extreme relief', () => {
+  const ids = Object.keys(BATTLE_MAPS);
+  assert.ok(ids.length >= 5 && ids.length <= 7, 'a few maps, each its own kind of ground');
+  const relief = (id) => (BATTLE_MAPS[id].land.hillHeight ?? 0) + (BATTLE_MAPS[id].land.ridge?.height ?? 0);
+  assert.equal(relief('plains'), 0);
+  assert.ok(relief('ridges') > relief('greenwood'), 'the ridges are steeper than the woods');
+  const peak = (id) => BATTLE_MAPS[id].land.mountainMaxHeight ?? 0;
+  assert.ok(peak('alpine') > peak('pass') && peak('pass') > peak('badlands'), 'the summit stands highest');
+  assert.ok(BATTLE_MAPS.alpine.land.snowPatchThreshold < 0, 'the summit is under snow');
+});
+
+test('starting the battle records how many soldiers each side fielded', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  assert.equal(game.battleStats.playerFielded, unitSize('IG_LIGHT'));
+  assert.equal(game.battleStats.enemyFielded, game.raiders.reduce((total, raider) => total + unitSize(raider.typeId), 0));
+  assert.ok(game.battleStats.enemyFielded > 0);
+});
+
+test('the enemy line spends as much of the chosen budget as it can, and never more', () => {
+  const faction = FACTIONS[DEFAULT_FACTIONS.enemy];
+  const costs = Object.fromEntries(faction.roster.map((entry) => [entry.id, entry.cost]));
+  const cheapest = Math.min(...faction.line.infantry.map((typeId) => costs[typeId]));
+  for (const budget of [16, 32, 52, 96]) {
+    for (const value of [0, 0.5, 0.99]) {
+      const game = new Game({ random: fixedRandom(value), level: BATTLE_LEVEL, budget });
+      const spent = game.raiders.reduce((total, raider) => total + costs[raider.typeId], 0);
+      assert.ok(spent <= budget, `${budget}: within budget`);
+      assert.ok(budget - spent < cheapest, `${budget}: nothing else affordable was left unbought`);
+      assert.equal(game.battleBudget, budget, 'the player gets the same budget');
+    }
+  }
+});
+
+test('a bigger budget fields a bigger line, in extra ranks once a row is full', () => {
+  const small = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, budget: 16 });
+  const big = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, budget: 96 });
+  assert.ok(big.raiders.length > small.raiders.length * 3);
+  const ranks = new Set(big.raiders.map((raider) => Math.round(raider.position.y / BATTLE.rankDepth)));
+  assert.ok(ranks.size > 2, 'deep enough to have more than one rank');
+});
+
+test('a budget outside the slider is held to its ends', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, budget: 9999 });
+  assert.equal(game.battleBudgetLimit, BATTLE.budgetRange.max);
 });

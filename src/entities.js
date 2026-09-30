@@ -281,6 +281,9 @@ class Company {
     // from 0 at a standstill to 1 -- see gatherPace.
     this.velocity = { x: 0, y: 0 };
     this.momentum = 0;
+    // Quickening from coming down a slope (1 on the level) -- see Game#climbPace.
+    this.descent = 1;
+    this.knock = { x: 0, y: 0 };
     // How far off its wanted heading it was this frame, which is what caps
     // the pace it can hold through a turn. Set by pathfinding's turnTowards.
     this.turnAngle = 0;

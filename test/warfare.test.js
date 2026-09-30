@@ -311,8 +311,47 @@ test('heavy cavalry at the charge tramples straight through light infantry', () 
   assert.equal(lancers.inMelee, false, 'not stopped');
   assert.ok(light.health < light.type.maxHealth, 'ridden down');
   assert.ok(light.recoverySeconds > 0, 'knocked off its feet');
-  assert.notEqual(light.position.y, 0, 'shoved aside, off the lancers\' line');
+  assert.deepEqual(light.position, { x: 15, y: 0 }, 'the shove plays out over the next frames rather than jumping');
+  assert.ok(light.knock.x > 0 && Math.abs(light.knock.y) > 0, 'flung ahead of the riders and off to one side');
   close(lancers.momentum, MASS.trampleMomentumKept, 'and the ride-through costs some pace');
+});
+
+test('a knocked company slides and slows to a stop, covering about its speed over the decay rate', () => {
+  const lancers = moving(new Raider('CR1', { x: 0, y: 0 }), 1, 1, 0);
+  const light = new Guard('IG_LIGHT', { x: 15, y: 0 });
+  lockEngagements([light], [lancers]);
+  const start = { ...light.position };
+  const launch = Math.hypot(light.knock.x, light.knock.y);
+  let last = 0;
+  resolveMelee([light], FRAME);
+  const first = Math.hypot(light.position.x - start.x, light.position.y - start.y);
+  assert.ok(first > 0 && first < launch * FRAME * 1.01, 'it starts fast, a frame at a time');
+  for (let frame = 0; frame < 3 * FPS; frame += 1) {
+    resolveMelee([light], FRAME);
+    const slid = Math.hypot(light.position.x - start.x, light.position.y - start.y);
+    assert.ok(slid >= last, 'never slides back');
+    last = slid;
+  }
+  assert.deepEqual(light.knock, { x: 0, y: 0 }, 'and it comes to rest');
+  assert.ok(last > launch / MASS.knockDecay * 0.85 && last < launch / MASS.knockDecay * 1.05);
+});
+
+test('cavalry that hits set spears is thrown back, and the spears give a little', () => {
+  const lancers = moving(new Raider('CR1', { x: 0, y: 0 }), 1, 1, 0);
+  const spears = new Guard('IG_HEAVY', { x: 15, y: 0 });
+  lockEngagements([spears], [lancers]);
+  assert.ok(lancers.knock.x < 0, 'rebounds off the points');
+  assert.ok(spears.knock.x > 0 && spears.knock.x < -lancers.knock.x, 'the wall shifts far less than the riders');
+});
+
+test('a fast charge shoves the company it strikes back along its line', () => {
+  const sabres = moving(new Raider('CR0', { x: 0, y: 0 }), 1, 1, 0);
+  const light = new Guard('IG_LIGHT', { x: 15, y: 0 });
+  light.holding = true;
+  lockEngagements([light], [sabres]);
+  assert.equal(sabres.inMelee, true, 'a fair fight, not a trample');
+  assert.ok(light.knock.x > 0, 'the struck company gives ground');
+  assert.equal(sabres.knock.x, 0, 'the standing company does not shove back');
 });
 
 test('light cavalry does not trample -- it takes the fight like anyone else', () => {

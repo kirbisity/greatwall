@@ -229,6 +229,24 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .battleUnitButton:hover .battlePortrait,
 .battleUnitButton.is-active .battlePortrait { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
 
+.battleUnitButton, .rosterChip { position: relative; }
+
+.unitSizeBadge {
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	padding: 0 5px;
+	font-family: var(--display);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 14px;
+	color: var(--parchment, #e8dcc0);
+	background: rgba(14, 11, 8, .85);
+	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 7px;
+	pointer-events: none;
+}
+
 .battleCost {
 	min-width: 34px;
 	padding: 0 7px;
@@ -576,7 +594,21 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	box-shadow: 0 8px 24px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(236, 224, 196, .05);
 }
 
-.setupSection-map { grid-column: 1 / -1; }
+.setupSection-map,
+.setupSection-budget { grid-column: 1 / -1; }
+
+.budgetRow { display: flex; align-items: center; gap: 16px; }
+.budgetSlider { flex: 1; min-width: 0; accent-color: var(--bronze); cursor: pointer; }
+.budgetValue {
+	min-width: 132px;
+	font-family: var(--display);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: .12em;
+	text-align: right;
+	text-transform: uppercase;
+	color: var(--bronze);
+}
 
 .setupHeading {
 	display: flex;

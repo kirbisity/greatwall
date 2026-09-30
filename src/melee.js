@@ -302,7 +302,6 @@ export function testMorale(company) {
  */
 export function rout(company) {
   company.routed = true;
-  company.routedAt = { ...company.position };
   company.holding = false;
   company.selected = false;
   // Whatever order it was last under is forgotten: it runs first.

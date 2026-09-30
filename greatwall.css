@@ -424,10 +424,11 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	inset: 0;
 	z-index: 10;
 	height: 0;
-	/* Clipped sideways so the slide-open animation stays clean, but free to
-	   scroll downwards on a screen shorter than the menu. */
-	overflow-x: hidden;
-	overflow-y: auto;
+	/* No page scrolls: each is laid out to fit, splitting into steps or
+	   views rather than running long. Auto stays only as a last resort for a
+	   screen smaller than any layout allows. */
+	display: flex;
+	overflow: hidden auto;
 	transition: height 420ms cubic-bezier(.4, 0, .2, 1);
 	background:
 		radial-gradient(circle at 50% 38%, rgba(60, 46, 22, .55), rgba(6, 5, 4, .97) 70%),
@@ -437,9 +438,15 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 #settingMenu { z-index: 11; }
 
-/* Padding rather than an offset, so the space counts towards what can be
-   scrolled and the last button is never stranded below the fold. */
-.overlay-content { position: relative; padding: 14vh 0 40px; width: 100%; text-align: center; }
+/* margin:auto centres it while there is room and, unlike align-items, never
+   pushes the top out of reach once there is not. */
+.overlay-content {
+	position: relative;
+	margin: auto;
+	padding: max(2vh, env(safe-area-inset-top)) 0 max(2vh, env(safe-area-inset-bottom));
+	width: 100%;
+	text-align: center;
+}
 
 .gameTitle {
 	margin: 0;
@@ -562,7 +569,6 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 #battleSetupPage { z-index: 12; }
 
-.battleSetupContent { padding-top: 4.5vh; }
 
 .battleSetupContent .panelTitle { margin-bottom: 8px; }
 
@@ -641,6 +647,7 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .setupCards-armies { grid-template-columns: repeat(3, 1fr); }
 
 .setupCard {
+	min-width: 0;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -753,16 +760,15 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	position: fixed;
 	inset: 0;
 	z-index: 14;
-	padding-top: 9vh;
-	overflow: auto;
+	overflow: hidden auto;
 	background: rgba(6, 5, 4, .72);
 }
 
 .modal-content {
 	position: relative;
-	width: min(680px, 86vw);
+	width: min(680px, 90vw);
 	margin: auto;
-	padding: 38px 44px;
+	padding: 30px 40px;
 	border: 1px solid var(--bronze-deep);
 	box-shadow: var(--lift), inset 0 0 60px rgba(90, 62, 20, .35);
 }
@@ -1025,7 +1031,6 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 	.actionHint { bottom: calc(90px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); white-space: normal; text-align: center; }
 
-	.overlay-content { padding-top: 7vh; }
 }
 
 /* The controls and instructions for the device in hand: a finger has no
@@ -1068,8 +1073,222 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 }
 
 @media (max-width: 480px) {
-	.setupCards-maps { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+	.setupCards-maps { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 	.setupCards-maps .setupCardName { font-size: 9px; letter-spacing: 0; }
 	.armyPortrait { height: 42px; }
 	.setupCardTag { display: none; }
+}
+
+
+/* --- multi-level menus: nothing here scrolls ----------------------------- */
+
+.modal:not(.infomodal) { align-items: center; justify-content: center; }
+.modal:not(.infomodal)[style*="block"] { display: flex !important; }
+.modal:not(.infomodal) .modal-content { margin: 0; max-height: 94vh; overflow: hidden auto; }
+
+.menuHeader { margin-bottom: 4px; }
+.gameTitle { font-size: clamp(36px, min(7vw, 11vh), 84px); }
+.menuHeader .gameTagline { font-size: 13px; line-height: 1.6; }
+.menuHeader .gameTagline::after { margin-top: 12px; }
+
+/* The main menu's two levels: home (play, settings...) and the level picker. */
+.menuView { display: none; }
+#myNav[data-view="home"] .menuView-home,
+#myNav[data-view="levels"] .menuView-levels { display: block; }
+
+/* Settings likewise: the usual toggles, and a debug page apart from them. */
+.settingsView { display: none; }
+#settingMenu[data-view="main"] .settingsView-main,
+#settingMenu[data-view="debug"] .settingsView-debug { display: block; }
+.settingsView .panelTitle { margin: 0; }
+
+/* Levels outside the numbered campaign get their own labelled shelf. */
+.levelGroupTitle {
+	display: none;
+	margin: 14px 0 0;
+	font-family: var(--display);
+	font-size: 12px;
+	font-weight: normal;
+	letter-spacing: .2em;
+	text-transform: uppercase;
+	color: var(--bronze);
+}
+.has-special .levelGroupTitle { display: block; }
+.levelList-special { margin-top: 6px; }
+.levelList-special .levelItem { border-color: var(--bronze-deep); }
+.levelList-special:empty { display: none; }
+.menuView .panelTitle { margin: 18px 0 0; }
+
+.menuList { margin-top: 18px; gap: 8px; }
+.menuItem { padding: 11px 18px; font-size: 16px; }
+
+.menuList-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	width: min(440px, 90vw);
+	margin-left: auto;
+	margin-right: auto;
+}
+.menuList-grid .menuItem { width: auto; }
+.menuList-grid .menuItem-wide { grid-column: 1 / -1; }
+/* Levels as a grid of cards so they fit on one screen rather than a long column. */
+.levelList {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 8px;
+	width: min(820px, 92vw);
+	margin: 14px auto 0;
+}
+.levelItem { width: auto; }
+.levelBlurb { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Battle setup: a three-step wizard, each step one screenful. */
+.battleSetupContent .panelTitle { margin: 0 0 8px; }
+.setupSteps { display: flex; justify-content: center; gap: 6px; margin: 0 auto 8px; padding: 0 8px; flex-wrap: wrap; }
+.setupStep {
+	padding: 6px 12px;
+	font-family: var(--display);
+	font-size: 12px;
+	letter-spacing: .1em;
+	text-transform: uppercase;
+	color: var(--parchment-dim);
+	background: none;
+	border: 1px solid rgba(138, 109, 36, .3);
+	border-radius: 999px;
+	opacity: .7;
+	cursor: pointer;
+}
+.setupStep.is-current { color: var(--bronze); border-color: var(--bronze); opacity: 1; background: rgba(138, 109, 36, .16); }
+.battleStory { margin-bottom: 10px; font-size: 13px; }
+
+.battleSetupBody { grid-template-columns: 1fr; width: min(760px, 94vw); }
+.battleSetupBody[data-step="0"] > .setupSection:not([data-step="0"]),
+.battleSetupBody[data-step="1"] > .setupSection:not([data-step="1"]),
+.battleSetupBody[data-step="2"] > .setupSection:not([data-step="2"]) { display: none; }
+.battleSetupBody[data-step="1"] { gap: 10px; }
+.battleSetupContent .menuList { margin-top: 14px; }
+
+/* Help: paged, so the whole of it never needs scrolling. */
+.helpPage { display: none; }
+.helpPage.is-shown { display: block; }
+.helpContent { min-height: min(400px, 90vh); display: flex; flex-direction: column; }
+.helpContent .panelTitle { margin-bottom: 8px; }
+.helpContent .helpPage { flex: 1; }
+.scroll p, .helpList { font-size: 15px; }
+.helpList { margin: 10px 0; line-height: 1.6; }
+.helpNav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.helpPageLabel { font-family: var(--display); letter-spacing: .12em; color: #7a5a1c; }
+.helpNavBtn {
+	min-width: 88px;
+	padding: 9px 16px;
+	font-family: var(--display);
+	font-size: 14px;
+	letter-spacing: .1em;
+	text-transform: uppercase;
+	color: #5c4726;
+	background: rgba(255, 250, 235, .5);
+	border: 1px solid #8a6d24;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.helpNavBtn-primary { color: var(--ink); background: linear-gradient(180deg, #e2c866, var(--bronze-deep)); }
+
+.battleResultContent { padding: 24px 32px; }
+.battleResultSummary { margin-bottom: 12px; line-height: 1.6; }
+
+@media (max-width: 480px) {
+	.modal-content { padding: 22px 18px; }
+	.scroll p, .helpList { font-size: 14px; }
+	.helpNavBtn { min-width: 72px; }
+	.levelList { grid-template-columns: 1fr; }
+	.levelThumb { width: 64px; height: 48px; }
+	.levelBlurb { -webkit-line-clamp: 1; }
+	.menuItem { font-size: 14px; letter-spacing: .09em; padding: 12px 8px; }
+}
+
+/* Phones on their side: the header shrinks and the story goes, leaving the picks. */
+@media (max-height: 500px) {
+	.menuHeader .gameTagline::after { display: none; }
+	.gameTitle { font-size: clamp(26px, 9vh, 44px); }
+	.menuList { margin-top: 10px; }
+	.menuItem { padding: 9px 14px; font-size: 14px; }
+	.menuView .panelTitle { margin-top: 8px; }
+	#myNav[data-view="levels"] .gameTagline { display: none; }
+	.levelGroupTitle { margin-top: 8px; }
+	.levelList-special { margin-top: 4px; }
+	.levelList { margin-top: 8px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+	.levelBlurb { display: none; }
+	.levelThumb { width: 56px; height: 42px; }
+	.battleStory { display: none; }
+	.setupStep { padding: 4px 10px; font-size: 11px; }
+	.setupSection { padding: 8px 10px 10px; }
+	.battleSetupBody[data-step="1"] { grid-template-columns: 1fr 1fr; width: min(900px, 96vw); }
+	.battleSetupContent .menuList { margin-top: 8px; }
+	.battleSetupContent .menuItem { padding: 8px 12px; }
+	.modal-content { padding: 16px 24px; }
+	.helpContent { min-height: 0; }
+	.scroll p, .helpList { font-size: 13px; line-height: 1.45; }
+	.helpNav { margin-top: 8px; }
+	.setupHeading { margin-bottom: 6px; }
+	.setupCards-maps .setupCardTag { display: none; }
+	.armyPortrait { height: 36px; }
+	.setupCard { padding: 5px; gap: 3px; }
+	.rosterStrip { margin-top: 6px; gap: 5px; }
+	.rosterChip { width: 44px; height: 36px; }
+	.battleSetupContent { padding-top: 1vh; padding-bottom: 1vh; }
+}
+
+/* Very short screens (a phone on its side, browser chrome and all): the level cards shrink to fit. */
+@media (max-height: 360px) {
+	.menuView-levels .panelTitle { display: none; }
+	.gameTitle { font-size: 24px; }
+	.levelItem { padding: 4px 10px 4px 4px; gap: 8px; }
+	.levelThumb { width: 44px; height: 33px; }
+	.levelName { font-size: 13px; }
+	.levelList { margin-top: 6px; gap: 6px; }
+}
+
+/* The level picker has the whole screen: no title block, roomier cards, and each level's two armies. */
+#myNav[data-view="levels"] .menuHeader { display: none; }
+.menuView-levels .panelTitle { margin-top: 4px; }
+.menuView-levels .levelList { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; width: min(1120px, 94vw); margin-top: 18px; }
+.menuView-levels .levelItem { align-self: start; align-items: flex-start; gap: 14px; padding: 10px 14px 10px 10px; }
+.menuView-levels .levelThumb { width: 112px; height: 84px; }
+.menuView-levels .levelName { font-size: 16px; }
+.menuView-levels .levelBlurb { -webkit-line-clamp: 2; margin-top: 5px; }
+.levelMatchup { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.levelSide { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.levelSideAvatar { width: 26px; height: 26px; object-fit: cover; border: 1px solid var(--bronze-deep); border-radius: 50%; background: rgba(0, 0, 0, .35); }
+.levelSideName { white-space: nowrap; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .85; }
+.levelSideRole { font-family: var(--display); font-size: 10px; letter-spacing: .08em; white-space: nowrap; text-transform: uppercase; color: var(--bronze); }
+.menuView-levels .levelGroupTitle { margin-top: 18px; }
+.menuView-levels .levelList-special { margin-top: 8px; }
+.menuView-levels .menuList { margin-top: 20px; }
+
+@media (max-width: 480px) {
+	.menuView-levels .levelList { grid-template-columns: 1fr; gap: 6px; margin-top: 8px; }
+	.menuView-levels .levelItem { gap: 10px; padding: 6px 10px 6px 6px; }
+	.menuView-levels .levelThumb { width: 76px; height: 57px; }
+	.menuView-levels .levelName { font-size: 14px; }
+	.menuView-levels .levelBlurb { -webkit-line-clamp: 1; margin-top: 3px; }
+	.levelMatchup { margin-top: 4px; gap: 2px; }
+	.levelSideAvatar { width: 20px; height: 20px; }
+	.levelSideName { font-size: 10px; letter-spacing: .03em; }
+	.menuView-levels .levelGroupTitle { margin-top: 10px; }
+	.menuView-levels .menuList { margin-top: 10px; }
+}
+
+@media (max-height: 500px) {
+	.menuView-levels .levelList { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 8px; }
+	.menuView-levels .levelItem { padding: 5px 8px 5px 5px; gap: 8px; }
+	.menuView-levels .levelThumb { width: 64px; height: 48px; }
+	.menuView-levels .levelName { font-size: 13px; }
+	.menuView-levels .levelBlurb { display: none; }
+	.levelMatchup { margin-top: 3px; gap: 1px; }
+	.levelSideAvatar { width: 16px; height: 18px; }
+	.menuView-levels .levelGroupTitle { margin-top: 6px; }
+	.menuView-levels .levelList-special { margin-top: 4px; }
+	.menuView-levels .menuList { margin-top: 8px; }
+	.menuView-levels .panelTitle { display: none; }
 }

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { LEVELS } from '../src/levels.js';
@@ -16,7 +16,7 @@ const pageIds = new Set(
 const CONTEXT_METHODS = [
   'clearRect', 'fillRect', 'strokeRect', 'beginPath', 'moveTo', 'lineTo', 'closePath',
   'stroke', 'arc', 'fill', 'drawImage', 'save', 'translate', 'rotate', 'restore',
-  'fillText', 'setTransform', 'setLineDash',
+  'fillText', 'strokeText', 'setTransform', 'setLineDash',
 ];
 
 function stubContext() {
@@ -101,6 +101,7 @@ function installDom() {
 }
 
 let bootedDom = null;
+let clock = 0;
 
 test('the app boots, plays frames and reacts to input without touching a missing element', async () => {
   const dom = installDom();
@@ -117,12 +118,26 @@ test('the app boots, plays frames and reacts to input without touching a missing
   assert.equal(dom.elements.get('loader').style.display, 'none');
 
   // Start the game, then run the frames the loop queues up.
-  dom.elements.get('startBtn2').listeners.get('click')();
+  const startButton = dom.elements.get('startBtn2');
+  const menu = dom.elements.get('myNav');
+  startButton.listeners.get('click')();
+  assert.equal(menu.dataset.view, 'levels', 'Start on a fresh menu shows the levels rather than assuming one');
+  assert.equal(dom.elements.get('levelsBtn').style.display, 'none', 'nothing to switch away from yet');
+  assert.equal(dom.elements.get('restartBtn').style.display, 'none', 'nothing to restart yet');
+  dom.elements.get('levelList').children[0].listeners.get('click')();
+  assert.equal(startButton.innerText, 'Continue');
+  assert.equal(dom.elements.get('levelsBtn').style.display, 'block');
+  assert.equal(dom.elements.get('restartBtn').style.display, 'block');
   dom.elements.get('helpClose').listeners.get('click')();
   const music = dom.elements.get('backgroundmusic');
   assert.match(music.src, /sounds\/level_1\.mp3$/, 'starting a level cues that level\'s own track');
   assert.equal(music.paused, false, 'music plays once a level has started');
+  // Frames run back to back here, so a clock that ticks one 60Hz frame at a
+  // time stands in for real time -- the simulation is paced by elapsed time.
+  clock = performance.now();
+  mock.method(performance, 'now', () => clock);
   for (let frame = 0; frame < 200 && dom.frames.length > 0; frame += 1) {
+    clock += 1000 / 60;
     dom.frames.shift()();
   }
   assert.ok(dom.frames.length > 0, 'the loop keeps requesting frames');
@@ -183,10 +198,11 @@ test('the open field has its own setup page -- story, map and both armies -- and
     .find((section) => section.className.includes(title)).children[1].children;
   const cardFor = (title, id) => cardsFor(title).find((card) => card.dataset.id === id);
 
-  const levelButtons = dom.elements.get('levelList').children;
-  levelButtons[openFieldIndex].listeners.get('click')();
+  assert.equal(dom.elements.get('levelList').children.length, LEVELS.length - 1, 'the campaign lists every ordinary level');
+  assert.equal(dom.elements.get('specialList').children.length, 1, 'the open field is set apart');
+  assert.ok(LEVELS.filter((level) => level.mode !== 'battle').every((level) => level.sides?.defender && level.sides?.attacker), 'every siege level names its two armies');
+  dom.elements.get('specialList').children[0].listeners.get('click')();
   assert.equal(dom.elements.get('battleSetupPage').style.height, '100%', 'picking the open field opens its page');
-  assert.equal(dom.elements.get('battleSetupBtn').style.display, 'block');
   assert.equal(app.game.mode, 'siege', 'picking the level waits for Start rather than beginning it');
   assert.equal(dom.elements.get('battleSetupStory').innerText, LEVELS[openFieldIndex].story, 'the story is told on the page');
   assert.equal(cardsFor('setupSection-map').length, Object.keys(BATTLE_MAPS).length, 'a card for every map');
@@ -204,14 +220,32 @@ test('the open field has its own setup page -- story, map and both armies -- and
   assert.equal(app.chosenMap(), 'greenwood');
   assert.ok(cardFor('setupSection-map', 'greenwood').className.includes('is-chosen'));
 
-  dom.elements.get('battleSetupBack').listeners.get('click')();
-  assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
+  // The page is a wizard: Back on its first step leaves to the menu.
+  const page = dom.elements.get('battleSetupPage');
+  const next = dom.elements.get('battleSetupStart');
+  const back = dom.elements.get('battleSetupBack');
+  back.listeners.get('click')();
+  assert.equal(page.style.height, '0%');
   dom.elements.get('startBtn2').listeners.get('click')();
-  assert.equal(dom.elements.get('battleSetupPage').style.height, '100%', 'Start on a fresh battle goes through the page');
+  assert.equal(dom.elements.get('myNav').dataset.view, 'levels', 'Start on a fresh battle asks which level');
+  dom.elements.get('specialList').children[0].listeners.get('click')();
+  assert.equal(page.style.height, '100%', 'the open field goes through its page');
+  assert.equal(page.dataset.step, '0', 'reopening begins at the first step');
   assert.equal(app.game.mode, 'siege');
 
-  dom.elements.get('battleSetupStart').listeners.get('click')();
-  assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
+  next.listeners.get('click')();
+  assert.equal(page.dataset.step, '1');
+  assert.equal(page.style.height, '100%', 'Next moves on rather than starting');
+  back.listeners.get('click')();
+  assert.equal(page.dataset.step, '0', 'Back returns a step');
+  next.listeners.get('click')();
+  next.listeners.get('click')();
+  assert.equal(page.dataset.step, '2');
+  assert.equal(next.innerText, 'Start Battle', 'the last step begins the battle');
+  assert.equal(app.game.mode, 'siege');
+
+  next.listeners.get('click')();
+  assert.equal(page.style.height, '0%');
   assert.equal(app.game.mode, 'battle');
   assert.equal(app.game.battleMap, 'greenwood');
   assert.equal(app.game.battleBudget, 48, 'the player gets the chosen budget');
@@ -220,7 +254,101 @@ test('the open field has its own setup page -- story, map and both armies -- and
   assert.equal(dom.elements.get('storyBanner').classList.contains('is-shown'), false, 'no story popup over the field');
   assert.notEqual(dom.elements.get('helpInfo').style.display, 'block', 'no wall-building help over the field');
 
+  assert.equal(dom.elements.get('battleDock').style.display, 'flex', 'the open field shows its placement dock');
+  assert.equal(dom.elements.get('startBattleBtn').style.display, 'inline-flex', 'and its Start Battle button');
+
   dom.elements.get('menuBtn').listeners.get('click')();
-  levelButtons[0].listeners.get('click')();
-  assert.equal(dom.elements.get('battleSetupBtn').style.display, 'none', 'a siege level has no armies to pick');
+  dom.elements.get('levelList').children[0].listeners.get('click')();
+  assert.equal(app.game.mode, 'siege', 'a siege level starts straight away');
+  assert.equal(dom.elements.get('battleDock').style.display, 'none', 'no unit dock left over in a siege level');
+  assert.equal(dom.elements.get('startBattleBtn').style.display, 'none', 'no Start Battle button left over either');
+  assert.equal(page.style.height, '0%', 'and has no armies to pick');
+});
+
+test('the menu has a levels view and the help turns through pages', async () => {
+  const dom = bootedDom;
+  const menu = dom.elements.get('myNav');
+  dom.elements.get('levelsBtn').listeners.get('click')();
+  assert.equal(menu.dataset.view, 'levels');
+  dom.elements.get('levelsBackBtn').listeners.get('click')();
+  assert.equal(menu.dataset.view, 'home');
+
+  const pages = ['a', 'b', 'c'].map(() => stubElement('page'));
+  const help = dom.elements.get('helpInfo');
+  help.querySelectorAll = () => pages;
+  const { app } = await import('../src/main.js');
+  app.hud.showHelp();
+  assert.equal(pages[0].classList.contains('is-shown'), true);
+  assert.equal(dom.elements.get('helpPageLabel').innerText, '1 / 3');
+  dom.elements.get('helpNext').listeners.get('click')();
+  dom.elements.get('helpNext').listeners.get('click')();
+  assert.equal(pages[2].classList.contains('is-shown'), true);
+  assert.equal(dom.elements.get('helpNext').innerText, 'Got it');
+  dom.elements.get('helpNext').listeners.get('click')();
+  assert.notEqual(help.style.display, 'block', 'the last page closes the help');
+});
+
+test('game speed paces the simulation and the debug page changes the running game', async () => {
+  const dom = bootedDom;
+  const { app } = await import('../src/main.js');
+  const click = (id) => dom.elements.get(id).listeners.get('click')();
+  const settingsMenu = dom.elements.get('settingMenu');
+
+  dom.elements.get('levelList').children[0].listeners.get('click')();
+  dom.elements.get('helpClose').listeners.get('click')();
+  app.resume();
+
+  const stepsOver = (frames) => {
+    let counted = 0;
+    const realStep = app.game.step.bind(app.game);
+    app.game.step = () => {
+      counted += 1;
+      realStep();
+    };
+    for (let frame = 0; frame < frames; frame += 1) {
+      clock += 1000 / 60;
+      dom.frames.shift()();
+    }
+    app.game.step = realStep;
+    return counted;
+  };
+
+  assert.equal(dom.elements.get('gameSpeedBtn').innerText, 'Game Speed: Medium');
+  assert.equal(stepsOver(60), 60, 'medium is one step a frame');
+  click('gameSpeedBtn');
+  assert.equal(dom.elements.get('gameSpeedBtn').innerText, 'Game Speed: Fast');
+  assert.equal(stepsOver(60), 120, 'fast is two');
+  click('gameSpeedBtn');
+  assert.equal(dom.elements.get('gameSpeedBtn').innerText, 'Game Speed: Slow');
+  assert.equal(stepsOver(60), 30, 'slow is half');
+  click('gameSpeedBtn');
+  assert.equal(dom.elements.get('gameSpeedBtn').innerText, 'Game Speed: Medium');
+
+  click('settingsBtn');
+  assert.equal(settingsMenu.dataset.view, 'main');
+  click('debugOpenBtn');
+  assert.equal(settingsMenu.dataset.view, 'debug');
+
+  click('debugMoneyBtn');
+  assert.equal(app.game.debug.infiniteMoney, true);
+  assert.equal(dom.elements.get('debugMoneyBtn').innerText, 'Infinite Money: On');
+  const before = app.game.tokens;
+  click('debugGrantBtn');
+  assert.ok(app.game.tokens > before, 'Add Money adds to the treasury');
+
+  click('debugSpeedBtn');
+  assert.equal(app.game.debug.raiderSpeed, 1.5);
+  assert.equal(dom.elements.get('debugSpeedBtn').innerText, 'Attacker Speed: 1.5x');
+  click('debugSpawnsBtn');
+  assert.equal(app.game.debug.spawnRaiders, false);
+  click('debugInvulnerableBtn');
+  assert.equal(app.game.debug.invulnerable, true);
+
+  const season = app.game.season;
+  click('debugSeasonBtn');
+  assert.notEqual(app.game.season, season, 'Next Season moves the calendar on');
+
+  click('debugBackBtn');
+  assert.equal(settingsMenu.dataset.view, 'main');
+  assert.equal(app.gameSpeed().name, 'Medium');
 });

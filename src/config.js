@@ -50,16 +50,74 @@ export const TOP_BAR_HEIGHT = 0;
 export const SIDE_BAR_WIDTH = 0;
 
 export const STARTING_TOKENS = 100;
+
+// How fast the simulation runs against real time. The step itself is fixed at
+// 1/FPS, so a speed is only how many of them a frame is allowed to take.
+export const GAME_SPEEDS = [
+  { name: 'Slow', factor: 0.5 },
+  { name: 'Medium', factor: 1 },
+  { name: 'Fast', factor: 2 },
+];
+
+// Developer conveniences in Settings > Debug. Session-only: a cheat left on
+// from last week should not quietly colour today's balance impressions.
+export const DEFAULT_GAME_SPEED = GAME_SPEEDS[1];
+export const DEBUG = {
+  // Kept topped up to this, so nothing on screen ever reads as unaffordable.
+  moneyFloor: 99999,
+  grantAmount: 500,
+  // Attacker speed multipliers the button cycles through; 0 freezes them.
+  raiderSpeeds: [0, 0.5, 1, 1.5, 2, 3],
+  // The most steps one frame may take: past this the page would stall trying
+  // to catch up, which is worse than the game simply running behind.
+  maxStepsPerFrame: 8,
+};
 export const INCOME_INTERVAL_SECONDS = 2;
 export const REGEN_FRACTION_PER_PAYOUT = 0.0005;
-export const RAIDER_SPAWN_INTERVAL_SECONDS = 2;
+export const RAIDER_SPAWN_INTERVAL_SECONDS = 3;
 export const SEASON_LENGTH_SECONDS = 60;
 
 export const HARVEST_MULTIPLIER = 2;
+
+/**
+ * What a company costs to keep in the field, paid on every payout. A share of
+ * its muster price, so a heavy company eats more than a light one; free
+ * inside `freeRadius` of the nearest castle, then dearer the further afield it
+ * is kept, up to `maxMultiplier`. A routed company draws nothing.
+ */
+export const UPKEEP = {
+  costShare: 0.008,
+  freeRadius: 150,
+  extraPerDistance: 1 / 230,
+  maxMultiplier: 3,
+};
+
+/**
+ * The court skims the treasury: gross income (castle and houses, before wall
+ * and company upkeep) is left alone for `graceSeasons`, then multiplied by
+ * `yearlyFactor` once more for every full year after that -- 0.9, 0.81, 0.729.
+ */
+export const CORRUPTION = {
+  graceSeasons: 8,
+  yearlyFactor: 0.9,
+};
+
+/** The small "+5" / "-2" figures that rise off whatever earns or costs on a payout. */
+export const FLOATERS = {
+  lifetimeSeconds: 1.8,
+  riseHeight: 16,
+  maxHouses: 5,
+  maxWalls: 4,
+  maxGuards: 8,
+  // How far above the ground each source's figure starts.
+  houseLift: 12,
+  wallLift: 12,
+  guardLift: 14,
+};
 export const WINTER_BUILD_MULTIPLIER = 8;
 
 export const WALL = {
-  maxHealth: 300,
+  maxHealth: 150,
   // A section is pegged out for `planSeconds` before any stone is laid. While
   // it is only marked out it is not a wall at all: nothing is blocked by it,
   // nothing routes around it, and it cannot be attacked. That stops a wall
@@ -80,11 +138,11 @@ export const WALL = {
   armor: 1,
   // Its counter-blow against whoever batters it: falling stone, not a sword, so armour is no help.
   attack: 1,
-  defense: 2,
+  defense: 1,
   costPerUnit: 2,
-  minLength: 30,
-  maxLength: 200,
-  snapRadius: 20,
+  minLength: 25,
+  maxLength: 150,
+  snapRadius: 15,
   // How close the cursor must come to a section for Raze, Repair or Fortify
   // to count it as the one being pointed at.
   pickRadius: 20,
@@ -220,18 +278,16 @@ export const HOLD = {
 /**
  * A company whose morale breaks (see each unit type's `breaksAt`) runs for
  * it: it hits at `attackMultiplier` and defends at `defenseMultiplier` of its strength, can only be pinned by
- * an enemy that gets within `catchDistance` of it, and once it is clear of
- * every enemy by `escapeDistance` it has left the field altogether. For a
- * raider, the city itself counts as an enemy -- see Game#raiderThreats.
+ * an enemy that gets within `catchDistance` of it, and after `dissolveSeconds`
+ * of running its men have scattered and slipped away -- it leaves the field.
+ * For a raider, the city itself counts as an enemy -- see Game#raiderThreats.
  */
 export const ROUT = {
   attackMultiplier: 0.5,
   defenseMultiplier: 0.5,
   catchDistance: 8,
-  escapeDistance: 160,
-  // And it must have run at least this far from where it broke -- it is seen
-  // to run, rather than vanishing where it stood.
-  runDistance: 80,
+  // The figures scatter and fade over this long, then the company is gone.
+  dissolveSeconds: 5,
   // How far ahead of itself a fleeing company aims.
   fleeReach: 100,
 };
@@ -256,13 +312,13 @@ export const MASS = {
   // knocked company slides and slows instead of jumping; a shove of speed v
   // carries it about v / knockDecay units. Every impulse scales with the
   // mover's mass over the moved company's (clamped to knockMassRange).
-  knockDecay: 4,
+  knockDecay: 5,
   knockMassRange: [0.5, 2],
-  trampleKnock: 90,
+  trampleKnock: 36,
   trampleSideways: 0.8,
-  counterChargeRebound: 80,
-  counterChargeShove: 25,
-  impactKnock: 45,
+  counterChargeRebound: 30,
+  counterChargeShove: 8,
+  impactKnock: 16,
   trampleStaggerSeconds: 1,
   trampleMomentumKept: 0.7,
   counterChargeMultiplier: 4,

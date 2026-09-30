@@ -206,7 +206,7 @@ test('a company whose health falls past its breaking point routs and breaks off 
   assert.equal(guard.routed, true);
   assert.equal(guard.inMelee, false);
   assert.equal(raider.foes.has(guard), false);
-  assert.equal(guard.selected, false, 'a routed company cannot be commanded');
+  assert.equal(guard.selected, false, 'a company that breaks is dropped from the selection');
   assert.equal(guard.holding, false);
   assert.ok(raider.recoverySeconds > 0, 'its old foes are a beat slow to give chase');
 });
@@ -262,12 +262,41 @@ test('only a routed enemy caught close up is engaged, not one merely within the 
   assert.equal(guard.inMelee, true);
 });
 
-test('a routed company cannot be selected', () => {
+test('a routed company can be selected and ordered, and still runs on its own account after', () => {
   const game = new Game({ random: fixedRandom() });
   const guard = new Guard('IG0', { x: 0, y: 0 });
   guard.routed = true;
+  const raider = new Raider('IR0', { x: 200, y: 0 });
   game.guards.push(guard);
-  assert.deepEqual(game.selectGuardsNear(guard.position), []);
+  game.raiders.push(raider);
+  assert.deepEqual(game.selectGuardsNear(guard.position), [guard]);
+  game.orderGuards([guard], { x: 60, y: 0 });
+  assert.equal(guard.routed, true, 'still routed, so still half strength and still unwilling to hold');
+  for (let frame = 0; frame < 8 * FPS; frame += 1) {
+    game.moveGuards();
+  }
+  assert.ok(guard.position.x > 20, 'it went where it was sent, towards the enemy');
+  assert.equal(guard.routed, true);
+  assert.equal(guard.arrived, true);
+  assert.ok(game.routedDestination(guard).x < guard.position.x, 'then it goes back to running');
+});
+
+test('an engaged company ordered elsewhere breaks off and marches', () => {
+  const game = new Game({ random: fixedRandom() });
+  const guard = new Guard('IG0', { x: 0, y: 0 });
+  const raider = new Raider('IR0', { x: 5, y: 0 });
+  game.guards.push(guard);
+  game.raiders.push(raider);
+  lockEngagements([guard], [raider]);
+  assert.equal(guard.inMelee, true);
+  game.orderGuards([guard], { x: -100, y: 0 });
+  assert.equal(guard.inMelee, false);
+  assert.equal(raider.foes.has(guard), false);
+  assert.ok(raider.recoverySeconds > 0, 'the foe is a beat slow to follow');
+  for (let frame = 0; frame < 20 * FPS; frame += 1) {
+    game.moveGuards();
+  }
+  assert.ok(guard.position.x < -5, 'it has actually moved off');
 });
 
 // --- mass ----------------------------------------------------------------------

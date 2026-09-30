@@ -191,12 +191,6 @@ const MARKER = {
   hold: '#d8b25a',
   holdBar: 3,
   holdGap: 4,
-  // The frame round a portrait in the open battleground mode, where both
-  // armies may be the same faction and the portraits alone cannot say whose
-  // company it is.
-  player: '#4a86c8',
-  enemy: '#c0432f',
-  frameWidth: 2,
 };
 
 // A ring under each selected company (see Game#selectGuardsNear), and the
@@ -1988,7 +1982,7 @@ export class Renderer {
   }
 
   /** The portrait a company carries, over its head. */
-  drawAvatar(company, centreX, bottomY, sideColour = null) {
+  drawAvatar(company, centreX, bottomY) {
     const path = company.type.avatar;
     if (!path) {
       return bottomY;
@@ -2002,13 +1996,6 @@ export class Renderer {
     const height = width * image.naturalHeight / image.naturalWidth;
     const top = bottomY - height;
     this.overlay.drawImage(image, centreX - width / 2, top, width, height);
-    if (sideColour) {
-      this.overlay.save();
-      this.overlay.strokeStyle = sideColour;
-      this.overlay.lineWidth = MARKER.frameWidth;
-      this.overlay.strokeRect(centreX - width / 2 - 1, top - 1, width + 2, height + 2);
-      this.overlay.restore();
-    }
     return top - AVATAR.gap;
   }
 
@@ -2052,29 +2039,22 @@ export class Renderer {
         this.drawCastleBar(view, game, castle, definition);
       }
     }
-    const sides = [[game.raiders, MARKER.enemy], [game.guards, MARKER.player]];
-    for (const [companies, sideColour] of sides) {
-      for (const company of companies) {
-        this.drawCompanyMarkers(view, game, company, game.mode === 'battle' ? sideColour : null);
+    for (const company of [...game.raiders, ...game.guards]) {
+      const model = this.unitFor(company.typeId);
+      if (!model) {
+        continue;
       }
-    }
-  }
-
-  drawCompanyMarkers(view, game, company, sideColour) {
-    const model = this.unitFor(company.typeId);
-    if (!model) {
-      return;
-    }
-    const fraction = company.health / company.type.maxHealth;
-    const top = this.drawCompanyBar(view, game, company, model.radius, fraction);
-    if (top === null) {
-      return;
-    }
-    const above = this.drawAvatar(company, top.x, top.y, sideColour);
-    if (company.routed) {
-      this.drawWhiteFlag(top.x, above);
-    } else if (company.holding) {
-      this.drawHoldMark(top.x, above);
+      const fraction = company.health / company.type.maxHealth;
+      const top = this.drawCompanyBar(view, game, company, model.radius, fraction);
+      if (top === null) {
+        continue;
+      }
+      const above = this.drawAvatar(company, top.x, top.y);
+      if (company.routed) {
+        this.drawWhiteFlag(top.x, above);
+      } else if (company.holding) {
+        this.drawHoldMark(top.x, above);
+      }
     }
   }
 

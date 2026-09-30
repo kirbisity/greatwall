@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEVELS } from '../src/levels.js';
+import { BATTLE_MAPS } from '../src/config.js';
 import { THUMBNAIL_COLUMNS, THUMBNAIL_ROWS, levelThumbnailGrid } from '../src/levelThumbnail.js';
 
 /** Parse an `rgb(r, g, b)` string back into its channels. */
@@ -44,4 +45,12 @@ test("the island's thumbnail shows open water; the desert's does not", () => {
 test('the same level thumbnails the same way twice, so it can be cached at menu-build time', () => {
   const level = LEVELS[0];
   assert.deepEqual(levelThumbnailGrid(level), levelThumbnailGrid(level));
+});
+
+test('a map preview shows the ground it is fought over: the maps do not all look alike', () => {
+  const grids = Object.values(BATTLE_MAPS).map((map) => {
+    const level = { land: { ...LEVELS.find((entry) => entry.mode === 'battle').land, ...map.land } };
+    return levelThumbnailGrid(level, { relief: true }).flat().join('|');
+  });
+  assert.equal(new Set(grids).size, grids.length);
 });

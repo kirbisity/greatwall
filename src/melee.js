@@ -244,6 +244,21 @@ export function rout(company) {
   company.routedAt = { ...company.position };
   company.holding = false;
   company.selected = false;
+  // Whatever order it was last under is forgotten: it runs first.
+  if ('arrived' in company) {
+    company.arrived = true;
+  }
+  disengage(company);
+  company.recoverySeconds = 0;
+  company.momentum = 1;
+}
+
+/**
+ * Break off every fight a company is in. Whatever it was fighting is a beat
+ * slow to give chase, so slipping away is a real chance rather than a
+ * formality -- anything faster will still run it down.
+ */
+export function disengage(company) {
   for (const foe of company.foes) {
     foe.foes.delete(company);
     if (foe.foes.size === 0) {
@@ -253,8 +268,6 @@ export function rout(company) {
   }
   company.foes.clear();
   company.meleeSeconds = 0;
-  company.recoverySeconds = 0;
-  company.momentum = 1;
 }
 
 /**

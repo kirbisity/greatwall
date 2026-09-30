@@ -4,7 +4,9 @@ import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { LEVELS } from './levels.js';
-import { DEFAULT_FACTIONS, FACTIONS } from './config.js';
+import {
+  BATTLE_MAPS, DEFAULT_BATTLE_MAP, DEFAULT_FACTIONS, FACTIONS,
+} from './config.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 import { clamp, distance } from './geometry.js';
 
@@ -59,6 +61,7 @@ class App {
     this.running = false;
     this.chosenLevel = 0;
     this.needsNewGame = true;
+    this.setupConfirmed = false;
     this.needsDraw = true;
     this.lastFrameAt = 0;
     this.bestScore = 0;
@@ -80,6 +83,13 @@ class App {
 
   bindButtons() {
     bind('startBtn2', () => this.start());
+    bind('battleSetupBtn', () => this.openBattleSetup());
+    bind('battleSetupBack', () => this.hud.closeBattleSetup());
+    bind('battleSetupStart', () => {
+      this.hud.closeBattleSetup();
+      this.setupConfirmed = true;
+      this.start();
+    });
     bind('restartBtn', () => this.restart());
     bind('settingsBtn', () => this.hud.openSettings());
     bind('settingsBackBtn', () => this.hud.closeSettings());
@@ -124,8 +134,8 @@ class App {
 
   /**
    * Picking a siege level starts it: there is nothing to unlock, so nothing
-   * to wait for. The open battleground waits for Start instead, since it
-   * has armies to choose first -- see showBattleSetup.
+   * to wait for. The open battleground opens its setup page instead, since
+   * it has a map and armies to choose first -- see openBattleSetup.
    */
   showLevels() {
     this.hud.showLevels(LEVELS, this.chosenLevel, (index) => {
@@ -134,29 +144,43 @@ class App {
       if (LEVELS[index].mode === 'battle') {
         this.needsNewGame = true;
         this.hud.markUnstarted();
+        this.openBattleSetup();
         return;
       }
       this.restart();
     });
-    this.showBattleSetup();
+    this.hud.showBattleSetupButton(LEVELS[this.chosenLevel].mode === 'battle');
   }
 
-  /** The open battleground's welcome text and army pickers, under the level list. */
+  /** The open battleground's setup page: its story, the map and both armies. */
+  openBattleSetup() {
+    this.showBattleSetup();
+    this.hud.openBattleSetup();
+  }
+
   showBattleSetup() {
-    const level = LEVELS[this.chosenLevel];
-    if (level.mode !== 'battle') {
-      this.hud.hideBattleSetup();
-      return;
-    }
-    this.hud.showBattleSetup(level, this.chosenFactions(), (side, factionId) => {
-      settings.factions = { ...this.chosenFactions(), [side]: factionId };
+    this.hud.showBattleSetup(LEVELS[this.chosenLevel], this.chosenSetup(), (kind, id) => {
+      if (kind === 'map') {
+        settings.battleMap = id;
+      } else {
+        settings.factions = { ...this.chosenFactions(), [kind]: id };
+      }
       saveSettings();
-      // The enemy line is drawn up when a game begins, so a new choice
-      // means a new game -- but only once Start is pressed.
+      // The ground and the enemy line are laid out when a game begins, so a
+      // new choice means a new game -- but only once Start is pressed.
       this.needsNewGame = true;
       this.hud.markUnstarted();
       this.showBattleSetup();
     });
+  }
+
+  chosenSetup() {
+    return { factions: this.chosenFactions(), map: this.chosenMap() };
+  }
+
+  /** The saved map, with anything unrecognised put back to the default. */
+  chosenMap() {
+    return BATTLE_MAPS[settings.battleMap] ? settings.battleMap : DEFAULT_BATTLE_MAP;
   }
 
   /** The saved army choices, with anything unrecognised put back to the default. */
@@ -220,12 +244,19 @@ class App {
   }
 
   start() {
+    // A battle not yet set up goes through its setup page first: that page's
+    // own Start Battle button is what brings us back here.
+    if (this.needsNewGame && LEVELS[this.chosenLevel].mode === 'battle' && !this.setupConfirmed) {
+      this.openBattleSetup();
+      return;
+    }
+    this.setupConfirmed = false;
     if (this.needsNewGame) {
       this.newGame();
       this.hud.markStarted();
       if (this.game.mode === 'battle') {
         // The welcome text and the wall-building help both live elsewhere for
-        // this mode (the menu's own setup panel), so straight on to placement.
+        // this mode (the setup page), so straight on to placement.
         this.hud.closeMenu();
         this.enterField();
         return;
@@ -260,12 +291,12 @@ class App {
   }
 
   newGame() {
-    this.game.loadLevel(LEVELS[this.chosenLevel], this.chosenFactions());
+    this.game.loadLevel(LEVELS[this.chosenLevel], this.chosenFactions(), this.chosenMap());
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
     this.hud.playLevelMusic(this.game.level.music);
     // The open battleground's story is told in the menu instead -- see
-    // showBattleSetup -- so it never pops up over the field itself.
+    // the setup page -- so it never pops up over the field itself.
     if (this.game.mode !== 'battle') {
       this.hud.showStory(this.game.level.story);
     }

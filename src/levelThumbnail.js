@@ -15,6 +15,19 @@ export const THUMBNAIL_ROWS = 12;
 // rather than anything read off the ground -- see paintLevelThumbnail.
 const CASTLE_MARK = '#e0b840';
 
+// A map preview shows what the tint alone cannot -- hills and woodland --
+// by lightening high ground and darkening wood towards this green.
+const WOOD_GREEN = [28, 62, 32];
+const HEIGHT_LIGHTENING = 50;
+
+function reliefTint(terrain, x, y, tint) {
+  const light = Math.min(1.5, Math.max(0.6, 1 + terrain.heightAt(x, y) / HEIGHT_LIGHTENING));
+  const wood = Math.min(1, terrain.forestAt(x, y) * 1.5);
+  return tint.map((channel, index) => Math.round(
+    Math.min(255, channel * light) * (1 - wood) + WOOD_GREEN[index] * wood,
+  ));
+}
+
 /**
  * A grid of `rgb()` fills for a level, sampled from the same terrain colour
  * the real ground uses (see Terrain#groundTintAt) -- so the thumbnail is a
@@ -22,7 +35,7 @@ const CASTLE_MARK = '#e0b840';
  * than a guess at it. Pure data, with no canvas of its own, so it can be
  * checked without one.
  */
-export function levelThumbnailGrid(level) {
+export function levelThumbnailGrid(level, { relief = false } = {}) {
   const terrain = new Terrain(1, level.land, level.river ?? null, level.sea ?? null);
   const grid = [];
   for (let row = 0; row < THUMBNAIL_ROWS; row += 1) {
@@ -30,7 +43,8 @@ export function levelThumbnailGrid(level) {
     for (let column = 0; column < THUMBNAIL_COLUMNS; column += 1) {
       const x = ((column + 0.5) / THUMBNAIL_COLUMNS - 0.5) * 2 * REACH;
       const y = ((row + 0.5) / THUMBNAIL_ROWS - 0.5) * 2 * REACH;
-      const [red, green, blue] = terrain.groundTintAt(x, y);
+      const tint = terrain.groundTintAt(x, y);
+      const [red, green, blue] = relief ? reliefTint(terrain, x, y, tint) : tint;
       line.push(`rgb(${red}, ${green}, ${blue})`);
     }
     grid.push(line);
@@ -45,17 +59,20 @@ export function levelThumbnailGrid(level) {
  * .levelThumb in greatwall.css), which is what makes it read as pixel art
  * rather than a photo blurred up.
  */
-export function paintLevelThumbnail(canvas, level) {
+export function paintLevelThumbnail(canvas, level, { marked = true, relief = false } = {}) {
   canvas.width = THUMBNAIL_COLUMNS;
   canvas.height = THUMBNAIL_ROWS;
   const context = canvas.getContext('2d');
-  const grid = levelThumbnailGrid(level);
+  const grid = levelThumbnailGrid(level, { relief });
   grid.forEach((line, row) => {
     line.forEach((fill, column) => {
       context.fillStyle = fill;
       context.fillRect(column, row, 1, 1);
     });
   });
+  if (!marked) {
+    return;
+  }
   const midColumn = Math.floor(THUMBNAIL_COLUMNS / 2);
   const midRow = Math.floor(THUMBNAIL_ROWS / 2);
   context.fillStyle = CASTLE_MARK;

@@ -14,7 +14,9 @@ import {
 } from './geometry.js';
 import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
-import { lockEngagements, resolveMelee, testMorale } from './melee.js';
+import {
+  disengage, lockEngagements, resolveMelee, testMorale,
+} from './melee.js';
 import { Terrain } from './terrain.js';
 import { unitSize } from './units.js';
 import { LEVELS } from './levels.js';
@@ -25,6 +27,8 @@ import {
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  BATTLE_MAPS,
+  DEFAULT_BATTLE_MAP,
   DEFAULT_FACTIONS,
   EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
@@ -123,6 +127,7 @@ export class Game {
     seed = 1,
     level = LEVELS[0],
     factions = DEFAULT_FACTIONS,
+    battleMap = DEFAULT_BATTLE_MAP,
   } = {}) {
     this.onMessage = onMessage;
     this.onEffect = onEffect;
@@ -133,7 +138,7 @@ export class Game {
     this.seed = seed;
     this.wallHintShown = false;
     this.upgradeHintShown = false;
-    this.loadLevel(level, factions);
+    this.loadLevel(level, factions, battleMap);
   }
 
   /**
@@ -141,8 +146,10 @@ export class Game {
    * a level's ground is fixed for its whole run, but the Game itself carries
    * on -- input and the renderer hold onto this object.
    */
-  loadLevel(level, factions = DEFAULT_FACTIONS) {
+  loadLevel(level, factions = DEFAULT_FACTIONS, battleMap = DEFAULT_BATTLE_MAP) {
     this.level = level;
+    // Which ground the open battleground is fought over -- see BATTLE_MAPS.
+    this.battleMap = BATTLE_MAPS[battleMap] ? battleMap : DEFAULT_BATTLE_MAP;
     // Who fields what in the open battleground mode -- see FACTIONS. An id
     // this game has never heard of falls back to the default for that side.
     this.factions = {
@@ -169,7 +176,8 @@ export class Game {
     this.guardTiers = { ...CASTLE_GUARD_TIERS, ...level.guardTiers };
     // Null leaves the renderer on its own default house.
     this.houseDefinition = level.house ?? null;
-    this.terrain = new Terrain(this.seed, level.land, level.river, level.sea);
+    const land = level.mode === 'battle' ? { ...level.land, ...BATTLE_MAPS[this.battleMap].land } : level.land;
+    this.terrain = new Terrain(this.seed, land, level.river, level.sea);
     // The coves a seaborne level lands its boats at, fixed for the run: the
     // renderer beaches a hull at each, and spawnPoint puts raiders ashore
     // there (see levels.js).
@@ -324,16 +332,18 @@ export class Game {
       if (!this.started) {
         return false;
       }
+      // A line that has broken and is running counts as beaten, whether or
+      // not any of it has actually left the field yet.
       // Losing the Emperor is fatal here too, the same as in a siege --
       // even with other companies still standing.
-      return this.guards.length === 0 || (this.emperor !== null && !this.emperor.isAlive);
+      return this.guards.every((guard) => guard.routed) || (this.emperor !== null && !this.emperor.isAlive);
     }
     return this.castles.some((castle) => castle.health < 0) || (this.emperor !== null && !this.emperor.isAlive);
   }
 
   /** The open battleground mode's own win condition -- sieges never end. */
   get isVictorious() {
-    return this.mode === 'battle' && this.started && this.raiders.length === 0;
+    return this.mode === 'battle' && this.started && this.raiders.every((raider) => raider.routed);
   }
 
   /** How far through its burning the city is, 0 to 1. */
@@ -1054,9 +1064,8 @@ export class Game {
    */
   selectGuardsNear(point) {
     const reach = IMPERIAL.selectRadius * IMPERIAL.selectRadius;
-    // A routed company is past taking orders -- see melee.js's rout.
     const found = this.guards.filter((guard) => (
-      !guard.routed && distanceSquared(guard.position, point) <= reach
+      distanceSquared(guard.position, point) <= reach
     ));
     for (const guard of this.guards) {
       guard.selected = found.includes(guard);
@@ -1077,12 +1086,14 @@ export class Game {
 
   /**
    * Send a selected group to hold new ground, spread a little around the
-   * point instead of stacked on the exact same spot -- but a company
-   * already trading blows stays put until it is free, the same as any
-   * other order (see Company#isHeld, moveGuards).
+   * point instead of stacked on the exact same spot. A company already
+   * trading blows breaks off and goes (see melee.js's disengage), and a
+   * routed one goes too -- but it stays routed, weak and unwilling, so it
+   * is likely to break again (see moveGuards).
    */
   orderGuards(guards, target) {
     guards.forEach((guard, index) => {
+      disengage(guard);
       guard.orders = spreadPoint(target, index, guards.length);
       guard.recalled = false;
       guard.selected = false;
@@ -1137,6 +1148,18 @@ export class Game {
       x: company.position.x + awayX / length * ROUT.fleeReach,
       y: company.position.y + awayY / length * ROUT.fleeReach,
     };
+  }
+
+  /** A routed company obeys a fresh order until it gets there, then goes back to running. */
+  routedDestination(guard) {
+    if (!guard.arrived) {
+      if (distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2) {
+        guard.arrived = true;
+      } else {
+        return guard.orders;
+      }
+    }
+    return this.fleeDestination(guard, this.raiders);
   }
 
   /**
@@ -1279,7 +1302,7 @@ export class Game {
         continue;
       }
       guard.destination = guard.routed
-        ? this.fleeDestination(guard, this.raiders)
+        ? this.routedDestination(guard)
         : this.guardDestination(guard);
       this.trackProgress(guard, 1 / FPS);
       steerCompany(guard, navigation, this.random);

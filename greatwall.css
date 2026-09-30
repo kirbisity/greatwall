@@ -515,59 +515,72 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .levelBlurb { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; opacity: .8; }
 
-/* --- open field setup: the story and each side's army ------------------- */
+/* --- open field setup page: the map and each side's army ---------------- */
 
-.battleSetup {
-	display: none;
+#battleSetupPage { z-index: 12; }
+
+.battleSetupContent { padding-top: 6vh; }
+
+.battleStory {
 	width: min(680px, 90vw);
-	margin: 22px auto 0;
-	padding: 18px 20px 20px;
-	border: 1px solid var(--bronze-dark);
-	border-radius: 4px;
-	background: rgba(16, 13, 9, .55);
-	text-align: left;
+	margin: 14px auto 22px;
+	font-size: 15px;
+	line-height: 1.6;
+	font-style: italic;
+	color: var(--parchment-dim);
 }
 
-.battleStory { margin: 0 0 16px; font-size: 15px; line-height: 1.6; font-style: italic; color: var(--parchment-dim); text-align: center; }
+.battleSetupBody { width: min(1080px, 94vw); margin: 0 auto; text-align: left; }
 
-.factionSides { display: flex; flex-wrap: wrap; gap: 20px; }
+.setupSection { margin-bottom: 22px; }
 
-.factionSide { flex: 1 1 260px; min-width: 0; }
-
-.factionHeading {
-	margin: 0 0 8px;
+.setupHeading {
+	margin: 0 0 10px;
 	font-family: var(--display);
 	font-size: 14px;
 	font-weight: 600;
 	letter-spacing: .14em;
 	text-transform: uppercase;
+	color: var(--bronze);
 }
 
-.factionSide-player .factionHeading { color: #6fa3dd; }
-.factionSide-enemy .factionHeading { color: #d9705c; }
+.setupSection-player .setupHeading { color: #6fa3dd; }
+.setupSection-enemy .setupHeading { color: #d9705c; }
 
-.factionChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.setupCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
 
-.factionChip {
-	padding: 7px 11px;
-	font-family: var(--display);
-	font-size: 12px;
-	letter-spacing: .08em;
-	text-transform: uppercase;
+.setupCard {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px;
+	font: inherit;
+	text-align: left;
 	color: var(--parchment-dim);
-	background: none;
+	background: rgba(16, 13, 9, .55);
 	border: 1px solid rgba(138, 109, 36, .45);
-	border-radius: 3px;
+	border-radius: 4px;
 	cursor: pointer;
 }
 
-.factionChip:hover { color: var(--parchment); border-color: var(--bronze); }
+.setupCard:hover { color: var(--parchment); border-color: var(--bronze); }
 
-.factionChip.is-chosen { color: var(--ink); border-color: var(--bronze); background: linear-gradient(180deg, #e2c866, var(--bronze-deep)); }
+.setupCard.is-chosen {
+	color: var(--parchment);
+	border-color: var(--bronze);
+	background: linear-gradient(180deg, rgba(120, 92, 30, .45), rgba(16, 13, 9, .6));
+	box-shadow: 0 0 0 1px var(--bronze) inset;
+}
 
-.factionBlurb { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--parchment); }
+.setupThumb { width: 100%; height: 84px; }
 
-.factionUnits { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--parchment-dim); opacity: .85; }
+.setupCardText { display: flex; flex-direction: column; gap: 5px; }
+
+.setupCardName { font-family: var(--display); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+
+.setupCardBlurb { font-size: 13px; line-height: 1.5; }
+
+.setupCardUnits { font-size: 11px; line-height: 1.5; opacity: .8; }
 
 /* --- modals ------------------------------------------------------------ */
 
@@ -884,3 +897,9 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	.toolName { font-size: 9px; letter-spacing: .06em; }
 }
 
+
+@media (max-width: 600px) {
+	.setupCards { grid-template-columns: 1fr; }
+	.setupCard { flex-direction: row; align-items: flex-start; }
+	.setupThumb { flex: none; width: 96px; height: 72px; }
+}

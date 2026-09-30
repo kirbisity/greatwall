@@ -564,6 +564,40 @@ export const FACTIONS = {
 };
 
 /** Who fights whom until the player says otherwise. */
+/**
+ * The grounds the open battleground can be fought over: each patches the
+ * level's own flat field (see levels.js) with hills or woodland. Hills tire
+ * whoever climbs them and trees slow whoever pushes through, so the ground
+ * decides who gains from a charge. `land` is read by Terrain like a level's.
+ */
+export const BATTLE_MAPS = {
+  plains: {
+    name: 'Open Plains',
+    blurb: 'Flat, bare ground. Nothing but the enemy between the lines.',
+    land: {},
+  },
+  downs: {
+    name: 'Rolling Downs',
+    blurb: 'Long slopes. Whoever holds the rise is fresh; whoever climbs it is not.',
+    land: {
+      hillScale: 380, hillHeight: 36, detailHeight: 2, slopeRelief: 3,
+    },
+  },
+  greenwood: {
+    name: 'The Greenwood',
+    blurb: 'Thick stands of trees that drag at any company pushing through them.',
+    land: { forestThreshold: 0.42, forestScale: 200 },
+  },
+  highlands: {
+    name: 'Windswept Highlands',
+    blurb: 'Steep, broken hills with woods in the hollows. Hard going for everyone.',
+    land: {
+      hillScale: 320, hillHeight: 52, detailHeight: 3, slopeRelief: 4, forestThreshold: 0.68,
+    },
+  },
+};
+export const DEFAULT_BATTLE_MAP = 'plains';
+
 export const DEFAULT_FACTIONS = { player: 'imperial', enemy: 'steppe' };
 
 /**

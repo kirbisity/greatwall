@@ -8,6 +8,7 @@ import { LEVELS } from '../src/levels.js';
 import { compileUnit, unitSize } from '../src/units.js';
 import {
   BATTLE,
+  BATTLE_MAPS,
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
@@ -775,6 +776,22 @@ test('isDefeated waits for the battle to start, then falls the moment the last c
   assert.equal(game.isDefeated, true, 'the last company fell');
 });
 
+test('a battle is lost once every company of the line is routed, and won once every raider is', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  game.placeGuard('IG0', { x: 20, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  game.guards[0].routed = true;
+  assert.equal(game.isDefeated, false, 'one company is still in the fight');
+  game.guards[1].routed = true;
+  assert.equal(game.isDefeated, true);
+  assert.equal(game.isVictorious, false);
+  for (const raider of game.raiders) {
+    raider.routed = true;
+  }
+  assert.equal(game.isVictorious, true);
+});
+
 test('isVictorious fires once every raider on the field is down, and never before the battle starts', () => {
   const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
   game.raiders = [];
@@ -1033,5 +1050,24 @@ test('every faction is fully playable: known types, portraits and models, on eit
       assert.doesNotThrow(() => new Guard(typeId), `${typeId} as a player company`);
       assert.ok(compileUnit(typeId), `${typeId} needs a model`);
     }
+  }
+});
+
+test('the open field takes its ground from the chosen map, and falls back to plains for an unknown one', () => {
+  const flat = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const hilly = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, battleMap: 'highlands' });
+  assert.equal(flat.battleMap, 'plains');
+  assert.equal(hilly.battleMap, 'highlands');
+  assert.equal(hilly.terrain.land.hillHeight, BATTLE_MAPS.highlands.land.hillHeight);
+  assert.notEqual(flat.terrain.land.hillHeight, hilly.terrain.land.hillHeight);
+  hilly.loadLevel(BATTLE_LEVEL, undefined, 'no-such-map');
+  assert.equal(hilly.battleMap, 'plains');
+});
+
+test('every battle map leaves the two baselines clear enough to fight over', () => {
+  for (const id of Object.keys(BATTLE_MAPS)) {
+    const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, battleMap: id });
+    assert.ok(game.raiders.length > 0, `${id} draws up an enemy line`);
+    assert.ok(game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }), `${id} lets a company be placed`);
   }
 });

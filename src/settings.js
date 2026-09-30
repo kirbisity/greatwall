@@ -1,4 +1,4 @@
-import { DEFAULT_FACTIONS } from './config.js';
+import { DEFAULT_BATTLE_MAP, DEFAULT_FACTIONS } from './config.js';
 
 const STORAGE_KEY = 'greatwall.settings';
 
@@ -8,6 +8,7 @@ export const settings = {
   showRoutes: false,
   // Who fights whom in the open battleground mode -- see FACTIONS.
   factions: { ...DEFAULT_FACTIONS },
+  battleMap: DEFAULT_BATTLE_MAP,
 };
 
 export function loadSettings() {

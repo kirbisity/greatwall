@@ -1,5 +1,5 @@
 import {
-  AUDIO_VOLUME_STEP, BATTLE, FACTIONS, INITIAL_SOUND_LEVEL, SEASONS, UNIT_TYPES,
+  AUDIO_VOLUME_STEP, BATTLE, BATTLE_MAPS, FACTIONS, INITIAL_SOUND_LEVEL, SEASONS, UNIT_TYPES,
 } from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
 import { Sfx } from './sfx.js';
@@ -98,7 +98,10 @@ export class Hud {
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
     this.levelList = element('levelList');
-    this.battleSetup = element('battleSetup');
+    this.battleSetupPage = element('battleSetupPage');
+    this.battleSetupStory = element('battleSetupStory');
+    this.battleSetupBody = element('battleSetupBody');
+    this.battleSetupButton = element('battleSetupBtn');
     this.settings = element('settingMenu');
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
@@ -306,57 +309,101 @@ export class Hud {
   }
 
   /**
-   * The open battleground mode's welcome text and army choice, shown in the
-   * main menu under the level picker: the level's story, then a row of
-   * factions and a description for each side. `onPick(side, factionId)` is
-   * told about every change; this only redraws what it is handed back.
+   * The open battleground's own page: the level's story, then a card to
+   * pick for the map and for each side's army. `choice` is `{ factions,
+   * map }` as currently chosen and `onPick(kind, id)` is told about every
+   * change, kind being 'map', 'player' or 'enemy'; this only redraws what
+   * it is handed back.
    */
-  showBattleSetup(level, factions, onPick) {
-    this.battleSetup.replaceChildren();
-    const story = document.createElement('p');
-    story.className = 'battleStory';
-    story.innerText = level.story ?? '';
-    this.battleSetup.append(story);
-
-    const sides = document.createElement('div');
-    sides.className = 'factionSides';
-    for (const [side, heading] of [['player', 'Your army'], ['enemy', 'The enemy']]) {
-      sides.append(this.buildFactionSide(side, heading, factions[side], onPick));
-    }
-    this.battleSetup.append(sides);
-    this.battleSetup.style.display = 'block';
+  showBattleSetup(level, choice, onPick) {
+    this.battleSetupStory.innerText = level.story ?? '';
+    this.battleSetupBody.replaceChildren();
+    this.battleSetupBody.append(
+      this.buildSetupSection('setupSection-map', 'The ground', this.buildMapCards(level, choice.map, onPick)),
+      this.buildSetupSection('setupSection-player', 'Your army', this.buildFactionCards('player', choice.factions.player, onPick)),
+      this.buildSetupSection('setupSection-enemy', 'The enemy', this.buildFactionCards('enemy', choice.factions.enemy, onPick)),
+    );
   }
 
-  hideBattleSetup() {
-    this.battleSetup.style.display = 'none';
+  openBattleSetup() {
+    this.battleSetupPage.style.height = '100%';
   }
 
-  buildFactionSide(side, heading, chosen, onPick) {
-    const column = document.createElement('div');
-    column.className = `factionSide factionSide-${side}`;
+  closeBattleSetup() {
+    this.battleSetupPage.style.height = '0%';
+  }
+
+  /** The menu's own shortcut into the setup page, shown only for the open battleground. */
+  showBattleSetupButton(visible) {
+    this.battleSetupButton.style.display = visible ? 'block' : 'none';
+  }
+
+  buildSetupSection(className, heading, cards) {
+    const section = document.createElement('section');
+    section.className = `setupSection ${className}`;
     const title = document.createElement('h3');
-    title.className = 'factionHeading';
+    title.className = 'setupHeading';
     title.innerText = heading;
-    const chips = document.createElement('div');
-    chips.className = 'factionChips';
-    for (const [id, faction] of Object.entries(FACTIONS)) {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = id === chosen ? 'factionChip is-chosen' : 'factionChip';
-      chip.dataset.faction = id;
-      chip.innerText = faction.name;
-      chip.addEventListener('click', () => onPick(side, id));
-      chips.append(chip);
+    section.append(title, cards);
+    return section;
+  }
+
+  buildSetupCard(chosen, kind, id) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = chosen ? 'setupCard is-chosen' : 'setupCard';
+    card.dataset.kind = kind;
+    card.dataset.id = id;
+    return card;
+  }
+
+  buildCardText(name, blurb, detail = null) {
+    const text = document.createElement('span');
+    text.className = 'setupCardText';
+    const title = document.createElement('span');
+    title.className = 'setupCardName';
+    title.innerText = name;
+    const body = document.createElement('span');
+    body.className = 'setupCardBlurb';
+    body.innerText = blurb;
+    text.append(title, body);
+    if (detail) {
+      const units = document.createElement('span');
+      units.className = 'setupCardUnits';
+      units.innerText = detail;
+      text.append(units);
     }
-    const faction = FACTIONS[chosen];
-    const blurb = document.createElement('p');
-    blurb.className = 'factionBlurb';
-    blurb.innerText = faction.blurb;
-    const units = document.createElement('p');
-    units.className = 'factionUnits';
-    units.innerText = faction.roster.map((entry) => UNIT_TYPES[entry.id].name).join(' \u00b7 ');
-    column.append(title, chips, blurb, units);
-    return column;
+    return text;
+  }
+
+  buildMapCards(level, chosen, onPick) {
+    const row = document.createElement('div');
+    row.className = 'setupCards';
+    for (const [id, map] of Object.entries(BATTLE_MAPS)) {
+      const card = this.buildSetupCard(id === chosen, 'map', id);
+      const thumb = document.createElement('canvas');
+      thumb.className = 'levelThumb setupThumb';
+      paintLevelThumbnail(thumb, { land: { ...level.land, ...map.land } }, { marked: false, relief: true });
+      card.append(thumb, this.buildCardText(map.name, map.blurb));
+      card.addEventListener('click', () => onPick('map', id));
+      row.append(card);
+    }
+    return row;
+  }
+
+  buildFactionCards(side, chosen, onPick) {
+    const row = document.createElement('div');
+    row.className = 'setupCards';
+    for (const [id, faction] of Object.entries(FACTIONS)) {
+      const card = this.buildSetupCard(id === chosen, side, id);
+      const roster = faction.roster
+        .map((entry) => `${UNIT_TYPES[entry.id].name} ${entry.cost}`)
+        .join(' \u00b7 ');
+      card.append(this.buildCardText(faction.name, faction.blurb, roster));
+      card.addEventListener('click', () => onPick(side, id));
+      row.append(card);
+    }
+    return row;
   }
 
   openSettings() {
@@ -522,7 +569,9 @@ export class Hud {
    * to plant them where they stand, "Release" once every one of them
    * already is. `screen` is where over them to put it, or null to hide it.
    */
-  updateHoldToggle(guards, screen) {
+  updateHoldToggle(selected, screen) {
+    // A routed company can be sent somewhere but not told to stand its ground.
+    const guards = selected.filter((guard) => !guard.routed);
     if (guards.length === 0 || !screen) {
       this.holdToggle.style.display = 'none';
       return;

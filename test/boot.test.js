@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { LEVELS } from '../src/levels.js';
+import { BATTLE_MAPS } from '../src/config.js';
 
 /**
  * Boots main.js against a stub DOM whose element ids come from the real page,
@@ -174,27 +175,39 @@ test('the app boots, plays frames and reacts to input without touching a missing
   assert.equal(app.running, false, 'escape pauses and opens the menu');
 });
 
-test('the open field is set up in the menu -- story and both armies -- and begins without a popup', async () => {
+test('the open field has its own setup page -- story, map and both armies -- and begins without a popup', async () => {
   const dom = bootedDom;
   const { app } = await import('../src/main.js');
   const openFieldIndex = LEVELS.findIndex((level) => level.mode === 'battle');
+  const cardsFor = (title) => dom.elements.get('battleSetupBody').children
+    .find((section) => section.className.includes(title)).children[1].children;
+  const cardFor = (title, id) => cardsFor(title).find((card) => card.dataset.id === id);
 
   const levelButtons = dom.elements.get('levelList').children;
   levelButtons[openFieldIndex].listeners.get('click')();
-  assert.equal(dom.elements.get('battleSetup').style.display, 'block', 'the setup panel shows for the open field');
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '100%', 'picking the open field opens its page');
+  assert.equal(dom.elements.get('battleSetupBtn').style.display, 'block');
   assert.equal(app.game.mode, 'siege', 'picking the level waits for Start rather than beginning it');
-  const [story, sides] = dom.elements.get('battleSetup').children;
-  assert.equal(story.innerText, LEVELS[openFieldIndex].story, 'the story is told in the menu');
-  const [player] = sides.children;
-  const chipFor = (column, id) => column.children[1].children.find((chip) => chip.dataset.faction === id);
-  assert.match(player.children[2].innerText, /Drilled/, 'the chosen faction is described');
+  assert.equal(dom.elements.get('battleSetupStory').innerText, LEVELS[openFieldIndex].story, 'the story is told on the page');
+  assert.equal(cardsFor('setupSection-map').length, Object.keys(BATTLE_MAPS).length, 'a card for every map');
 
-  chipFor(player, 'japan').listeners.get('click')();
-  chipFor(dom.elements.get('battleSetup').children[1].children[1], 'imperial').listeners.get('click')();
+  cardFor('setupSection-map', 'greenwood').listeners.get('click')();
+  cardFor('setupSection-player', 'japan').listeners.get('click')();
+  cardFor('setupSection-enemy', 'imperial').listeners.get('click')();
   assert.deepEqual(app.chosenFactions(), { player: 'japan', enemy: 'imperial' });
+  assert.equal(app.chosenMap(), 'greenwood');
+  assert.ok(cardFor('setupSection-map', 'greenwood').className.includes('is-chosen'));
 
+  dom.elements.get('battleSetupBack').listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
   dom.elements.get('startBtn2').listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '100%', 'Start on a fresh battle goes through the page');
+  assert.equal(app.game.mode, 'siege');
+
+  dom.elements.get('battleSetupStart').listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
   assert.equal(app.game.mode, 'battle');
+  assert.equal(app.game.battleMap, 'greenwood');
   assert.deepEqual(app.game.factions, { player: 'japan', enemy: 'imperial' });
   assert.ok(app.game.raiders.every((raider) => raider.typeId.startsWith('IG_') || raider.typeId === 'IG0'));
   assert.equal(dom.elements.get('storyBanner').classList.contains('is-shown'), false, 'no story popup over the field');
@@ -202,5 +215,5 @@ test('the open field is set up in the menu -- story and both armies -- and begin
 
   dom.elements.get('menuBtn').listeners.get('click')();
   levelButtons[0].listeners.get('click')();
-  assert.equal(dom.elements.get('battleSetup').style.display, 'none', 'a siege level has no armies to pick');
+  assert.equal(dom.elements.get('battleSetupBtn').style.display, 'none', 'a siege level has no armies to pick');
 });

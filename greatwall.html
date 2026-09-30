@@ -113,12 +113,26 @@
 			<h1 class="gameTitle">Greatwall</h1>
 			<p id="navinfo" class="gameTagline">Build walls to defend the city</p>
 			<div id="levelList" class="levelList"></div>
-			<div id="battleSetup" class="battleSetup"></div>
 			<div class="menuList">
 				<button id="startBtn2" class="menuItem menuItem-primary">Start</button>
+				<button id="battleSetupBtn" class="menuItem">Choose Armies &amp; Map</button>
 				<button id="restartBtn" class="menuItem">Restart</button>
 				<button id="settingsBtn" class="menuItem">Settings</button>
 				<a href="index.html" class="menuItem">Quit</a>
+			</div>
+		</div>
+	</div>
+
+	<!-- The open battleground's own setup page: the map and each side's army,
+	     chosen before the field is entered. Built by Hud#showBattleSetup. -->
+	<div id="battleSetupPage" class="overlay">
+		<div class="overlay-content battleSetupContent">
+			<h2 class="panelTitle">Prepare for Battle</h2>
+			<p id="battleSetupStory" class="battleStory"></p>
+			<div id="battleSetupBody" class="battleSetupBody"></div>
+			<div class="menuList">
+				<button id="battleSetupStart" class="menuItem menuItem-primary">Start Battle</button>
+				<button id="battleSetupBack" class="menuItem">Back</button>
 			</div>
 		</div>
 	</div>

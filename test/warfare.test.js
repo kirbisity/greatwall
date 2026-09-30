@@ -238,15 +238,22 @@ test('a routed company flees the nearest enemy and never hunts', () => {
   assert.ok(away.x < guard.position.x, 'runs away from the raider, not at it');
 });
 
-test('a routed company that gets clear of every enemy leaves the field', () => {
+test('a routed company scatters and leaves the field after the dissolve time', () => {
   const game = new Game({ random: fixedRandom() });
   const guard = new Guard('IG0', { x: 0, y: 0 });
   guard.routed = true;
   game.guards.push(guard);
-  game.raiders.push(new Raider('IR0', { x: ROUT.escapeDistance + 50, y: 0 }));
-  guard.routedAt = { x: ROUT.runDistance + 1, y: 0 };
-  game.moveGuards();
+  game.raiders.push(new Raider('IR0', { x: 20, y: 0 }));
+  for (let frame = 0; frame < (ROUT.dissolveSeconds - 1) * FPS; frame += 1) {
+    game.dissolveRouted(guard);
+  }
+  assert.equal(guard.fled, false, 'still on the field a second before the end');
+  assert.ok(guard.dissolve > 0.7 && guard.dissolve < 1, 'and mostly faded');
+  for (let frame = 0; frame < 1.5 * FPS; frame += 1) {
+    game.dissolveRouted(guard);
+  }
   assert.equal(guard.fled, true);
+  assert.equal(guard.dissolve, 1);
   game.step();
   assert.equal(game.guards.includes(guard), false);
 });
@@ -426,16 +433,10 @@ test('a raider routed at the walls runs from the city, not on into it', () => {
   assert.ok(away.x > raider.position.x, 'heads back out, away from the castle');
 });
 
-test('a routed company has to actually run for it before it leaves the field', () => {
-  const game = new Game({ random: fixedRandom() });
+test('a company that has not routed does not dissolve', () => {
   const guard = new Guard('IG0', { x: 0, y: 0 });
-  guard.routed = true;
-  guard.routedAt = { x: 0, y: 0 };
-  game.checkEscape(guard, []);
-  assert.equal(guard.fled, false, 'no enemies about, but it has not got anywhere yet');
-  guard.position = { x: ROUT.runDistance + 1, y: 0 };
-  game.checkEscape(guard, []);
-  assert.equal(guard.fled, true);
+  assert.equal(guard.dissolve, 0);
+  assert.equal(guard.fled, false);
 });
 
 const total = (type) => type.attackAA + type.attackNormal;

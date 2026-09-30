@@ -26,11 +26,15 @@ import { BUILDINGS } from './buildings/index.js';
 import {
   AVOIDANCE,
   BATTLE,
+  CORRUPTION,
+  FLOATERS,
+  UPKEEP,
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
   BATTLE_MAPS,
   DEFAULT_BATTLE_MAP,
+  DEBUG,
   DEFAULT_FACTIONS,
   EARTHWORK,
   EMPEROR_TIER_MULTIPLIER,
@@ -146,6 +150,11 @@ export class Game {
     this.seed = seed;
     this.wallHintShown = false;
     this.upgradeHintShown = false;
+    // Set from Settings > Debug; lives here rather than in restart() so a new
+    // level or a Restart does not undo it.
+    this.debug = {
+      infiniteMoney: false, invulnerable: false, spawnRaiders: true, raiderSpeed: 1,
+    };
     this.loadLevel(level, factions, battleMap, budget);
   }
 
@@ -204,6 +213,8 @@ export class Game {
     // its cached landscape is stale -- see Renderer#drawGround.
     this.terrainRevision = 0;
     this.guards = [];
+    // Rising money figures -- see floatPayout.
+    this.floaters = [];
     // The one Emperor a game gets -- see dispatchOptions/spawnEmperor.
     // Mustered only stays true for the run it happened on: a fresh level
     // (or a restart) gets its own free launch back.
@@ -377,6 +388,38 @@ export class Game {
     return this.season % SEASONS_PER_YEAR === WINTER ? WINTER_BUILD_MULTIPLIER : 1;
   }
 
+  /** 1 through the grace period, then 0.9, 0.81, 0.729 ... one step per year after it. */
+  get corruptionFactor() {
+    const seasonsPast = this.season - CORRUPTION.graceSeasons;
+    if (seasonsPast < 0) {
+      return 1;
+    }
+    const yearsCorrupt = Math.floor(seasonsPast / SEASONS_PER_YEAR) + 1;
+    return CORRUPTION.yearlyFactor ** yearsCorrupt;
+  }
+
+  /**
+   * Coin per payout to keep one company in the field: a share of its price,
+   * dearer the further from the nearest castle it is kept. Whole coins, and
+   * never less than one for a paid company. Routed and free (Emperor)
+   * companies cost nothing.
+   */
+  guardUpkeep(guard) {
+    const price = guard.type.cost ?? 0;
+    if (guard.routed || price <= 0) {
+      return 0;
+    }
+    // Home is where it mustered, which is the castle -- except in the open
+    // field, where there is no castle to be far from.
+    let nearest = this.castles.length === 0 ? distance(guard.position, guard.home) : Infinity;
+    for (const castle of this.castles) {
+      nearest = Math.min(nearest, distance(guard.position, castle.position));
+    }
+    const beyond = Math.max(0, nearest - UPKEEP.freeRadius);
+    const multiplier = Math.min(UPKEEP.maxMultiplier, 1 + beyond * UPKEEP.extraPerDistance);
+    return Math.max(1, Math.round(price * UPKEEP.costShare * multiplier));
+  }
+
   get harvestMultiplier() {
     return this.season % SEASONS_PER_YEAR === AUTUMN ? HARVEST_MULTIPLIER : 1;
   }
@@ -464,6 +507,8 @@ export class Game {
   }
 
   step() {
+    this.applyDebug();
+    this.ageFloaters(1 / FPS);
     if (this.advanceClock()) {
       this.onSecondElapsed();
     }
@@ -519,6 +564,25 @@ export class Game {
       }
       this.breachSeconds = Math.min(BREACH.collapseSeconds, (this.breachSeconds ?? 0) + 1 / FPS);
     }
+  }
+
+  /** Settings > Debug: the per-frame cheats. */
+  applyDebug() {
+    if (this.debug.infiniteMoney) {
+      this.tokens = Math.max(this.tokens, DEBUG.moneyFloor);
+    }
+    if (this.debug.invulnerable) {
+      for (const castle of this.castles) {
+        castle.health = castle.effectiveType.maxHealth;
+      }
+      for (const wall of this.walls) {
+        wall.health = wall.maxHealth * wall.built;
+      }
+    }
+  }
+
+  grantMoney(amount) {
+    this.tokens += amount;
   }
 
   onSecondElapsed() {
@@ -582,10 +646,21 @@ export class Game {
     }
     const upkeepPerWall = WALL.upkeepPerSection;
     const upkeepUnits = wallUpkeep / upkeepPerWall;
+    let guardCount = 0;
+    let guardUpkeep = 0;
+    for (const guard of this.guards) {
+      const bill = this.guardUpkeep(guard);
+      if (bill > 0) {
+        guardCount += 1;
+        guardUpkeep += bill;
+      }
+    }
+    const corruption = this.corruptionFactor;
     return {
       cityIncome, houseCount, housePerHouse, houseIncome,
       wallCount, upkeepPerWall, upkeepUnits, wallUpkeep,
-      total: cityIncome + houseIncome - wallUpkeep,
+      guardCount, guardUpkeep, corruption,
+      total: (cityIncome + houseIncome) * corruption - wallUpkeep - guardUpkeep,
     };
   }
 
@@ -596,6 +671,56 @@ export class Game {
       castle.regenerate(REGEN_FRACTION_PER_PAYOUT);
     }
     this.tokens += this.incomeBreakdown.total * this.harvestMultiplier;
+    this.floatPayout();
+  }
+
+  /**
+   * Small figures showing where this payout came from and went: the castle
+   * and a few houses gain, a few wall sections and every company (up to a
+   * cap) cost. Sampled, so a big city stays readable.
+   */
+  floatPayout() {
+    const factor = this.corruptionFactor;
+    const harvest = this.harvestMultiplier;
+    const gain = (amount) => `+${Math.max(1, Math.round(amount * factor * harvest))}`;
+    for (const castle of this.castles) {
+      this.addFloater(castle.position, 'castle', gain(castle.effectiveType.wealth), true);
+    }
+    for (const house of this.sample(this.houses, FLOATERS.maxHouses)) {
+      this.addFloater(house.position, FLOATERS.houseLift, gain(HOUSES.income), true);
+    }
+    const standing = this.walls.filter((wall) => !wall.isPlanned);
+    for (const wall of this.sample(standing, FLOATERS.maxWalls)) {
+      this.addFloater(wallMidpoint(wall), FLOATERS.wallLift, `-${wall.upkeep * harvest}`, false);
+    }
+    const paid = this.guards.filter((guard) => this.guardUpkeep(guard) > 0);
+    for (const guard of paid.slice(0, FLOATERS.maxGuards)) {
+      this.addFloater(guard.position, FLOATERS.guardLift, `-${this.guardUpkeep(guard) * harvest}`, false);
+    }
+  }
+
+  addFloater(position, lift, text, isGain) {
+    this.floaters.push({ x: position.x, y: position.y, lift, text, isGain, age: 0 });
+  }
+
+  /** Up to `count` distinct items picked at random, without reordering `items`. */
+  sample(items, count) {
+    if (items.length <= count) {
+      return items;
+    }
+    const pool = [...items];
+    const picked = [];
+    while (picked.length < count) {
+      picked.push(pool.splice(Math.floor(this.random() * pool.length), 1)[0]);
+    }
+    return picked;
+  }
+
+  ageFloaters(seconds) {
+    for (const floater of this.floaters) {
+      floater.age += seconds;
+    }
+    this.floaters = this.floaters.filter((floater) => floater.age < FLOATERS.lifetimeSeconds);
   }
 
   advanceSeason() {
@@ -661,7 +786,7 @@ export class Game {
 
   spawnRaider() {
     const target = this.castles[0];
-    if (!target) {
+    if (!target || !this.debug.spawnRaiders) {
       return;
     }
     const mix = SEASON_RAIDER_MIX[Math.min(this.season, SEASON_RAIDER_MIX.length - 1)];
@@ -870,7 +995,7 @@ export class Game {
       raider.touchedThisFrame = false;
       if (raider.routed) {
         // Running, not besieging: nothing gets battered on the way out.
-        this.checkEscape(raider, this.raiderThreats());
+        this.dissolveRouted(raider);
       } else {
         this.resolveWallContact(navigation, raider);
         if (raider.isAlive && target) {
@@ -1239,17 +1364,10 @@ export class Game {
     return this.fleeDestination(guard, this.raiders);
   }
 
-  /**
-   * A routed company has left the field once it has run ROUT.runDistance
-   * from where it broke and is clear of every enemy by ROUT.escapeDistance.
-   */
-  checkEscape(company, enemies) {
-    const from = company.routedAt ?? company.position;
-    if (distanceSquared(company.position, from) < ROUT.runDistance ** 2) {
-      return;
-    }
-    const clear = ROUT.escapeDistance * ROUT.escapeDistance;
-    company.fled = enemies.every((enemy) => distanceSquared(company.position, enemy.position) > clear);
+  /** A routed company scatters as it runs, and has left the field once ROUT.dissolveSeconds are up. */
+  dissolveRouted(company) {
+    company.routedSeconds += 1 / FPS;
+    company.fled = company.routedSeconds >= ROUT.dissolveSeconds;
   }
 
   /** What a routed raider runs from: every imperial company, and the city it was sent against. */
@@ -1397,7 +1515,7 @@ export class Game {
       steerCompany(guard, navigation, this.random);
       guard.gatherPace(1 / FPS);
       if (guard.routed) {
-        this.checkEscape(guard, this.raiders);
+        this.dissolveRouted(guard);
       }
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
@@ -1438,7 +1556,7 @@ export class Game {
    * given up and is besieging plants itself and swings instead.
    */
   advanceAgainstWalls(navigation, raider) {
-    const pace = this.paceOn(raider);
+    const pace = this.paceOn(raider) * this.debug.raiderSpeed;
     const climb = this.wallClimb;
     // A wall that can be climbed never stops a step; it only makes the step
     // slow, the same way imperial companies pick their way over stone.

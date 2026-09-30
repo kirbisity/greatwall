@@ -58,6 +58,8 @@ const DESERT = {
 export const LEVELS = [
   {
     id: 'northern-march',
+    // Who holds the walls and who comes against them -- see FACTIONS.
+    sides: { defender: 'imperial', attacker: 'steppe' },
     name: 'Mandate of Heaven',
     blurb: 'Raiders from the north. A river guards your back.',
     story: 'After months of attrition, the Great Khan\'s tumens have arrived from the north. We must hold the city under the Mandate of heaven.',
@@ -112,6 +114,8 @@ export const LEVELS = [
   },
   {
     id: 'dust-sea',
+    // Who holds the walls and who comes against them -- see FACTIONS.
+    sides: { defender: 'imperial', attacker: 'steppe' },
     name: 'The Great Gobi',
     blurb: 'A desert siege. Raiders from every side.',
     story: 'Abandoned by the imperial court amidst a political turmoil, the desert outpost receives no relief, no supplies, and no orders. As thousands of approaching nomadic horsemen closing in from all directions, we must hold a dead frontier. No one will even remember our names.',
@@ -142,6 +146,8 @@ export const LEVELS = [
   },
   {
     id: 'shiro-island',
+    // Who holds the walls and who comes against them -- see FACTIONS.
+    sides: { defender: 'japan', attacker: 'steppe' },
     name: 'Tides of Tsushima',
     blurb: 'An island siege. No safe side at all.',
     story: 'The massive invasion fleet landed. Samurai defenders must push the landing vanguard back into the sea before the beachhead becomes entirely overwhelmed.',

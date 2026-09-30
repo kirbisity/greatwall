@@ -301,7 +301,7 @@ class Company {
     // rout), and gone for good once clear of every enemy -- see
     // Game#fleeDestination.
     this.routed = false;
-    this.routedAt = null;
+    this.routedSeconds = 0;
     this.fled = false;
     // Only raiders are stopped by walls: they batter them or find a way
     // round. Imperial companies file through their own stonework.
@@ -336,6 +336,11 @@ class Company {
 
   get isAlive() {
     return this.health >= 0;
+  }
+
+  /** 0 while it holds together, rising to 1 as a routed company scatters and fades. */
+  get dissolve() {
+    return Math.min(1, this.routedSeconds / ROUT.dissolveSeconds);
   }
 
   get healthFraction() {

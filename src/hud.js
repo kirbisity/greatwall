@@ -81,6 +81,10 @@ export function formatBattleStats(stats) {
     + `K/D ${kd}`;
 }
 
+/** The setup page's steps, and which one each of its four sections (map, size, player, enemy) sits on. */
+const SETUP_STEPS = ['The ground', 'Your army', 'The enemy'];
+const SETUP_STEP_OF_SECTION = [0, 1, 1, 2];
+
 function element(id) {
   const node = document.getElementById(id);
   if (!node) {
@@ -101,10 +105,21 @@ export class Hud {
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
     this.levelList = element('levelList');
+    this.levelsView = element('levelsView');
+    this.specialList = element('specialList');
+    this.levelsButton = element('levelsBtn');
+    this.restartButton = element('restartBtn');
     this.battleSetupPage = element('battleSetupPage');
     this.battleSetupStory = element('battleSetupStory');
     this.battleSetupBody = element('battleSetupBody');
-    this.battleSetupButton = element('battleSetupBtn');
+    this.battleSetupSteps = element('battleSetupSteps');
+    this.battleSetupNext = element('battleSetupStart');
+    this.battleSetupBack = element('battleSetupBack');
+    this.setupStep = 0;
+    this.helpPage = 0;
+    this.helpPrevButton = element('helpPrev');
+    this.helpNextButton = element('helpNext');
+    this.helpPageLabel = element('helpPageLabel');
     this.settings = element('settingMenu');
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
@@ -117,6 +132,13 @@ export class Hud {
     this.soundButton = element('soundBtn');
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
+    this.gameSpeedButton = element('gameSpeedBtn');
+    this.debugButtons = {
+      infiniteMoney: element('debugMoneyBtn'),
+      invulnerable: element('debugInvulnerableBtn'),
+      spawnRaiders: element('debugSpawnsBtn'),
+      raiderSpeed: element('debugSpeedBtn'),
+    };
     this.music = element('backgroundmusic');
     this.buildToolButton = element('buildTool');
     this.attackToolButton = element('attackTool');
@@ -197,8 +219,14 @@ export class Hud {
       this.incomeLabel.innerText = `$${income}`;
     }
     // Upkeep counts units, not sections: a fortified wall is worth several.
-    const formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`
-      + ` - ${breakdown.upkeepPerWall}×${breakdown.upkeepUnits}`;
+    let formula = `${breakdown.cityIncome} + ${breakdown.housePerHouse}×${breakdown.houseCount}`;
+    if (breakdown.corruption < 1) {
+      formula = `(${formula}) ×${breakdown.corruption.toFixed(2)}`;
+    }
+    formula += ` - ${breakdown.upkeepPerWall}×${breakdown.upkeepUnits}`;
+    if (breakdown.guardUpkeep > 0) {
+      formula += ` - ${breakdown.guardUpkeep}`;
+    }
     if (formula !== this.shownIncomeFormula) {
       this.shownIncomeFormula = formula;
       this.incomeFormula.innerText = formula;
@@ -268,6 +296,7 @@ export class Hud {
    */
   openMenu() {
     this.menu.style.height = '100%';
+    this.showMenuView('home');
     this.stopMusic();
     this.closeStory();
     this.clearThreats();
@@ -278,40 +307,84 @@ export class Hud {
     this.menu.style.height = '0%';
   }
 
+  /** The main menu is two levels deep: 'home' (play, settings...) and 'levels' (the picker). */
+  showMenuView(view) {
+    this.menu.dataset.view = view;
+  }
+
   /**
    * The level picker in the main menu, built from the level configs rather
    * than the markup, so adding a level stays a matter of levels.js alone.
+   * The numbered campaign goes in one list; a level with its own mode (the
+   * open battleground) sits apart under Special, unnumbered.
    */
-  showLevels(levels, chosen, onPick) {
-    if (!this.levelList) {
-      return;
-    }
+  showLevels(levels, chosen, onPick, sidesOf) {
     this.levelList.replaceChildren();
+    this.specialList.replaceChildren();
+    let campaignNumber = 0;
     levels.forEach((level, index) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = index === chosen ? 'levelItem is-chosen' : 'levelItem';
-
-      // A pixelated preview of the level's own ground, not a generic icon --
-      // see levelThumbnail.js.
-      const thumb = document.createElement('canvas');
-      thumb.className = 'levelThumb';
-      paintLevelThumbnail(thumb, level);
-
-      const text = document.createElement('span');
-      text.className = 'levelText';
-      const name = document.createElement('span');
-      name.className = 'levelName';
-      name.innerText = `${index + 1}. ${level.name}`;
-      const blurb = document.createElement('span');
-      blurb.className = 'levelBlurb';
-      blurb.innerText = level.blurb;
-      text.append(name, blurb);
-
-      button.append(thumb, text);
+      const isSpecial = level.mode === 'battle';
+      const label = isSpecial ? level.name : `${++campaignNumber}. ${level.name}`;
+      const button = this.levelCard(level, label, index === chosen, sidesOf(level));
       button.addEventListener('click', () => onPick(index));
-      this.levelList.append(button);
+      (isSpecial ? this.specialList : this.levelList).append(button);
     });
+    this.levelsView.classList.toggle('has-special', this.specialList.children.length > 0);
+  }
+
+  levelCard(level, label, isChosen, sides) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = isChosen ? 'levelItem is-chosen' : 'levelItem';
+
+    // A pixelated preview of the level's own ground, not a generic icon --
+    // see levelThumbnail.js.
+    const thumb = document.createElement('canvas');
+    thumb.className = 'levelThumb';
+    paintLevelThumbnail(thumb, level);
+
+    const text = document.createElement('span');
+    text.className = 'levelText';
+    const name = document.createElement('span');
+    name.className = 'levelName';
+    name.innerText = label;
+    const blurb = document.createElement('span');
+    blurb.className = 'levelBlurb';
+    blurb.innerText = level.blurb;
+    text.append(name, blurb, this.matchup(sides));
+
+    button.append(thumb, text);
+    return button;
+  }
+
+  /**
+   * The two armies of a level, one to a line: a portrait, its name and
+   * what it does there. `sides.labels` names the two roles (defender
+   * first) where the defaults do not fit.
+   */
+  matchup(sides) {
+    const [defenderLabel, attackerLabel] = sides.labels ?? ['Defends', 'Attacks'];
+    const row = document.createElement('span');
+    row.className = 'levelMatchup';
+    const side = (factionId, role) => {
+      const faction = FACTIONS[factionId];
+      const portrait = document.createElement('img');
+      portrait.className = 'levelSideAvatar';
+      portrait.alt = '';
+      portrait.src = faction.avatar;
+      const label = document.createElement('span');
+      label.className = 'levelSideName';
+      label.innerText = faction.name;
+      const roleTag = document.createElement('span');
+      roleTag.className = 'levelSideRole';
+      roleTag.innerText = role;
+      const holder = document.createElement('span');
+      holder.className = 'levelSide';
+      holder.append(portrait, label, roleTag);
+      return holder;
+    };
+    row.append(side(sides.defender, defenderLabel), side(sides.attacker, attackerLabel));
+    return row;
   }
 
   /**
@@ -324,7 +397,7 @@ export class Hud {
   showBattleSetup(level, choice, onPick) {
     this.battleSetupStory.innerText = level.story ?? '';
     this.battleSetupBody.replaceChildren();
-    this.battleSetupBody.append(
+    const sections = [
       this.buildSetupSection(
         'setupSection-map', 'The ground', this.buildMapCards(level, choice.map, onPick), this.mapCaption(choice.map),
       ),
@@ -337,20 +410,74 @@ export class Hud {
         'setupSection-enemy', 'The enemy', this.buildFactionCards('enemy', choice.factions.enemy, onPick),
         this.buildRosterStrip(choice.factions.enemy),
       ),
-    );
+    ];
+    // Each step shows only its own sections, so nothing on the page ever
+    // needs scrolling: the ground; then the player's army and its size;
+    // then the enemy's.
+    sections.forEach((section, index) => {
+      section.dataset.step = String(SETUP_STEP_OF_SECTION[index]);
+    });
+    this.battleSetupBody.append(...sections);
+    this.buildSetupSteps();
+    this.applySetupStep();
+  }
+
+  buildSetupSteps() {
+    this.battleSetupSteps.replaceChildren();
+    SETUP_STEPS.forEach((title, index) => {
+      const step = document.createElement('button');
+      step.type = 'button';
+      step.className = 'setupStep';
+      step.dataset.step = String(index);
+      step.innerText = `${index + 1} \u00b7 ${title}`;
+      step.addEventListener('click', () => {
+        this.setupStep = index;
+        this.applySetupStep();
+      });
+      this.battleSetupSteps.append(step);
+    });
+  }
+
+  applySetupStep() {
+    const last = SETUP_STEPS.length - 1;
+    const step = String(this.setupStep);
+    this.battleSetupPage.dataset.step = step;
+    this.battleSetupBody.dataset.step = step;
+    this.battleSetupNext.innerText = this.setupStep === last ? 'Start Battle' : 'Next';
+    this.battleSetupBack.innerText = this.setupStep === 0 ? 'Menu' : 'Back';
+    for (const button of this.battleSetupSteps.children) {
+      button.classList.toggle('is-current', button.dataset.step === step);
+    }
+  }
+
+  /** Next on the setup page: moves to the following step, and says true once it is time to begin. */
+  advanceBattleSetup() {
+    if (this.setupStep < SETUP_STEPS.length - 1) {
+      this.setupStep += 1;
+      this.applySetupStep();
+      return false;
+    }
+    return true;
+  }
+
+  /** Back on the setup page: the step before, or out to the menu from the first. */
+  retreatBattleSetup() {
+    if (this.setupStep === 0) {
+      this.closeBattleSetup();
+      return;
+    }
+    this.setupStep -= 1;
+    this.applySetupStep();
   }
 
   openBattleSetup() {
+    this.setupStep = 0;
+    this.applySetupStep();
     this.battleSetupPage.style.height = '100%';
   }
 
   closeBattleSetup() {
     this.battleSetupPage.style.height = '0%';
-  }
-
-  /** The menu's own shortcut into the setup page, shown only for the open battleground. */
-  showBattleSetupButton(visible) {
-    this.battleSetupButton.style.display = visible ? 'block' : 'none';
   }
 
   buildSetupSection(className, heading, cards, ...extras) {
@@ -510,7 +637,13 @@ export class Hud {
   }
 
   openSettings() {
+    this.showSettingsView('main');
     this.settings.style.height = '100%';
+  }
+
+  /** Settings has two views: 'main' and 'debug'. */
+  showSettingsView(view) {
+    this.settings.dataset.view = view;
   }
 
   closeSettings() {
@@ -518,7 +651,33 @@ export class Hud {
   }
 
   showHelp() {
+    this.helpPage = 0;
+    this.applyHelpPage();
     this.helpModal.style.display = 'block';
+  }
+
+  helpPages() {
+    return [...this.helpModal.querySelectorAll('.helpPage')];
+  }
+
+  applyHelpPage() {
+    const pages = this.helpPages();
+    pages.forEach((page, index) => page.classList.toggle('is-shown', index === this.helpPage));
+    const last = Math.max(0, pages.length - 1);
+    this.helpPageLabel.innerText = `${this.helpPage + 1} / ${last + 1}`;
+    this.helpPrevButton.style.visibility = this.helpPage === 0 ? 'hidden' : 'visible';
+    this.helpNextButton.innerText = this.helpPage >= last ? 'Got it' : 'Next';
+  }
+
+  /** Turn the help by one page; true when this was the last page and it should close. */
+  turnHelpPage(direction) {
+    const last = Math.max(0, this.helpPages().length - 1);
+    if (direction > 0 && this.helpPage >= last) {
+      return true;
+    }
+    this.helpPage = Math.min(last, Math.max(0, this.helpPage + direction));
+    this.applyHelpPage();
+    return false;
   }
 
   closeHelp() {
@@ -695,7 +854,7 @@ export class Hud {
   }
 
   showGameOver(score, best) {
-    this.startButton.innerText = 'Start';
+    this.markUnstarted();
     this.menuInfo.innerText = `Score: ${score}\nBest: ${best}`;
     this.openMenu();
   }
@@ -753,7 +912,7 @@ export class Hud {
    * player does go back to the menu (see App#continueFromBattleResult).
    */
   showBattleResult(won, seconds, stats) {
-    this.startButton.innerText = 'Start';
+    this.markUnstarted();
     this.battleResultTitle.innerText = won ? 'Victory' : 'Defeat';
     const headline = won
       ? `The enemy line broke after ${seconds}s.`
@@ -819,13 +978,21 @@ export class Hud {
     return column;
   }
 
+  /** A game is under way: the menu offers to continue it, restart it or pick another. */
   markStarted() {
     this.startButton.innerText = 'Continue';
+    this.showGameControls(true);
   }
 
-  /** The menu's main button, for a level picked but not yet begun. */
+  /** Nothing to continue: Start leads to the level picker, and Levels and Restart have nothing to act on. */
   markUnstarted() {
     this.startButton.innerText = 'Start';
+    this.showGameControls(false);
+  }
+
+  showGameControls(visible) {
+    this.levelsButton.style.display = visible ? 'block' : 'none';
+    this.restartButton.style.display = visible ? 'block' : 'none';
   }
 
   // --- audio --------------------------------------------------------------
@@ -864,6 +1031,19 @@ export class Hud {
 
   setRoutesLabel(enabled) {
     this.routesButton.innerText = `Show Routes: ${enabled ? 'On' : 'Off'}`;
+  }
+
+  setGameSpeedLabel(name) {
+    this.gameSpeedButton.innerText = `Game Speed: ${name}`;
+  }
+
+  /** Redraws the debug buttons from `debug` (a Game's debug state), so what they say is what is on. */
+  setDebugLabels(debug) {
+    const onOff = (enabled) => (enabled ? 'On' : 'Off');
+    this.debugButtons.infiniteMoney.innerText = `Infinite Money: ${onOff(debug.infiniteMoney)}`;
+    this.debugButtons.invulnerable.innerText = `Invulnerable: ${onOff(debug.invulnerable)}`;
+    this.debugButtons.spawnRaiders.innerText = `Raider Spawns: ${onOff(debug.spawnRaiders)}`;
+    this.debugButtons.raiderSpeed.innerText = `Attacker Speed: ${debug.raiderSpeed}x`;
   }
 
   cycleSoundLevel() {

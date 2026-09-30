@@ -262,6 +262,13 @@ export class Input {
     this.hud.setBattleSelection(this.pendingUnit);
   }
 
+  /** A new game begins: whatever placement left on screen goes, whichever mode comes next. */
+  clearPlacement() {
+    this.pendingUnit = null;
+    this.hud.hideBattlePrep();
+    this.hud.clearActionHint();
+  }
+
   /** Start Battle pressed: the roster dock comes down and no more placing happens. */
   endPlacement() {
     this.pendingUnit = null;

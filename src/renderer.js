@@ -6,6 +6,7 @@ import {
   DAMAGE_EFFECTS,
   EARTHWORK,
   FLAG,
+  FLOATERS,
   HEALTH_COLORS,
   HOUSES,
   IMPERIAL,
@@ -481,6 +482,20 @@ function prismFrom(footprint, height, ground = null) {
 }
 
 /** Draws the world with a perspective camera: terrain, sorted scene, overlays. */
+/**
+ * Where a routed company's figure has drifted to, in the company's own frame:
+ * off along its own fixed bearing, further for some men than others.
+ */
+function scatterOf(figure, dissolve, reach) {
+  if (dissolve === 0) {
+    return { x: 0, y: 0 };
+  }
+  const bearing = figure.phase * 7.3;
+  const spread = 0.5 + Math.abs(Math.sin(figure.phase * 3.7));
+  const distance = dissolve * reach * 2 * spread;
+  return { x: Math.cos(bearing) * distance, y: Math.sin(bearing) * distance };
+}
+
 export class Renderer {
   constructor({ terrain, units, structures }, camera) {
     this.canvases = [terrain, units, structures];
@@ -679,6 +694,7 @@ export class Renderer {
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
     this.drawCityFlags(view, game);
+    this.drawFloaters(view, game);
     if (settings.showRoutes) {
       this.drawRoutes(view, game);
     }
@@ -1339,12 +1355,17 @@ export class Renderer {
       const faces = model.geometry[build];
 
       const ground = terrain.heightAt(x, y);
+      // A routed company comes apart: each man drifts off on his own line
+      // while the whole thing fades out -- see ROUT.dissolveSeconds.
+      const dissolve = raider.dissolve;
+      const alpha = 1 - dissolve;
       for (const figure of model.figures) {
-        const swayX = figure.place.x + Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
-        const swayY = figure.place.y + Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
+        const scatter = scatterOf(figure, dissolve, reach);
+        const swayX = figure.place.x + scatter.x + Math.sin(seconds * 2.3 * rate + figure.phase) * UNIT_SWAY * shake;
+        const swayY = figure.place.y + scatter.y + Math.sin(seconds * 1.7 * rate + figure.phase * 1.7) * UNIT_SURGE * shake;
         const bob = Math.abs(Math.sin(seconds * 3.1 * rate + figure.phase)) * UNIT_BOB * shake;
         for (const face of faces) {
-          this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob: bob + ground });
+          this.collectUnitFace(items, view, face, raider.position, { cos, sin, swayX, swayY, bob: bob + ground, alpha });
         }
       }
     }
@@ -1380,12 +1401,14 @@ export class Renderer {
       depth: depth / points.length,
       points,
       fill: face.shades[Math.round(lit * LIGHT_BANDS)],
+      alpha: pose.alpha,
     });
   }
 
   paint(items) {
     const context = this.scene;
     for (const item of items) {
+      context.globalAlpha = item.alpha ?? 1;
       context.beginPath();
       context.moveTo(item.points[0].x, item.points[0].y);
       for (let i = 1; i < item.points.length; i += 1) {
@@ -1395,6 +1418,7 @@ export class Renderer {
       context.fillStyle = item.fill;
       context.fill();
     }
+    context.globalAlpha = 1;
   }
 
   // --- screen-space overlays ----------------------------------------------
@@ -1982,6 +2006,41 @@ export class Renderer {
     }
   }
 
+  /** The "+5" / "-2" figures rising off whatever earned or cost coin on the last payout. */
+  drawFloaters(view, game) {
+    if (game.floaters.length === 0) {
+      return;
+    }
+    const context = this.overlay;
+    const scale = this.camera.view.focal / this.camera.distance;
+    context.save();
+    context.font = `bold ${clamp(Math.round(scale * 6), 10, 15)}px sans-serif`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.lineWidth = 3;
+    context.lineJoin = 'round';
+    for (const floater of game.floaters) {
+      const progress = floater.age / FLOATERS.lifetimeSeconds;
+      let lift = floater.lift;
+      if (lift === 'castle') {
+        const definition = game.buildings[game.castles[0]?.typeId];
+        lift = definition ? this.structureFor(definition).height * 0.6 : FLOATERS.houseLift;
+      }
+      const ground = game.terrain.heightAt(floater.x, floater.y);
+      const anchor = projectPoint(view, floater.x, floater.y, ground + lift + progress * FLOATERS.riseHeight);
+      if (!anchor) {
+        continue;
+      }
+      // Solid for the first half, then fading out as it climbs.
+      context.globalAlpha = progress < 0.5 ? 1 : 1 - (progress - 0.5) * 2;
+      context.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+      context.strokeText(floater.text, anchor.x, anchor.y);
+      context.fillStyle = floater.isGain ? '#ffe27a' : '#ff8a80';
+      context.fillText(floater.text, anchor.x, anchor.y);
+    }
+    context.restore();
+  }
+
   /** The portrait a company carries, over its head. */
   drawAvatar(company, centreX, bottomY) {
     const path = company.type.avatar;
@@ -2046,16 +2105,17 @@ export class Renderer {
         continue;
       }
       const fraction = company.health / company.type.maxHealth;
+      this.overlay.globalAlpha = 1 - company.dissolve;
       const top = this.drawCompanyBar(view, game, company, model.radius, fraction);
-      if (top === null) {
-        continue;
+      if (top !== null) {
+        const above = this.drawAvatar(company, top.x, top.y);
+        if (company.routed) {
+          this.drawWhiteFlag(top.x, above);
+        } else if (company.holding) {
+          this.drawHoldMark(top.x, above);
+        }
       }
-      const above = this.drawAvatar(company, top.x, top.y);
-      if (company.routed) {
-        this.drawWhiteFlag(top.x, above);
-      } else if (company.holding) {
-        this.drawHoldMark(top.x, above);
-      }
+      this.overlay.globalAlpha = 1;
     }
   }
 

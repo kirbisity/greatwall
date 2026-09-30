@@ -5,10 +5,11 @@ import { Input } from './input.js';
 import { Renderer } from './renderer.js';
 import { LEVELS } from './levels.js';
 import {
-  BATTLE, BATTLE_MAPS, DEFAULT_BATTLE_MAP, DEFAULT_FACTIONS, FACTIONS,
+  BATTLE, BATTLE_MAPS, DEBUG, DEFAULT_BATTLE_MAP, DEFAULT_FACTIONS, DEFAULT_GAME_SPEED, FACTIONS, GAME_SPEEDS,
 } from './config.js';
 import { loadSettings, saveSettings, settings } from './settings.js';
 import { clamp, distance } from './geometry.js';
+import { simulationSteps } from './clock.js';
 
 // A long stall must not teleport the camera or fast-forward the game.
 const MAX_FRAME_SECONDS = 0.05;
@@ -64,6 +65,7 @@ class App {
     this.setupConfirmed = false;
     this.needsDraw = true;
     this.lastFrameAt = 0;
+    this.stepCarry = 0;
     this.bestScore = 0;
   }
 
@@ -75,6 +77,9 @@ class App {
     this.hud.setCursor('move');
     this.hud.setAtmosphereLabel(settings.atmosphere);
     this.hud.setRoutesLabel(settings.showRoutes);
+    this.hud.setGameSpeedLabel(this.gameSpeed().name);
+    this.hud.setDebugLabels(this.game.debug);
+    this.hud.markUnstarted();
     this.showLevels();
     this.draw();
     this.lastFrameAt = performance.now();
@@ -82,10 +87,27 @@ class App {
   }
 
   bindButtons() {
-    bind('startBtn2', () => this.start());
-    bind('battleSetupBtn', () => this.openBattleSetup());
-    bind('battleSetupBack', () => this.hud.closeBattleSetup());
+    bind('startBtn2', () => {
+      // Nothing to continue: Start is where the player picks what to play.
+      if (this.needsNewGame) {
+        this.hud.showMenuView('levels');
+        return;
+      }
+      this.start();
+    });
+    bind('levelsBtn', () => this.hud.showMenuView('levels'));
+    bind('levelsBackBtn', () => this.hud.showMenuView('home'));
+    bind('battleSetupBack', () => this.hud.retreatBattleSetup());
+    bind('helpPrev', () => this.hud.turnHelpPage(-1));
+    bind('helpNext', () => {
+      if (this.hud.turnHelpPage(1)) {
+        this.closeHelp();
+      }
+    });
     bind('battleSetupStart', () => {
+      if (!this.hud.advanceBattleSetup()) {
+        return;
+      }
       this.hud.closeBattleSetup();
       this.setupConfirmed = true;
       this.start();
@@ -94,6 +116,25 @@ class App {
     bind('settingsBtn', () => this.hud.openSettings());
     bind('settingsBackBtn', () => this.hud.closeSettings());
     bind('soundBtn', () => this.hud.cycleSoundLevel());
+    bind('gameSpeedBtn', () => this.cycleGameSpeed());
+    bind('debugOpenBtn', () => this.hud.showSettingsView('debug'));
+    bind('debugBackBtn', () => this.hud.showSettingsView('main'));
+    bind('debugMoneyBtn', () => this.toggleDebug('infiniteMoney'));
+    bind('debugInvulnerableBtn', () => this.toggleDebug('invulnerable'));
+    bind('debugSpawnsBtn', () => this.toggleDebug('spawnRaiders'));
+    bind('debugSpeedBtn', () => this.cycleRaiderSpeed());
+    bind('debugGrantBtn', () => {
+      this.game.grantMoney(DEBUG.grantAmount);
+      this.draw();
+    });
+    bind('debugRaiderBtn', () => {
+      this.game.spawnRaider();
+      this.draw();
+    });
+    bind('debugSeasonBtn', () => {
+      this.game.advanceSeason();
+      this.draw();
+    });
     bind('atmosphereBtn', () => this.toggleAtmosphere());
     bind('routesBtn', () => this.toggleRoutes());
     bind('bgmusicBtn', () => this.hud.playMusic());
@@ -138,7 +179,9 @@ class App {
    * it has a map and armies to choose first -- see openBattleSetup.
    */
   showLevels() {
-    this.hud.showLevels(LEVELS, this.chosenLevel, (index) => {
+    // Only a game actually under way is marked: before that, nothing is preselected.
+    const playing = this.needsNewGame ? -1 : this.chosenLevel;
+    this.hud.showLevels(LEVELS, playing, (index) => {
       this.chosenLevel = index;
       this.showLevels();
       if (LEVELS[index].mode === 'battle') {
@@ -148,8 +191,16 @@ class App {
         return;
       }
       this.restart();
-    });
-    this.hud.showBattleSetupButton(LEVELS[this.chosenLevel].mode === 'battle');
+    }, (level) => this.sidesOf(level));
+  }
+
+  /** Defender and attacker army ids for a level card: the open field shows the player's own picks. */
+  sidesOf(level) {
+    if (level.mode === 'battle') {
+      const { player, enemy } = this.chosenFactions();
+      return { defender: player, attacker: enemy, labels: ['You', 'Enemy'] };
+    }
+    return level.sides;
   }
 
   /** The open battleground's setup page: its story, the map and both armies. */
@@ -168,6 +219,7 @@ class App {
         settings.factions = { ...this.chosenFactions(), [kind]: id };
       }
       saveSettings();
+      this.showLevels();
       // The ground and the enemy line are laid out when a game begins, so a
       // new choice means a new game -- but only once Start is pressed.
       this.needsNewGame = true;
@@ -218,6 +270,31 @@ class App {
     this.hud.setAtmosphereLabel(settings.atmosphere);
     this.hud.setRoutesLabel(settings.showRoutes);
     this.draw();
+  }
+
+  /** The saved game speed, with anything unrecognised put back to Medium. */
+  gameSpeed() {
+    return GAME_SPEEDS.find((speed) => speed.name === settings.gameSpeed) ?? DEFAULT_GAME_SPEED;
+  }
+
+  cycleGameSpeed() {
+    const next = (GAME_SPEEDS.indexOf(this.gameSpeed()) + 1) % GAME_SPEEDS.length;
+    settings.gameSpeed = GAME_SPEEDS[next].name;
+    saveSettings();
+    this.hud.setGameSpeedLabel(settings.gameSpeed);
+    this.stepCarry = 0;
+  }
+
+  toggleDebug(option) {
+    this.game.debug[option] = !this.game.debug[option];
+    this.hud.setDebugLabels(this.game.debug);
+  }
+
+  cycleRaiderSpeed() {
+    const speeds = DEBUG.raiderSpeeds;
+    const at = speeds.indexOf(this.game.debug.raiderSpeed);
+    this.game.debug.raiderSpeed = speeds[(at + 1) % speeds.length];
+    this.hud.setDebugLabels(this.game.debug);
   }
 
   toggleRoutes() {
@@ -303,9 +380,11 @@ class App {
   }
 
   newGame() {
+    this.input.clearPlacement();
     this.game.loadLevel(LEVELS[this.chosenLevel], this.chosenFactions(), this.chosenMap(), this.chosenBudget());
     this.camera.centerOn({ x: 0, y: 0 });
     this.needsNewGame = false;
+    this.showLevels();
     this.hud.playLevelMusic(this.game.level.music);
     // The open battleground's story is told in the menu instead -- see
     // the setup page -- so it never pops up over the field itself.
@@ -318,6 +397,7 @@ class App {
 
   resume() {
     this.running = true;
+    this.stepCarry = 0;
   }
 
   pause() {
@@ -336,7 +416,14 @@ class App {
 
     const cameraMoved = this.camera.update(elapsed);
     if (this.running) {
-      this.game.step();
+      // The simulation's own clock, apart from the frame rate and the camera:
+      // Slow owes half a step a frame, Fast two, and a 120Hz display no more
+      // than a 60Hz one.
+      const owed = simulationSteps(this.stepCarry, elapsed, this.gameSpeed().factor);
+      this.stepCarry = owed.carry;
+      for (let done = 0; done < owed.steps; done += 1) {
+        this.game.step();
+      }
     }
     if (this.running || cameraMoved || this.needsDraw) {
       this.needsDraw = false;

@@ -108,44 +108,78 @@
 
 	<button id="holdToggle" class="holdToggle" type="button">Hold</button>
 
-	<div id="myNav" class="overlay">
-		<div class="overlay-content">
-			<h1 class="gameTitle">Greatwall</h1>
-			<p id="navinfo" class="gameTagline">Build walls to defend the city</p>
-			<div id="levelList" class="levelList"></div>
-			<div class="menuList">
-				<button id="startBtn2" class="menuItem menuItem-primary">Start</button>
-				<button id="battleSetupBtn" class="menuItem">Choose Armies &amp; Map</button>
-				<button id="restartBtn" class="menuItem">Restart</button>
-				<button id="settingsBtn" class="menuItem">Settings</button>
-				<a href="index.html" class="menuItem">Quit</a>
+	<div id="myNav" class="overlay" data-view="home">
+		<div class="overlay-content menuScreen">
+			<header class="menuHeader">
+				<h1 class="gameTitle">Greatwall</h1>
+				<p id="navinfo" class="gameTagline">Build walls to defend the city</p>
+			</header>
+
+			<div class="menuView menuView-home">
+				<div class="menuList menuList-grid">
+					<button id="startBtn2" class="menuItem menuItem-primary menuItem-wide">Start</button>
+					<button id="levelsBtn" class="menuItem">Levels</button>
+					<button id="restartBtn" class="menuItem">Restart</button>
+					<button id="settingsBtn" class="menuItem">Settings</button>
+					<a href="index.html" class="menuItem">Quit</a>
+				</div>
+			</div>
+
+			<div id="levelsView" class="menuView menuView-levels">
+				<h2 class="panelTitle">Choose a level</h2>
+				<div id="levelList" class="levelList"></div>
+				<h3 class="levelGroupTitle">Special</h3>
+				<div id="specialList" class="levelList levelList-special"></div>
+				<div class="menuList">
+					<button id="levelsBackBtn" class="menuItem">Back</button>
+				</div>
 			</div>
 		</div>
 	</div>
 
 	<!-- The open battleground's own setup page: the map and each side's army,
 	     chosen before the field is entered. Built by Hud#showBattleSetup. -->
-	<div id="battleSetupPage" class="overlay">
+	<div id="battleSetupPage" class="overlay" data-step="0">
 		<div class="overlay-content battleSetupContent">
 			<h2 class="panelTitle">Prepare for Battle</h2>
+			<nav id="battleSetupSteps" class="setupSteps" aria-label="Setup steps"></nav>
 			<p id="battleSetupStory" class="battleStory"></p>
-			<div id="battleSetupBody" class="battleSetupBody"></div>
+			<div id="battleSetupBody" class="battleSetupBody" data-step="0"></div>
 			<div class="menuList">
-				<button id="battleSetupStart" class="menuItem menuItem-primary">Start Battle</button>
 				<button id="battleSetupBack" class="menuItem">Back</button>
+				<button id="battleSetupStart" class="menuItem menuItem-primary">Next</button>
 			</div>
 		</div>
 	</div>
 
-	<div id="settingMenu" class="overlay">
+	<div id="settingMenu" class="overlay" data-view="main">
 		<div id="settingMenuContent" class="overlay-content">
-			<h2 class="panelTitle">Settings</h2>
-			<div class="menuList">
-				<button id="soundBtn" class="menuItem">Sound: 40</button>
-				<button id="atmosphereBtn" class="menuItem" title="Haze and cloud. Turn off for more speed.">Atmosphere: On</button>
-				<button id="routesBtn" class="menuItem" title="Show the gateways raiders navigate by.">Show Routes: Off</button>
-				<button id="bgmusicBtn" class="menuItem">Play Music</button>
-				<button id="settingsBackBtn" class="menuItem">Back</button>
+			<div class="settingsView settingsView-main">
+				<h2 class="panelTitle">Settings</h2>
+				<div class="menuList menuList-grid">
+					<button id="soundBtn" class="menuItem">Sound: 40</button>
+					<button id="atmosphereBtn" class="menuItem" title="Haze and cloud. Turn off for more speed.">Atmosphere: On</button>
+					<button id="routesBtn" class="menuItem" title="Show the gateways raiders navigate by.">Show Routes: Off</button>
+					<button id="bgmusicBtn" class="menuItem">Play Music</button>
+					<button id="gameSpeedBtn" class="menuItem" title="How fast the battlefield runs. Slow gives more time to plan.">Game Speed: Medium</button>
+					<button id="debugOpenBtn" class="menuItem">Debug</button>
+					<button id="settingsBackBtn" class="menuItem menuItem-wide">Back</button>
+				</div>
+			</div>
+
+			<!-- For testing balance: lasts until the page is reloaded, never saved. -->
+			<div class="settingsView settingsView-debug">
+				<h2 class="panelTitle">Debug</h2>
+				<div class="menuList menuList-grid">
+					<button id="debugMoneyBtn" class="menuItem" title="Keeps the treasury full.">Infinite Money: Off</button>
+					<button id="debugGrantBtn" class="menuItem">Add Money</button>
+					<button id="debugSpeedBtn" class="menuItem" title="How fast raiders march. 0 freezes them.">Attacker Speed: 1x</button>
+					<button id="debugSpawnsBtn" class="menuItem" title="Whether new raiders keep arriving.">Raider Spawns: On</button>
+					<button id="debugInvulnerableBtn" class="menuItem" title="Walls and castle take no lasting damage.">Invulnerable: Off</button>
+					<button id="debugRaiderBtn" class="menuItem">Send Raider</button>
+					<button id="debugSeasonBtn" class="menuItem">Next Season</button>
+					<button id="debugBackBtn" class="menuItem">Back</button>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -154,27 +188,54 @@
 	<div id="loader"><span class="loaderRing"></span><span class="loaderText">Raising the wall</span></div>
 
 	<div id="helpInfo" class="modal">
-		<div class="modal-content scroll">
+		<div class="modal-content scroll helpContent">
 			<button id="helpClose" class="close" title="Close">&times;</button>
 			<h2 class="panelTitle">The Art of the Wall</h2>
-			<p>Raiders ride for your city. Walls are the only thing between them and your people.</p>
-			<ul class="helpList">
-				<li><b>Build</b> &mdash; drag to raise a wall. Sections cost coin by length, and ends snap to other walls and to the city edge.</li>
-				<li class="mouseOnly"><b>Moving the view</b> &mdash; drag the map to pan it and scroll to zoom. A tool takes over the drag; the <b>Move</b> button puts it down again.</li>
-				<li class="touchOnly"><b>Moving the view</b> &mdash; drag one finger to pan and pinch two to zoom. With a tool up, slide two fingers together to pan; tap <b>Move</b> to put the tool down.</li>
-				<li><b>Attack</b> &mdash; pick a company's tier above the castle, then click or tap where to send it. It will run down the nearest raiders, then come home.</li>
-				<li><b>Repair</b> &mdash; drag over a damaged or unfinished section to pay for its mending. The stone climbs back to full over the following seconds under the mason's hammer. Drawing over a section that already stands does nothing.</li>
-				<li><b>Fortify</b> &mdash; drag over a section to raise it. The first order doubles its height over ten seconds; a second doubles its width over twenty. Each doubles its strength and its upkeep, so a reinforced wall costs four times the plain one to raise and four times as much to keep. Reinforced is as far as stone goes.</li>
-				<li>A new section is pegged out for six seconds &mdash; a yellow line under the mason's hammer &mdash; and stops nothing until the stone starts rising. It takes about ten seconds more to reach full height, and can be attacked the whole way up.</li>
-				<li><b>Raze</b> &mdash; drag over a wall to demolish it. Half the price returns, less its damage.</li>
-				<li><b>Upgrade</b> &mdash; click or tap your castle to grow it. A courtyard complex becomes a walled compound, then a moated city, unlocking heavier companies as it grows. The old buildings clear and the new ones rise over the following seconds, but the city fights and earns at its old strength until they do.</li>
-				<li class="mouseOnly"><b>Ctrl+Z</b> &mdash; undo the last section you laid.</li>
-				<li class="touchOnly"><b>Undo</b> &mdash; the curved arrow under the top bar takes back the last section you laid.</li>
-				<li class="mouseOnly"><b>[</b> and <b>]</b> &mdash; tilt the view. Lower to see your walls stand.</li>
-			</ul>
-			<p class="helpNote">Nothing crosses a standing wall. Raiders hunt for a way round, and batter their way through only when there is none. Cavalry are quick but die fast against stone; infantry are slow and grind it down. Winter multiplies the cost of stone; autumn doubles the harvest.</p>
-			<p class="helpNote">Houses fill in behind the walls on their own — the farther out the ring, the more it can hold. Each one adds to the income shown at the top. A raider that reaches one burns it down in a moment, so a breach costs more than the stone.</p>
-			<p class="helpNote">No civilisation lasts forever. The question is how long.</p>
+
+			<div class="helpPage is-shown">
+				<p>Raiders ride for your city. Walls are the only thing between them and your people.</p>
+				<ul class="helpList">
+					<li><b>Build</b> &mdash; drag to raise a wall. Sections cost coin by length, and ends snap to other walls and to the city edge.</li>
+					<li class="mouseOnly"><b>Moving the view</b> &mdash; drag the map to pan it and scroll to zoom. A tool takes over the drag; the <b>Move</b> button puts it down again.</li>
+					<li class="touchOnly"><b>Moving the view</b> &mdash; drag one finger to pan and pinch two to zoom. With a tool up, slide two fingers together to pan; tap <b>Move</b> to put the tool down.</li>
+					<li class="mouseOnly"><b>Ctrl+Z</b> &mdash; undo the last section you laid.</li>
+					<li class="touchOnly"><b>Undo</b> &mdash; the curved arrow under the top bar takes back the last section you laid.</li>
+					<li class="mouseOnly"><b>[</b> and <b>]</b> &mdash; tilt the view. Lower to see your walls stand.</li>
+				</ul>
+			</div>
+
+			<div class="helpPage">
+				<ul class="helpList">
+					<li>A new section is pegged out for six seconds &mdash; a yellow line under the mason's hammer &mdash; and stops nothing until the stone starts rising. It takes about ten seconds more to reach full height, and can be attacked the whole way up.</li>
+					<li><b>Repair</b> &mdash; drag over a damaged or unfinished section to pay for its mending. The stone climbs back to full over the following seconds under the mason's hammer. Drawing over a section that already stands does nothing.</li>
+				</ul>
+			</div>
+
+			<div class="helpPage">
+				<ul class="helpList">
+					<li><b>Fortify</b> &mdash; drag over a section to raise it. The first order doubles its height over ten seconds; a second doubles its width over twenty. Each doubles its strength and its upkeep, so a reinforced wall costs four times the plain one to raise and four times as much to keep. Reinforced is as far as stone goes.</li>
+					<li><b>Raze</b> &mdash; drag over a wall to demolish it. Half the price returns, less its damage.</li>
+				</ul>
+			</div>
+
+			<div class="helpPage">
+				<ul class="helpList">
+					<li><b>Attack</b> &mdash; pick a company's tier above the castle, then click or tap where to send it. It marches there, stands hold, and fights whatever reaches it until you command it again.</li>
+					<li><b>Upgrade</b> &mdash; click or tap your castle to grow it. A courtyard complex becomes a walled compound, then a moated city, unlocking heavier companies as it grows. The old buildings clear and the new ones rise over the following seconds, but the city fights and earns at its old strength until they do.</li>
+				</ul>
+			</div>
+
+			<div class="helpPage">
+				<p class="helpNote">Nothing crosses a standing wall. Raiders hunt for a way round, and batter their way through only when there is none. Cavalry are quick but die fast against stone; infantry are slow and grind it down. Winter multiplies the cost of stone; autumn doubles the harvest.</p>
+				<p class="helpNote">Houses fill in behind the walls on their own &mdash; the farther out the ring, the more it can hold. Each one adds to the income shown at the top. A raider that reaches one burns it down in a moment, so a breach costs more than the stone.</p>
+				<p class="helpNote">No civilisation lasts forever. The question is how long.</p>
+			</div>
+
+			<nav class="helpNav">
+				<button id="helpPrev" class="helpNavBtn" type="button">Back</button>
+				<span id="helpPageLabel" class="helpPageLabel">1 / 5</span>
+				<button id="helpNext" class="helpNavBtn helpNavBtn-primary" type="button">Next</button>
+			</nav>
 		</div>
 	</div>
 

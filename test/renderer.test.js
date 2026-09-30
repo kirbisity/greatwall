@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createView } from '../src/projection.js';
+import { createView, projectPoint } from '../src/projection.js';
 import { Renderer } from '../src/renderer.js';
 import { Terrain } from '../src/terrain.js';
 import { LEVELS } from '../src/levels.js';
@@ -339,4 +339,151 @@ test('an empty shimmer list draws nothing, and a real one draws something', () =
   Object.defineProperty(renderer, 'clock', { value: 0 });
   renderer.drawShimmer(renderer.camera.view, game);
   assert.ok(calls.fill > 0, 'expected a real list, twinkling above the threshold, to draw something');
+});
+
+// --- transient order/selection effects never crash the render loop --------
+
+/** A renderer with just enough of itself for the overlay-drawn pings: a
+ *  camera view to project through, and a stub 2d context whose arc() throws
+ *  on a negative radius, the same way a real CanvasRenderingContext2D does. */
+function pingRenderer() {
+  const context = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    closePath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    fill() {},
+    arc(x, y, radius) {
+      if (radius < 0) {
+        throw new DOMException(`The radius provided (${radius}) is negative.`, 'IndexSizeError');
+      }
+    },
+    set strokeStyle(value) {},
+    set fillStyle(value) {},
+    set lineWidth(value) {},
+  };
+  const renderer = Object.create(Renderer.prototype);
+  renderer.overlay = context;
+  renderer.camera = { view: createView({ focus: { x: 0, y: 0 }, distance: 150, elevation: 45, width: 1200, height: 800 }) };
+  return renderer;
+}
+
+test('a selection ping never throws, even if its own lifetime is somehow extended past its duration', () => {
+  const renderer = pingRenderer();
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  renderer.pingSelection(10, 10, 0);
+  // A ping's `until` is only ever set once, at creation -- this reproduces
+  // what happens if something later stretches it out regardless.
+  renderer.selectionPing.until = 1000;
+  Object.defineProperty(renderer, 'clock', { value: 5, configurable: true });
+  assert.doesNotThrow(() => renderer.drawSelectionPing(renderer.camera.view));
+});
+
+test('a move order ping never throws, even if its own lifetime is somehow extended past its duration', () => {
+  const renderer = pingRenderer();
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  renderer.pingMoveOrder([{ x: 0, y: 0 }], [{ x: 10, y: 0 }], { x: 10, y: 0 }, 0);
+  renderer.moveOrder.until = 1000;
+  Object.defineProperty(renderer, 'clock', { value: 5, configurable: true });
+  assert.doesNotThrow(() => renderer.drawMoveOrder(renderer.camera.view));
+});
+
+test('both pings run clean across their entire natural lifetime, not just at the ends', () => {
+  const renderer = pingRenderer();
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  renderer.pingSelection(10, 10, 0);
+  renderer.pingMoveOrder([{ x: 0, y: 0 }], [{ x: 10, y: 0 }], { x: 10, y: 0 }, 0);
+  for (const clock of [0, 0.2, 0.4, 0.6, 0.8, 1, 1.2]) {
+    Object.defineProperty(renderer, 'clock', { value: clock, configurable: true });
+    assert.doesNotThrow(() => renderer.drawSelectionPing(renderer.camera.view), `selection at clock=${clock}`);
+    assert.doesNotThrow(() => renderer.drawMoveOrder(renderer.camera.view), `move order at clock=${clock}`);
+  }
+});
+
+// --- the Build tool's own live trail ---------------------------------------
+
+/** A renderer with just enough of itself to draw the build trail: a real
+ *  camera view to project through, and an overlay whose stroke() is
+ *  recorded so a test can tell whether anything was actually drawn. */
+function trailRenderer(heightAt = () => 0) {
+  const strokes = [];
+  const points = [];
+  const context = {
+    save() {},
+    restore() {},
+    beginPath() { points.length = 0; },
+    moveTo(x, y) { points.push({ x, y }); },
+    lineTo(x, y) { points.push({ x, y }); },
+    stroke() { strokes.push(context.strokeStyle); },
+    set strokeStyle(value) { context._strokeStyle = value; },
+    get strokeStyle() { return context._strokeStyle; },
+    set lineWidth(value) {},
+    set lineJoin(value) {},
+    set lineCap(value) {},
+  };
+  const renderer = Object.create(Renderer.prototype);
+  renderer.overlay = context;
+  renderer.camera = { view: createView({ focus: { x: 0, y: 0 }, distance: 150, elevation: 45, width: 1200, height: 800 }) };
+  Object.defineProperty(renderer, 'clock', { value: 0, configurable: true });
+  const terrain = { heightAt };
+  const draw = () => renderer.drawBuildTrail(renderer.camera.view, terrain);
+  return { renderer, strokes, points, terrain, draw };
+}
+
+test('a single point draws nothing -- there is no line until the drag has actually moved', () => {
+  const { renderer, strokes, draw } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }], true);
+  draw();
+  assert.equal(strokes.length, 0);
+});
+
+test('a real drag draws a stroke, gold while valid and red once it is not', () => {
+  const { renderer, strokes, draw } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
+  draw();
+  assert.match(strokes.at(-1), /232, 196, 68/, 'valid should read as the same gold a wall itself uses');
+
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], false);
+  draw();
+  assert.match(strokes.at(-1), /220, 60, 50/, 'invalid should read as red');
+});
+
+test('the trail follows the ground under each point, the same way a real wall preview does', () => {
+  // A slope: height climbs 1 unit for every unit of x, so the two ends of
+  // this trail sit at very different heights -- flattened to sea level,
+  // they would visibly float off a hillside.
+  const { renderer, points, draw } = trailRenderer((x) => x);
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 50, y: 0 }], true);
+  draw();
+
+  const flatEnd = projectPoint(renderer.camera.view, 50, 0, 0);
+  const groundEnd = projectPoint(renderer.camera.view, 50, 0, 50);
+  assert.notEqual(points.at(-1).y, flatEnd.y, 'should not have been drawn at sea level');
+  assert.ok(Math.abs(points.at(-1).y - groundEnd.y) < 0.01, 'should sit on the actual hillside instead');
+});
+
+test('releasing the trail fades it out over its own duration, then drops it for good', () => {
+  const { renderer, strokes, draw } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
+  renderer.releaseBuildTrail();
+
+  Object.defineProperty(renderer, 'clock', { value: 0.1, configurable: true });
+  draw();
+  assert.equal(strokes.length, 1, 'still fading -- should still draw');
+
+  Object.defineProperty(renderer, 'clock', { value: 10, configurable: true });
+  draw();
+  assert.equal(strokes.length, 1, 'long past its fade -- should draw nothing more');
+  assert.equal(renderer.buildTrail, null, 'and should have let go of itself');
+});
+
+test('starting a fresh trail while one is already fading replaces it outright', () => {
+  const { renderer } = trailRenderer();
+  renderer.setBuildTrail([{ x: 0, y: 0 }, { x: 10, y: 0 }], true);
+  renderer.releaseBuildTrail();
+  renderer.setBuildTrail([{ x: 5, y: 5 }, { x: 6, y: 6 }], true);
+  assert.equal(renderer.buildTrail.fadingSince, null, 'a fresh drag is live, not fading');
 });

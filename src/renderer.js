@@ -1,16 +1,20 @@
 import {
   AMBIENT_LIGHT,
   AVATAR,
+  BATTLE,
   CASTLE_REBUILD,
   DAMAGE_EFFECTS,
+  EARTHWORK,
   FLAG,
   HEALTH_COLORS,
   HOUSES,
+  IMPERIAL,
   PALETTE,
   SUN,
   TERRAIN,
   TOWER_HEIGHT_UNITS,
   TOWER_RADIUS_UNITS,
+  WALL,
   WALL_HEIGHT_UNITS,
   WALL_THICKNESS_UNITS,
 } from './config.js';
@@ -150,6 +154,59 @@ const PLAN_LINE = 'rgba(232, 196, 68, 0.95)';
 const PLAN_TOOL = 'images/buildBtn.png';
 const PLAN_TOOL_SIZE = 22;
 
+// The live trail behind the Build tool's own drag, and how long it lingers
+// once the finger lifts -- see setBuildTrail/releaseBuildTrail/drawBuildTrail.
+// Kept muted rather than bright: it is a cursor trace, not another wall.
+const TRAIL_VALID_LINE = '232, 196, 68';
+const TRAIL_INVALID_LINE = '220, 60, 50';
+const TRAIL_FADE_SECONDS = 0.5;
+const TRAIL_WIDTH = 2;
+const TRAIL_MAX_ALPHA = 0.55;
+
+// An earthwork reads as a low ramp of turned soil: a darker brown base wider
+// than the paler top laid over it, rather than the single hairline a stone
+// wall's own preview gets -- see drawEarthworks. Drawn onto the ground layer
+// itself (see Renderer#render) so units painted afterwards, on the layer
+// above it, always stand over it rather than the other way round.
+const EARTHWORK_SIDE = '110, 78, 42';
+const EARTHWORK_TOP = '196, 158, 84';
+const EARTHWORK_OUTER_WIDTH = 8;
+const EARTHWORK_INNER_WIDTH = 4;
+
+// The open battleground mode's own start line, shown only during placement
+// (see Renderer#drawStartLine): a pale dashed rule the player deploys south
+// of, so "near the start line" reads as an actual line rather than a rule
+// only the message toasts explain.
+const START_LINE_COLOR = '236, 226, 196';
+const START_LINE_WIDTH = 2;
+const START_LINE_ALPHA = 0.55;
+
+// Small markers drawn over a company's portrait: the white flag of a routed
+// company, and the bars of one on hold.
+const MARKER = {
+  height: 16,
+  flag: '#f4f1e8',
+  flagWidth: 10,
+  flagHeight: 7,
+  hold: '#d8b25a',
+  holdBar: 3,
+  holdGap: 4,
+};
+
+// A ring under each selected company (see Game#selectGuardsNear), and the
+// brief outward ping marking where an Attack-tool tap just landed.
+const SELECTION_RING_RADIUS = 12;
+const SELECTION_LINE = '235, 210, 120';
+const SELECTION_PING_SECONDS = 0.8;
+
+// The destination circle and the light arrow from each company to its own
+// spread point, shown the moment a move order is given -- see
+// Input#handleAttackTap, pingMoveOrder/drawMoveOrder.
+const ORDER_LINE = '255, 250, 225';
+const ORDER_EFFECT_SECONDS = 1.1;
+const ORDER_RING_RADIUS = 16;
+const ORDER_ARROWHEAD_LENGTH = 10;
+
 // A beached raiding hull: how long, how wide at the stern and at the bow,
 // and how tall the freeboard, deckhouse and mast stand above the keel.
 const BOAT = {
@@ -281,6 +338,11 @@ const HOVER_TINT = [255, 214, 64];
 const HOVER_PULSE_RATE = 5;
 const HOVER_MIN = 0.25;
 const HOVER_MAX = 0.85;
+
+// Confirms an order landed -- see Wall#flash -- with a brighter, quicker
+// blink than the hover highlight above, so the two read as different things.
+const FLASH_TINT = [255, 255, 255];
+const FLASH_PULSE_RATE = 16;
 
 /** Blend a tint towards another by `amount`, 0 leaving it alone. */
 function blended(tint, towards, amount) {
@@ -432,6 +494,21 @@ export class Renderer {
     // the cursor moves. Null whenever neither tool is selected, or nothing
     // is under the cursor.
     this.hoveredWall = null;
+    // The Build tool's own drag, traced exactly rather than reduced to a
+    // straight line -- gold while every point along it could actually be
+    // built, red the moment the latest attempt could not (too poor, in the
+    // water, crossing the city, or a crowded node). See setBuildTrail/
+    // releaseBuildTrail/drawBuildTrail.
+    this.buildTrail = null;
+    // Where an Attack-tool tap last landed, a brief ring fading outward to
+    // show what got searched -- see pingSelection/drawSelection. Selected
+    // companies themselves are read straight off game.guards (guard.selected).
+    this.selectionPing = null;
+    // A move order just given: a circle at the point tapped, and a light
+    // arrow from each company's own position to where it is actually
+    // headed (which may be spread a little off the tapped point -- see
+    // Game#orderGuards). See pingMoveOrder/drawMoveOrder.
+    this.moveOrder = null;
     this.units = new Map();
     this.images = new Map();
     // Scratch for the ground mesh, grown to fit and then reused: a repaint
@@ -557,6 +634,7 @@ export class Renderer {
     this.scene.clearRect(0, 0, width, height);
     this.overlay.clearRect(0, 0, width, height);
     this.drawGround(game);
+    this.drawEarthworks(this.camera.view, game.terrain, game.earthworks);
 
     const view = this.camera.view;
     const items = [];
@@ -586,12 +664,17 @@ export class Renderer {
     // with the same haze that dims everything else out there.
     if (settings.atmosphere) {
       this.drawShimmer(view, game);
-      this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.level.mist);
-      this.atmosphere.drawSnow(this.overlay, game.seasonPhase, game.level.climate);
+      this.atmosphere.drawFog(this.overlay, game.seasonPhase, game.mist);
+      this.atmosphere.drawClouds(this.overlay, game.seasonPhase, game.mist);
+      this.atmosphere.drawSnow(this.overlay, game.seasonPhase, game.climate);
+      this.atmosphere.drawRain(this.overlay, game.rain);
       this.atmosphere.drawTint(this.overlay, game.seasonPhase);
     }
     this.drawPeggedWalls(view, game);
+    this.drawStartLine(view, game);
+    this.drawBuildTrail(view, game.terrain);
+    this.drawSelection(view, game.guards);
+    this.drawMoveOrder(view);
     this.drawWorkingWalls(view, game);
     this.drawDamageEffects(view, game);
     this.drawBurningHouses(view, game);
@@ -631,7 +714,7 @@ export class Renderer {
     // A winter's own settling, quantised the same coarse way autumn's turn
     // already is -- see Season#snowCoverAt for how a level's own climate
     // can hold this at zero the whole year round.
-    const snowCover = snowCoverAt(game.seasonPhase, game.level.climate);
+    const snowCover = snowCoverAt(game.seasonPhase, game.climate);
     const settled = Math.round(snowCover * GOLD_STEPS) / GOLD_STEPS;
     // Reshaped ground is part of what the mesh draws, so a platform climbing
     // has to count as a change the same way the camera moving does. The
@@ -639,7 +722,7 @@ export class Renderer {
     // whole new Terrain, and without the id here that swap can go
     // unnoticed if the camera happens to end up back where it started,
     // leaving the previous level's ground painted under the new one.
-    const key = `${game.level.id}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${settled}|${game.terrainRevision}`;
+    const key = `${game.level.id}|${game.battleMap}|${focus.x}|${focus.y}|${distance}|${elevation}|${turned}|${settled}|${game.terrainRevision}`;
     if (this.paintedGround === key) {
       return;
     }
@@ -1052,9 +1135,17 @@ export class Renderer {
         ? taperedWallQuads(wall.start, wall.end, halfWidth, halfWidth * WALL_TAPER, height, ground)
         : wallPrism(wall.start, wall.end, halfWidth, height, ground);
       const flat = this.flankPixels(view, wall.start, height) < MIN_FLANK_PIXELS;
-      const tint = wall === hoveredWall
+      let tint = wall === hoveredWall
         ? blended(wallTint(condition), HOVER_TINT, pulse)
         : wallTint(condition);
+      if (wall.isFlashing) {
+        // Fades out as flashSeconds runs down, and blinks quickly rather
+        // than glowing steadily, so it reads as a confirmation rather than
+        // another hover highlight.
+        const strength = wall.flashSeconds / WALL.flashSeconds;
+        const blink = strength * (0.5 + 0.5 * Math.sin(this.clock * FLASH_PULSE_RATE));
+        tint = blended(tint, FLASH_TINT, blink);
+      }
       this.collectPrism(items, view, flat ? [quads[0]] : quads, tint);
     }
   }
@@ -1391,6 +1482,283 @@ export class Renderer {
   }
 
   /**
+   * The open battleground mode's earthworks: a low ramp of turned soil,
+   * drawn as a wider dark base stroke under a paler, narrower one -- enough
+   * to read as a raised mound without modelling one. Drawn onto the ground
+   * layer itself (see Renderer#render), so every unit painted afterwards,
+   * on the layer above it, stands over it rather than under it.
+   */
+  drawEarthworks(view, terrain, earthworks) {
+    if (!earthworks || earthworks.length === 0) {
+      return;
+    }
+    const context = this.ground;
+    context.save();
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    for (const earthwork of earthworks) {
+      const from = projectPoint(view, earthwork.start.x, earthwork.start.y,
+        terrain.heightAt(earthwork.start.x, earthwork.start.y));
+      const to = projectPoint(view, earthwork.end.x, earthwork.end.y,
+        terrain.heightAt(earthwork.end.x, earthwork.end.y));
+      if (!from || !to) {
+        continue;
+      }
+      context.strokeStyle = `rgb(${EARTHWORK_SIDE})`;
+      context.lineWidth = EARTHWORK_OUTER_WIDTH;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+      context.strokeStyle = `rgb(${EARTHWORK_TOP})`;
+      context.lineWidth = EARTHWORK_INNER_WIDTH;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  /**
+   * The open battleground mode's own start line, shown only while the
+   * placement phase is still open -- a reference the player deploys south
+   * of, not something that means anything once the fight has begun.
+   */
+  drawStartLine(view, game) {
+    if (game.mode !== 'battle' || game.started) {
+      return;
+    }
+    const from = { x: -BATTLE.fieldHalfWidth, y: BATTLE.baselineY };
+    const to = { x: BATTLE.fieldHalfWidth, y: BATTLE.baselineY };
+    const start = projectPoint(view, from.x, from.y, game.terrain.heightAt(from.x, from.y));
+    const end = projectPoint(view, to.x, to.y, game.terrain.heightAt(to.x, to.y));
+    if (!start || !end) {
+      return;
+    }
+    const context = this.overlay;
+    context.save();
+    context.lineWidth = START_LINE_WIDTH;
+    context.setLineDash([10, 8]);
+    context.strokeStyle = `rgba(${START_LINE_COLOR}, ${START_LINE_ALPHA})`;
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    context.lineTo(end.x, end.y);
+    context.stroke();
+    context.restore();
+  }
+
+  /**
+   * The Build tool's own drag, live -- called on every point along it (see
+   * Input#dragBuild) rather than just its snapped ends, so the trail traces
+   * the swipe itself. `valid` reflects only the most recent attempt, so the
+   * colour answers "if I let go right now, would this work" rather than
+   * summing the whole drag's history.
+   */
+  setBuildTrail(points, valid) {
+    this.buildTrail = {
+      points: points.map((point) => ({ ...point })),
+      valid,
+      fadingSince: null,
+    };
+  }
+
+  /** The finger has lifted (or the drag was abandoned) -- fade the trail out rather than cutting it. */
+  releaseBuildTrail() {
+    if (this.buildTrail && this.buildTrail.fadingSince === null) {
+      this.buildTrail.fadingSince = this.clock;
+    }
+  }
+
+  drawBuildTrail(view, terrain) {
+    const trail = this.buildTrail;
+    if (!trail || trail.points.length < 2) {
+      return;
+    }
+    let alpha = TRAIL_MAX_ALPHA;
+    if (trail.fadingSince !== null) {
+      const elapsed = this.clock - trail.fadingSince;
+      if (elapsed >= TRAIL_FADE_SECONDS) {
+        this.buildTrail = null;
+        return;
+      }
+      alpha = TRAIL_MAX_ALPHA * clamp(1 - elapsed / TRAIL_FADE_SECONDS, 0, 1);
+    }
+    const context = this.overlay;
+    context.save();
+    context.lineWidth = TRAIL_WIDTH;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.strokeStyle = `rgba(${trail.valid ? TRAIL_VALID_LINE : TRAIL_INVALID_LINE}, ${alpha})`;
+    context.beginPath();
+    let started = false;
+    for (const point of trail.points) {
+      // Following the ground under each point, the same way a real wall's
+      // own preview does (see drawPeggedWalls) -- projected at sea level
+      // instead, the trail floated visibly off the hillside wherever the
+      // terrain was not flat.
+      const ground = terrain.heightAt(point.x, point.y);
+      const projected = projectPoint(view, point.x, point.y, ground);
+      if (!projected) {
+        continue;
+      }
+      if (!started) {
+        context.moveTo(projected.x, projected.y);
+        started = true;
+      } else {
+        context.lineTo(projected.x, projected.y);
+      }
+    }
+    if (started) {
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  /** Mark where an Attack-tool tap just landed -- see Input#handleAttackTap. */
+  pingSelection(x, y, groundZ) {
+    this.selectionPing = { x, y, groundZ, until: this.clock + SELECTION_PING_SECONDS };
+  }
+
+  /**
+   * A ring under each selected company, read straight off guard.selected
+   * every frame so it tracks a company as it moves, plus the brief outward
+   * ping from the tap that picked them out.
+   */
+  drawSelection(view, guards) {
+    const context = this.overlay;
+    for (const guard of guards) {
+      if (!guard.selected) {
+        continue;
+      }
+      const point = projectPoint(view, guard.position.x, guard.position.y, 0);
+      if (!point) {
+        continue;
+      }
+      const radius = (view.focal / point.depth) * SELECTION_RING_RADIUS;
+      context.save();
+      context.strokeStyle = `rgb(${SELECTION_LINE})`;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      context.stroke();
+      context.restore();
+    }
+    this.drawSelectionPing(view);
+  }
+
+  drawSelectionPing(view) {
+    const ping = this.selectionPing;
+    if (!ping) {
+      return;
+    }
+    if (this.clock >= ping.until) {
+      this.selectionPing = null;
+      return;
+    }
+    const point = projectPoint(view, ping.x, ping.y, ping.groundZ);
+    if (!point) {
+      return;
+    }
+    // Clamped defensively, not just derived: a radius built off this going
+    // negative does not just look wrong, it throws out of CanvasRenderingContext2D.arc
+    // and would take the whole render loop down with it.
+    const progress = clamp(1 - (ping.until - this.clock) / SELECTION_PING_SECONDS, 0, 1);
+    const context = this.overlay;
+    context.save();
+    context.strokeStyle = `rgba(${SELECTION_LINE}, ${1 - progress})`;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(point.x, point.y, (view.focal / point.depth) * IMPERIAL.selectRadius * (0.4 + 0.6 * progress), 0, Math.PI * 2);
+    context.stroke();
+    context.restore();
+  }
+
+  /**
+   * Mark a move order just given -- see Input#handleAttackTap. `starts` and
+   * `destinations` are paired by index, one entry per company ordered.
+   */
+  pingMoveOrder(starts, destinations, target, groundZ) {
+    this.moveOrder = {
+      starts: starts.map((point) => ({ ...point })),
+      destinations: destinations.map((point) => ({ ...point })),
+      target: { ...target },
+      groundZ,
+      until: this.clock + ORDER_EFFECT_SECONDS,
+    };
+  }
+
+  /**
+   * A circle where the order was actually aimed, and a light arrow from
+   * each company's own position to wherever it is headed -- spread a
+   * little off the tapped point for a group (see Game#orderGuards), so the
+   * arrow is what shows a viewer that company's own real destination.
+   */
+  drawMoveOrder(view) {
+    const order = this.moveOrder;
+    if (!order) {
+      return;
+    }
+    if (this.clock >= order.until) {
+      this.moveOrder = null;
+      return;
+    }
+    // See drawSelectionPing's own note: clamped so a radius built off this
+    // can never go negative and throw out the whole render loop.
+    const progress = clamp(1 - (order.until - this.clock) / ORDER_EFFECT_SECONDS, 0, 1);
+    const alpha = 1 - progress;
+    const context = this.overlay;
+
+    const centre = projectPoint(view, order.target.x, order.target.y, order.groundZ);
+    if (centre) {
+      context.save();
+      context.strokeStyle = `rgba(${ORDER_LINE}, ${alpha})`;
+      context.lineWidth = 2;
+      context.beginPath();
+      context.arc(centre.x, centre.y, (view.focal / centre.depth) * ORDER_RING_RADIUS * (0.5 + 0.5 * progress), 0, Math.PI * 2);
+      context.stroke();
+      context.restore();
+    }
+
+    order.starts.forEach((start, index) => {
+      const destination = order.destinations[index];
+      const from = projectPoint(view, start.x, start.y, order.groundZ);
+      const to = projectPoint(view, destination.x, destination.y, order.groundZ);
+      if (!from || !to) {
+        return;
+      }
+      this.drawArrow(from, to, alpha);
+    });
+  }
+
+  /** A line with an arrowhead at `to`, in the move order's own light colour. */
+  drawArrow(from, to, alpha) {
+    const context = this.overlay;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    context.save();
+    context.strokeStyle = `rgba(${ORDER_LINE}, ${alpha})`;
+    context.fillStyle = `rgba(${ORDER_LINE}, ${alpha})`;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(to.x, to.y);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(to.x, to.y);
+    context.lineTo(
+      to.x - ORDER_ARROWHEAD_LENGTH * Math.cos(angle - Math.PI / 6),
+      to.y - ORDER_ARROWHEAD_LENGTH * Math.sin(angle - Math.PI / 6),
+    );
+    context.lineTo(
+      to.x - ORDER_ARROWHEAD_LENGTH * Math.cos(angle + Math.PI / 6),
+      to.y - ORDER_ARROWHEAD_LENGTH * Math.sin(angle + Math.PI / 6),
+    );
+    context.closePath();
+    context.fill();
+    context.restore();
+  }
+
+  /**
    * Masons at work: a section paid to repair, or one growing into its next
    * tier. Both are already standing, so they get the pulsing tool hovering
    * over the stone rather than the dashed line a pegged section gets. The
@@ -1632,6 +2000,39 @@ export class Renderer {
     return top - AVATAR.gap;
   }
 
+  /** A small white flag over a company whose morale has broken -- see melee.js's rout. */
+  drawWhiteFlag(centreX, bottomY) {
+    const context = this.overlay;
+    const poleTop = bottomY - MARKER.height;
+    context.save();
+    context.strokeStyle = PALETTE.barEdge;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.moveTo(centreX, bottomY);
+    context.lineTo(centreX, poleTop);
+    context.stroke();
+    context.fillStyle = MARKER.flag;
+    context.fillRect(centreX, poleTop, MARKER.flagWidth, MARKER.flagHeight);
+    context.lineWidth = 1;
+    context.strokeRect(centreX, poleTop, MARKER.flagWidth, MARKER.flagHeight);
+    context.restore();
+  }
+
+  /** Two upright bars over a company standing its ground -- see Game#toggleHold. */
+  drawHoldMark(centreX, bottomY) {
+    const context = this.overlay;
+    const top = bottomY - MARKER.flagHeight - 2;
+    context.save();
+    context.fillStyle = MARKER.hold;
+    context.strokeStyle = PALETTE.barEdge;
+    context.lineWidth = 1;
+    for (const offset of [-MARKER.holdGap, MARKER.holdGap - MARKER.holdBar]) {
+      context.fillRect(centreX + offset, top, MARKER.holdBar, MARKER.flagHeight);
+      context.strokeRect(centreX + offset, top, MARKER.holdBar, MARKER.flagHeight);
+    }
+    context.restore();
+  }
+
   drawBars(view, game) {
     for (const castle of game.castles) {
       const definition = game.buildings[castle.typeId];
@@ -1646,8 +2047,14 @@ export class Renderer {
       }
       const fraction = company.health / company.type.maxHealth;
       const top = this.drawCompanyBar(view, game, company, model.radius, fraction);
-      if (top !== null) {
-        this.drawAvatar(company, top.x, top.y);
+      if (top === null) {
+        continue;
+      }
+      const above = this.drawAvatar(company, top.x, top.y);
+      if (company.routed) {
+        this.drawWhiteFlag(top.x, above);
+      } else if (company.holding) {
+        this.drawHoldMark(top.x, above);
       }
     }
   }

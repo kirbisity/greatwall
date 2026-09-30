@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampIntoView } from '../src/hud.js';
+import { clampIntoView, formatBattleStats } from '../src/hud.js';
 
 const phone = { width: 375, height: 667, top: 56 };
 const box = (left, top, width = 200, height = 60) => ({ left, top, right: left + width, bottom: top + height });
@@ -27,4 +27,41 @@ test('a menu that would sit under the top bar is pushed below it', () => {
 test('a menu wider than the screen keeps its start on screen', () => {
   const { dx } = clampIntoView(box(-40, 200, 420), phone, 8);
   assert.equal(-40 + dx, 8, 'its first option must be reachable even if its last is not');
+});
+
+test('formatBattleStats shows companies destroyed/lost, soldiers lost, and a soldier-based K/D', () => {
+  const text = formatBattleStats({
+    kills: 9, deaths: 2, enemyLoss: 130, playerLoss: 40,
+  });
+  assert.equal(
+    text,
+    'Enemy companies destroyed 9 · Your companies lost 2\nEnemy soldiers lost: 130\nYour soldiers lost: 40\nK/D 3.25',
+  );
+});
+
+test('formatBattleStats K/D ignores company counts', () => {
+  const text = formatBattleStats({
+    kills: 1, deaths: 9, enemyLoss: 60, playerLoss: 30,
+  });
+  assert.match(text, /K\/D 2\.00/);
+});
+
+test('formatBattleStats reads K/D as a clean win with no losses at all', () => {
+  const zeroLosses = formatBattleStats({
+    kills: 6, deaths: 0, enemyLoss: 80, playerLoss: 0,
+  });
+  assert.match(zeroLosses, /K\/D ∞/);
+
+  const nothingHappened = formatBattleStats({
+    kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0,
+  });
+  assert.match(nothingHappened, /K\/D 0\.00/);
+});
+
+test('formatBattleStats says how many soldiers each side fielded, when known', () => {
+  const text = formatBattleStats({
+    kills: 2, deaths: 1, enemyLoss: 130, playerLoss: 40, enemyFielded: 240, playerFielded: 180,
+  });
+  assert.match(text, /Enemy soldiers lost: 130 of 240/);
+  assert.match(text, /Your soldiers lost: 40 of 180/);
 });

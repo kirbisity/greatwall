@@ -27,13 +27,15 @@
 
 	<div id="viewoverlay"></div>
 
+	<div id="threatMarkers" class="threatMarkers" aria-hidden="true"></div>
+
 	<header id="topMenu">
 		<button id="menuBtn" class="iconButton" title="Menu (Esc)">
 			<img src="images/menuBtn.png" alt="Menu">
 		</button>
 
 		<div class="readouts">
-			<div class="readout" title="Treasury">
+			<div class="readout readout-treasury" title="Treasury">
 				<span class="readout-label">Treasury</span>
 				<span id="token0" class="readout-value">$0</span>
 			</div>
@@ -50,15 +52,22 @@
 				<span class="readout-label">Season</span>
 				<span id="season0" class="readout-value">Autumn</span>
 			</div>
+			<div id="battleBudgetReadout" class="readout readout-battle" title="Points left to spend on your line">
+				<span class="readout-label">Budget</span>
+				<span id="battleBudgetValue" class="readout-value">0 / 0</span>
+			</div>
 		</div>
 
 		<div class="viewTools">
+			<button id="startBattleBtn" class="battleStartBtn" title="Close the placement phase and begin the fight">Start Battle</button>
 			<button id="move" class="iconButton" title="Pan the map"><img src="images/moveBtn.png" alt="Move"></button>
 			<button id="zoom" class="iconButton" title="Zoom the view"><img src="images/zoomBtn.png" alt="Zoom"></button>
 			<button id="help" class="iconButton" title="How to play"><img src="images/helpBtn.png" alt="Help"></button>
 			<button id="undo" class="iconButton touchOnly" title="Undo the last section"><img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M9%2014L4%209l5-5'/%3E%3Cpath%20d='M4%209h10.5a5.5%205.5%200%200%201%200%2011H11'/%3E%3C/svg%3E" alt="Undo"></button>
 		</div>
 	</header>
+
+	<nav id="battleDock" class="battleDock"></nav>
 
 	<nav id="toolDock" class="toolDock">
 		<button id="buildTool" class="toolButton" title="Drag to raise a wall">
@@ -87,11 +96,17 @@
 		</button>
 	</nav>
 
+	<div id="actionHint" class="actionHint">
+		<p id="actionHintText"></p>
+	</div>
+
 	<div id="dispatchMenu" class="dispatchMenu">
 		<button id="dispatchOption0" class="dispatchButton" type="button"></button>
 		<button id="dispatchOption1" class="dispatchButton" type="button"></button>
 		<button id="dispatchOption2" class="dispatchButton" type="button"></button>
 	</div>
+
+	<button id="holdToggle" class="holdToggle" type="button">Hold</button>
 
 	<div id="myNav" class="overlay">
 		<div class="overlay-content">
@@ -100,9 +115,24 @@
 			<div id="levelList" class="levelList"></div>
 			<div class="menuList">
 				<button id="startBtn2" class="menuItem menuItem-primary">Start</button>
+				<button id="battleSetupBtn" class="menuItem">Choose Armies &amp; Map</button>
 				<button id="restartBtn" class="menuItem">Restart</button>
 				<button id="settingsBtn" class="menuItem">Settings</button>
 				<a href="index.html" class="menuItem">Quit</a>
+			</div>
+		</div>
+	</div>
+
+	<!-- The open battleground's own setup page: the map and each side's army,
+	     chosen before the field is entered. Built by Hud#showBattleSetup. -->
+	<div id="battleSetupPage" class="overlay">
+		<div class="overlay-content battleSetupContent">
+			<h2 class="panelTitle">Prepare for Battle</h2>
+			<p id="battleSetupStory" class="battleStory"></p>
+			<div id="battleSetupBody" class="battleSetupBody"></div>
+			<div class="menuList">
+				<button id="battleSetupStart" class="menuItem menuItem-primary">Start Battle</button>
+				<button id="battleSetupBack" class="menuItem">Back</button>
 			</div>
 		</div>
 	</div>
@@ -157,6 +187,20 @@
 	<div id="storyBanner" class="storyBanner">
 		<button id="storyClose" class="close" title="Close">&times;</button>
 		<p id="storyText"></p>
+	</div>
+
+	<!-- The open battleground mode's own end-of-round screen: shown over the
+	     field itself rather than the main menu, so the line as it stood at
+	     the last moment is still visible behind it. -->
+	<div id="battleResult" class="modal">
+		<div class="modal-content battleResultContent">
+			<h2 id="battleResultTitle" class="panelTitle"></h2>
+			<p id="battleResultSummary" class="battleResultSummary"></p>
+			<div id="battleResultBreakdown" class="battleBreakdown"></div>
+			<div class="menuList">
+				<button id="battleResultContinue" class="menuItem menuItem-primary">Continue</button>
+			</div>
+		</div>
 	</div>
 
 	<audio id="backgroundmusic"></audio>

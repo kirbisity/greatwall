@@ -1,4 +1,6 @@
-import { CAMERA, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP } from './config.js';
+import {
+  CAMERA, EARTHWORK, SIDE_BAR_WIDTH, TOP_BAR_HEIGHT, WALL, ZOOM_STEP,
+} from './config.js';
 import { distance } from './geometry.js';
 
 const CURSORS = {
@@ -10,6 +12,17 @@ const CURSORS = {
   fortify: 'url(images/buildBtn.png), copy',
   upgrade: 'url(images/castleBtn.png), default',
   attack: 'url(images/attackBtn.png), crosshair',
+};
+
+// What a freshly picked tool wants next -- see Hud#showActionHint. Attack
+// has two stages of its own (see openDispatchMenu/showDispatchMenu below),
+// so it is left out here and set explicitly at each stage instead.
+const TOOL_HINTS = {
+  build: 'Drag on the ground to raise a wall',
+  destroy: 'Drag over a wall to tear it down',
+  repair: 'Drag over a damaged wall to mend it',
+  fortify: 'Drag over a wall to reinforce it',
+  upgrade: 'Tap the castle to grow it',
 };
 
 // Outcomes that leave a usable end to keep drawing from. Drawing over a
@@ -24,10 +37,24 @@ const HOVER_TOOLS = new Set(['repair', 'fortify']);
 const DRAG_ZOOM_SENSITIVITY = 5;
 const MAX_DRAG_ZOOM_STEPS = 2;
 
+// How much of a finger's newest reported position replaces the smoothed one
+// each sample, once the gesture is under way -- 1 would be no smoothing at
+// all, and this is deliberately close to that: just enough to round off
+// sample noise, not slow enough to feel like the ground is trailing the
+// finger. See Input#panMap.
+const TOUCH_PAN_SMOOTHING = 0.55;
+// A touch landing is the least steady moment of a drag -- a thumb settling
+// still reads as a few pixels of back-and-forth before it commits to a
+// direction. Starting this gently and ramping up to TOUCH_PAN_SMOOTHING
+// over PAN_RAMP_SAMPLES samples absorbs that shake instead of panning the
+// camera along with it, without adding any lag a deliberate swipe can feel.
+const PAN_RAMP_START = 0.12;
+const PAN_RAMP_SAMPLES = 6;
+
 // Anything a gesture can start on that is interface rather than map. A drag
 // that begins on a button, the dock or a menu must not move the camera or
 // lay stone, and a tap on one must not also land on the ground beneath it.
-const INTERFACE = 'button, a, input, #topMenu, #toolDock, #dispatchMenu, .overlay, .modal';
+const INTERFACE = 'button, a, input, #topMenu, #toolDock, #battleDock, #dispatchMenu, .overlay, .modal';
 
 /** Translates pointer and keyboard events into camera moves and game actions. */
 export class Input {
@@ -54,11 +81,24 @@ export class Input {
     // it grabbed, rather than a mouse, which eases after it -- see
     // Camera#panFrom.
     this.holdsGround = false;
+    // A light low-pass filter on a finger's own reported position, so the
+    // small per-sample noise real touch digitizers report does not turn
+    // straight into visible micro-jerks in the pan -- see handleMove. Reset
+    // at the start of every drag so a new gesture starts from exactly where
+    // the finger landed, not wherever the last one left off.
+    this.smoothedTouch = null;
+    // How many pan samples into the current drag -- see panMap's own ramp
+    // from PAN_RAMP_START up to TOUCH_PAN_SMOOTHING.
+    this.panRampStep = 0;
     this.zoomAnchor = null;
     this.chainPoint = null;
-    // Which guard tier the dispatch menu last picked. Sticky across sends,
-    // so repeat orders of the same company do not reopen the menu.
-    this.selectedGuardType = null;
+    // Every point along the Build tool's current drag, in world ground
+    // coordinates -- see dragBuild/Renderer#setBuildTrail.
+    this.trail = [];
+    // The open battleground mode's placement phase: which roster type a tap
+    // on the field will place next, picked from the battle dock -- see
+    // selectPendingUnit/handleClick. Null the rest of the time.
+    this.pendingUnit = null;
   }
 
   /**
@@ -89,12 +129,19 @@ export class Input {
     if (!this.startsOnMap(event)) {
       return;
     }
+    // Without this, a finger that drifts over a button mid-drag can lose the
+    // gesture to it instead -- captured, every later event for this pointer
+    // keeps coming here regardless of what it is currently over.
+    if (event.pointerType !== 'mouse' && event.target?.setPointerCapture) {
+      event.target.setPointerCapture(event.pointerId);
+    }
     this.contacts.set(event.pointerId ?? 0, { x: event.clientX, y: event.clientY });
     if (this.contacts.size === 1) {
       // Sync first so the initial drag delta is zero instead of a jump from (0, 0).
       this.trackPointer(event);
       this.pointerDown = true;
       this.holdsGround = event.pointerType === 'touch' || event.pointerType === 'pen';
+      this.smoothedTouch = null;
       return;
     }
     this.beginPinch();
@@ -131,6 +178,8 @@ export class Input {
     this.pointerDown = false;
     this.zoomAnchor = null;
     this.chainPoint = null;
+    this.smoothedTouch = null;
+    this.renderer.releaseBuildTrail();
     this.camera.release();
   }
 
@@ -142,6 +191,7 @@ export class Input {
   beginPinch() {
     this.pointerDown = false;
     this.chainPoint = null;
+    this.renderer.releaseBuildTrail();
     this.zoomAnchor = null;
     this.pinch = this.measurePinch();
   }
@@ -177,6 +227,13 @@ export class Input {
       this.openDispatchMenu();
     } else {
       this.hud.hideDispatchMenu();
+      this.game.deselectGuards();
+    }
+    const hint = TOOL_HINTS[this.tool];
+    if (hint) {
+      this.hud.showActionHint(hint);
+    } else if (this.tool !== 'attack') {
+      this.hud.clearActionHint();
     }
   }
 
@@ -184,27 +241,81 @@ export class Input {
     this.tool = 'move';
     this.applyTool();
     this.hud.hideDispatchMenu();
+    this.hud.clearActionHint();
+    this.game.deselectGuards();
+    this.renderer.releaseBuildTrail();
+  }
+
+  /**
+   * The open battleground mode's placement phase: shows the roster dock and
+   * wires each button to pick out what a tap on the field places next (see
+   * handleClick). The Build tool still works throughout, for earthworks.
+   */
+  beginPlacement() {
+    this.resetTool();
+    this.hud.showBattlePrep(this.game, (typeId) => this.selectPendingUnit(typeId));
+    this.hud.showActionHint('Pick a company, then tap the field');
+  }
+
+  selectPendingUnit(typeId) {
+    this.pendingUnit = this.pendingUnit === typeId ? null : typeId;
+    this.hud.setBattleSelection(this.pendingUnit);
+  }
+
+  /** Start Battle pressed: the roster dock comes down and no more placing happens. */
+  endPlacement() {
+    this.pendingUnit = null;
+    this.hud.hideBattlePrep();
+    this.resetTool();
+    // No Attack tool to pick in this mode (see handleClick) -- but a tap
+    // still commands a company from here on, so the cursor should say so.
+    this.hud.setCursor(CURSORS.attack);
   }
 
   /** Show the tier picker above the castle, so an order carries a company. */
   openDispatchMenu() {
-    const castle = this.game.castles[0];
-    const options = this.game.dispatchOptions();
-    if (!castle || options.length === 0) {
+    if (this.game.dispatchOptions().length === 0) {
       return;
     }
-    // Over the roof, where the castle actually stands. At sea level the
-    // picker landed on top of a keep standing up a hill.
-    const { x, y } = castle.position;
-    const definition = this.game.buildings?.[castle.typeId];
-    const roof = definition && this.renderer.structureFor
-      ? this.renderer.structureFor(definition).height
-      : 0;
-    const screen = this.camera.toScreen({ x, y, z: this.groundHeight(x, y) + roof })
-      ?? { x: this.camera.width / 2, y: this.camera.height / 2 };
-    this.hud.showDispatchMenu(options, screen, (typeId) => {
-      this.selectedGuardType = typeId;
+    // Anchored to the Attack button itself, not the castle -- a fixed
+    // screen point the player's eye is already on, rather than a world
+    // point that can drift off-screen as the camera pans or zooms.
+    const button = typeof document !== 'undefined' ? document.getElementById('attackTool') : null;
+    const rect = button?.getBoundingClientRect();
+    const screen = rect
+      ? { x: rect.left + rect.width / 2, y: rect.top }
+      : { x: this.camera.width / 2, y: this.camera.height / 2 };
+    this.hud.showActionHint('Choose a company to muster');
+    this.refreshDispatchMenu(screen);
+  }
+
+  /**
+   * (Re)draws the tier picker against whatever is on offer right now, so a
+   * one-time option -- the Emperor among them -- disappears the moment it
+   * is spent rather than sitting there clickable with nothing left to give.
+   * Left open after a pick rather than hidden, so several companies can be
+   * mustered in a row -- tapping the map (see handleAttackTap) is what
+   * closes it, once the player has moved on to selecting and sending them.
+   */
+  refreshDispatchMenu(screen) {
+    const options = this.game.dispatchOptions();
+    if (options.length === 0) {
       this.hud.hideDispatchMenu();
+      return;
+    }
+    this.hud.showDispatchMenu(options, screen, (typeId) => {
+      const option = options.find((candidate) => candidate.id === typeId);
+      const result = this.game.sendGuard(typeId);
+      if (!result.sent) {
+        const reason = result.status === 'unique'
+          ? `Only one ${option.name} can ever be mustered`
+          : `${option.name} costs $${option.cost} to muster`;
+        this.hud.showMessage(reason);
+        return;
+      }
+      this.hud.showActionHint('Tap a company to select it, then tap again to send it');
+      this.onChange();
+      this.refreshDispatchMenu(screen);
     });
   }
 
@@ -242,6 +353,23 @@ export class Input {
     if (!this.startsOnMap(event)) {
       return;
     }
+    if (this.pendingUnit && this.tool === 'move') {
+      this.trackPointer(event);
+      this.placePendingUnit();
+      this.onChange();
+      return;
+    }
+    // Once the open battleground mode's fight has actually started there is
+    // nothing left to muster, so a tap always means select-or-send -- the
+    // same behaviour the Attack tool gives a siege, just always on here
+    // rather than something to pick. See Hud's own siegeOnlyToolIds, which
+    // is why there is no button for this in this mode to begin with.
+    if (this.game.mode === 'battle' && this.game.started) {
+      this.trackPointer(event);
+      this.handleAttackTap(this.pointerOnGround());
+      this.onChange();
+      return;
+    }
     if (this.tool === 'upgrade') {
       this.trackPointer(event);
       if (this.game.upgradeCastleAt(this.pointerOnGround())) {
@@ -252,21 +380,50 @@ export class Input {
     }
     if (this.tool === 'attack') {
       this.trackPointer(event);
-      this.orderAttack(this.pointerOnGround());
+      this.handleAttackTap(this.pointerOnGround());
+      this.onChange();
+      return;
+    }
+    // Repair and Fortify no longer need a drag across the section -- a
+    // single tap in its vicinity (see WALL.pickRadius) is enough, which
+    // matters far more on a touchscreen than a mouse: sweeping precisely
+    // along a thin wall with a fingertip is genuinely hard.
+    if (this.tool === 'repair') {
+      this.trackPointer(event);
+      this.dragRepair();
+      this.onChange();
+      return;
+    }
+    if (this.tool === 'fortify') {
+      this.trackPointer(event);
+      this.dragFortify();
       this.onChange();
     }
   }
 
-  /** Muster the picked tier, or the cheapest, and send it to hold a spot. */
-  orderAttack(target) {
-    const options = this.game.dispatchOptions();
-    const chosen = options.find((option) => option.id === this.selectedGuardType) ?? options[0];
-    if (!chosen) {
+  /**
+   * The Attack tool's own two-step order: an empty-handed tap picks out
+   * whatever companies are nearby (see Game#selectGuardsNear), and a tap
+   * with something already selected sends that group to hold the new
+   * ground (see Game#orderGuards) instead. A tap always closes the tier
+   * picker -- mustering is done, this tap is about commanding.
+   */
+  handleAttackTap(point) {
+    this.hud.hideDispatchMenu();
+    const selected = this.game.selectedGuards;
+    if (selected.length > 0) {
+      const starts = selected.map((guard) => ({ ...guard.position }));
+      this.game.orderGuards(selected, point);
+      const destinations = selected.map((guard) => ({ ...guard.orders }));
+      this.renderer.pingMoveOrder(starts, destinations, point, this.groundHeight(point.x, point.y));
+      this.hud.showActionHint('Tap a company to select it, then tap again to send it');
       return;
     }
-    const result = this.game.sendGuard(chosen.id, target);
-    if (result.status === 'poor') {
-      this.hud.showMessage(`${chosen.name} costs $${chosen.cost} to muster`);
+    const found = this.game.selectGuardsNear(point);
+    const ground = this.groundHeight(point.x, point.y);
+    this.renderer.pingSelection(point.x, point.y, ground);
+    if (found.length > 0) {
+      this.hud.showActionHint('Tap again to send them there');
     }
   }
 
@@ -296,9 +453,35 @@ export class Input {
         this.dragFortify();
         break;
       default:
-        this.camera.panFrom(previous, this.pointer, { direct: this.holdsGround });
+        this.panMap(previous);
     }
     this.onChange();
+  }
+
+  /**
+   * A finger's own reported position is noisier, sample to sample, than a
+   * mouse's -- panned exactly as reported, that noise shows up as a visible
+   * jitter with every step. Smoothing it here, before it ever reaches the
+   * camera, takes the jitter out while staying tight enough that the
+   * ground still reads as held rather than trailing behind the finger --
+   * see Camera#panFrom's own note on why touch tracks directly at all.
+   */
+  panMap(previous) {
+    if (!this.holdsGround) {
+      this.camera.panFrom(previous, this.pointer, { direct: false });
+      return;
+    }
+    if (!this.smoothedTouch) {
+      this.smoothedTouch = { ...previous };
+      this.panRampStep = 0;
+    }
+    const ramp = Math.min(1, this.panRampStep / PAN_RAMP_SAMPLES);
+    const smoothing = PAN_RAMP_START + (TOUCH_PAN_SMOOTHING - PAN_RAMP_START) * ramp;
+    this.panRampStep += 1;
+    const from = { ...this.smoothedTouch };
+    this.smoothedTouch.x += (this.pointer.x - this.smoothedTouch.x) * smoothing;
+    this.smoothedTouch.y += (this.pointer.y - this.smoothedTouch.y) * smoothing;
+    this.camera.panFrom(from, this.smoothedTouch, { direct: true });
   }
 
   /**
@@ -328,30 +511,71 @@ export class Input {
     this.camera.zoomAt(this.zoomAnchor, 1 + ZOOM_STEP * steps);
   }
 
+  /** Places whatever roster type is pending at the tapped point -- see selectPendingUnit. */
+  placePendingUnit() {
+    const result = this.game.placeGuard(this.pendingUnit, this.pointerOnGround());
+    if (result.placed) {
+      this.hud.updateBattleBudget(this.game);
+      return;
+    }
+    if (result.status === 'poor') {
+      this.hud.showMessage('Not enough points left');
+      return;
+    }
+    if (result.status === 'zone') {
+      this.hud.showMessage('Place your troops south of the start line');
+      return;
+    }
+    if (result.status === 'unique') {
+      this.hud.showMessage('Only one Emperor can be fielded');
+    }
+  }
+
+  /**
+   * Traces the drag itself, point by point, rather than reducing it to a
+   * straight line -- gold while the latest attempt along it could actually
+   * be built, red the moment one could not. See Renderer#setBuildTrail.
+   *
+   * In the open battleground mode this lays earthworks instead of stone --
+   * shorter ones, since a ramp of dirt is a far smaller undertaking than a
+   * wall -- see EARTHWORK.
+   */
   dragBuild() {
+    const bounds = this.game.mode === 'battle' ? EARTHWORK : WALL;
     const target = this.pointerOnGround();
     if (!this.chainPoint) {
       this.chainPoint = target;
+      this.trail = [target];
+      this.renderer.setBuildTrail(this.trail, true);
       return;
     }
+    this.trail.push(target);
     const span = distance(this.chainPoint, target);
-    if (span <= WALL.minLength || span >= WALL.maxLength) {
+    if (span <= bounds.minLength || span >= bounds.maxLength) {
+      this.renderer.setBuildTrail(this.trail, true);
       return;
     }
 
-    const result = this.game.buildWall(this.chainPoint, target);
-    if (CHAIN_CONTINUES.has(result.status)) {
+    const result = this.game.mode === 'battle'
+      ? this.game.buildEarthwork(this.chainPoint, target)
+      : this.game.buildWall(this.chainPoint, target);
+    const valid = CHAIN_CONTINUES.has(result.status);
+    this.renderer.setBuildTrail(this.trail, valid);
+    if (valid) {
       // Carry on from the snapped end so chains follow walls and city edges.
       this.chainPoint = result.end ?? target;
       return;
     }
+    // Blocked, wet or too poor: the trail itself has already turned red at
+    // the point the drag actually reached, but chainPoint is deliberately
+    // left alone -- a refused segment does not throw away the chain, so the
+    // very next drag can still snap on and try a different end without
+    // starting over.
     if (result.status === 'blocked') {
-      this.chainPoint = null;
       this.hud.showMessage('Walls cannot cross the city');
       return;
     }
     if (result.status === 'water') {
-      this.chainPoint = null;
       this.hud.showMessage('Walls cannot be laid in water');
       return;
     }
@@ -422,7 +646,12 @@ export class Input {
 
   /** Take back the last section laid -- Ctrl+Z, or the undo button on a touchscreen. */
   undo() {
-    this.game.undoLastWall();
+    if (this.game.mode === 'battle') {
+      this.game.undoLastPlacement();
+      this.hud.updateBattleBudget(this.game);
+    } else {
+      this.game.undoLastWall();
+    }
     this.onChange();
   }
 }

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EARTHWORK, WALL } from '../src/config.js';
 
 const { Input } = await import('../src/input.js');
 
@@ -9,12 +10,35 @@ function makeInput({ wallAt = () => null, game: gameOverrides = {} } = {}) {
     setCursor: () => {},
     setActiveTool: () => {},
     hideDispatchMenu: () => {},
+    showDispatchMenu: () => {},
     showMessage: () => {},
+    showActionHint: () => {},
+    clearActionHint: () => {},
+    showBattlePrep: () => {},
+    hideBattlePrep: () => {},
+    setBattleSelection: () => {},
+    updateBattleBudget: () => {},
   };
-  const camera = { toWorld: (point) => point, width: 1200, height: 800 };
-  const renderer = { hoveredWall: null };
+  const camera = {
+    toWorld: (point) => point, toScreen: () => ({ x: 600, y: 400 }), width: 1200, height: 800,
+  };
+  const renderer = {
+    hoveredWall: null,
+    pingSelection: () => {},
+    pingMoveOrder: () => {},
+    setBuildTrail: () => {},
+    releaseBuildTrail: () => {},
+  };
   const game = {
-    wallAt, castles: [], dispatchOptions: () => [], terrain: { heightAt: () => 0 }, ...gameOverrides,
+    wallAt,
+    castles: [],
+    dispatchOptions: () => [],
+    terrain: { heightAt: () => 0 },
+    selectedGuards: [],
+    deselectGuards: () => {},
+    selectGuardsNear: () => [],
+    orderGuards: () => {},
+    ...gameOverrides,
   };
   const input = new Input({
     game,
@@ -88,82 +112,198 @@ test('moving off a section to open ground clears the highlight', () => {
   assert.equal(renderer.hoveredWall, null);
 });
 
-// --- ordering an attack -------------------------------------------------
+// --- tapping repair or fortify, without a swipe across the section --------
 
-/** An Input wired to a game that records the companies it is asked to send. */
+test('a single tap with the repair tool mends whatever is under it', () => {
+  const repaired = [];
+  const { input } = makeInput({
+    game: {
+      repairWallAt: (point) => { repaired.push(point); return { status: 'repairing' }; },
+    },
+  });
+  input.selectTool('repair');
+  input.handleClick({ clientX: 300, clientY: 200 });
+  assert.equal(repaired.length, 1, 'a plain tap should act, not just a drag');
+  assert.deepEqual(repaired[0], { x: 300, y: 200 });
+});
+
+test('a single tap with the fortify tool works the same way', () => {
+  const fortified = [];
+  const { input } = makeInput({
+    game: {
+      upgradeWallAt: (point) => { fortified.push(point); return { status: 'working' }; },
+    },
+  });
+  input.selectTool('fortify');
+  input.handleClick({ clientX: 250, clientY: 180 });
+  assert.equal(fortified.length, 1);
+});
+
+test('tapping repair on open ground with nothing to mend is a quiet no-op', () => {
+  const { input } = makeInput({ game: { repairWallAt: () => ({ status: 'none' }) } });
+  input.selectTool('repair');
+  assert.doesNotThrow(() => input.handleClick({ clientX: 100, clientY: 100 }));
+});
+
+// --- mustering, selecting and ordering an attack -------------------------
+
+/** An Input wired to a game that records every company it is asked to muster. */
 function attackReady({ options = [{ id: 'IG0', name: 'Guardsman', cost: 260 }], sent = { sent: true } } = {}) {
+  const spawned = [];
+  const selected = [];
   const orders = [];
+  const guards = [];
   const { input } = makeInput({
     game: {
       dispatchOptions: () => options,
-      sendGuard: (typeId, target) => {
-        orders.push({ typeId, target });
-        return sent;
-      },
+      castles: [{ position: { x: 0, y: 0 }, typeId: 'CC0' }],
+      sendGuard: (typeId) => { spawned.push(typeId); return sent; },
+      selectGuardsNear: (point) => { selected.push(point); return guards; },
+      orderGuards: (group, target) => orders.push({ group, target }),
+      get selectedGuards() { return guards; },
     },
   });
-  return { input, orders };
+  return { input, spawned, selected, orders, guards };
 }
 
-test('clicking the map with the attack tool musters a company', () => {
-  const { input, orders } = attackReady();
-  input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
-
-  assert.equal(orders.length, 1, 'the click should have sent a company');
-  assert.equal(orders[0].typeId, 'IG0');
-  assert.deepEqual(orders[0].target, { x: 400, y: 300 });
-});
-
-test('the attack order carries the tier the player picked, not just the first', () => {
-  const options = [
-    { id: 'IG_LIGHT', name: 'Light Guard', cost: 260 },
-    { id: 'IG_HEAVY', name: 'Heavy Guard', cost: 680 },
-  ];
-  const { input, orders } = attackReady({ options });
-  input.selectTool('attack');
-  input.selectedGuardType = 'IG_HEAVY';
-  input.handleClick({ clientX: 500, clientY: 350 });
-
-  assert.equal(orders[0].typeId, 'IG_HEAVY');
-});
-
-test('an attack the treasury cannot afford says so and sends nobody', () => {
-  const messages = [];
-  const orders = [];
+test('the attack tool asks for a company first, then to tap one to select it', () => {
+  const options = [{ id: 'IG0', name: 'Guardsman', cost: 260 }];
+  const hints = [];
   const { input } = makeInput({
     game: {
-      dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }],
-      sendGuard: (typeId) => {
-        orders.push(typeId);
-        return { sent: false, status: 'poor' };
-      },
+      dispatchOptions: () => options,
+      castles: [{ position: { x: 0, y: 0 }, typeId: 'CC0' }],
+      sendGuard: () => ({ sent: true }),
     },
   });
-  input.hud.showMessage = (text) => messages.push(text);
-  input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
+  input.hud.showActionHint = (text) => hints.push(text);
+  // A real showDispatchMenu only wires up a click handler and returns --
+  // onPick fires later, once, when the player actually taps a button.
+  let picked = false;
+  input.hud.showDispatchMenu = (opts, screen, onPick) => {
+    if (!picked) {
+      picked = true;
+      onPick(options[0].id);
+    }
+  };
 
-  assert.equal(orders.length, 1, 'it still asks');
+  input.selectTool('attack');
+
+  assert.deepEqual(hints, [
+    'Choose a company to muster',
+    'Tap a company to select it, then tap again to send it',
+  ]);
+});
+
+test('picking a tier spawns a company right away, without needing a map tap', () => {
+  const { input, spawned } = attackReady();
+  let picked = false;
+  input.hud.showDispatchMenu = (opts, screen, onPick) => {
+    if (!picked) {
+      picked = true;
+      onPick('IG0');
+    }
+  };
+  input.selectTool('attack');
+  assert.deepEqual(spawned, ['IG0']);
+});
+
+test('picking a tier the treasury cannot afford says so and musters nobody', () => {
+  const messages = [];
+  const { input } = attackReady({ sent: { sent: false, status: 'poor' } });
+  input.hud.showMessage = (text) => messages.push(text);
+  input.hud.showDispatchMenu = (opts, screen, onPick) => onPick('IG0');
+  input.selectTool('attack');
   assert.match(messages.join(' '), /costs \$260/);
 });
 
-test('with no company available the attack click is simply ignored', () => {
-  const { input, orders } = attackReady({ options: [] });
+test('the tier picker stays open after a pick, so several companies can be mustered in a row', () => {
+  const hidden = [];
+  const { input, spawned } = attackReady();
+  input.hud.hideDispatchMenu = () => hidden.push(true);
+  // A real showDispatchMenu just wires up a handler and waits -- picking
+  // happens later, as its own separate click, not nested inside the call
+  // that rendered the button.
+  let latestPick = null;
+  input.hud.showDispatchMenu = (opts, screen, onPick) => { latestPick = onPick; };
   input.selectTool('attack');
-  input.handleClick({ clientX: 400, clientY: 300 });
-  assert.equal(orders.length, 0);
+
+  latestPick('IG0');
+  latestPick('IG0');
+
+  assert.equal(hidden.length, 0, 'mustering should not close the picker');
+  assert.equal(spawned.length, 2, 'both picks should have mustered a company');
 });
 
-test('the attack tool stays up, so several companies can be sent in a row', () => {
-  const { input, orders } = attackReady();
+test('an empty-handed tap selects whatever companies are nearby', () => {
+  const { input, selected } = attackReady();
   input.selectTool('attack');
   input.handleClick({ clientX: 400, clientY: 300 });
-  input.handleClick({ clientX: 500, clientY: 320 });
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected[0], { x: 400, y: 300 });
+});
 
+test('a tap with something selected sends that group instead of selecting again', () => {
+  const { input, selected, orders, guards } = attackReady();
+  guards.push({ selected: true });
+  input.selectTool('attack');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 0, 'already have a group -- this tap commands, not selects');
+  assert.equal(orders.length, 1);
+  assert.deepEqual(orders[0].target, { x: 400, y: 300 });
+});
+
+test('sending a selected group pings the destination and an arrow for each company', () => {
+  const { input, guards } = attackReady();
+  guards.push({ position: { x: 10, y: 20 }, selected: true });
+  const pings = [];
+  input.renderer.pingMoveOrder = (starts, destinations, target, groundZ) => {
+    pings.push({ starts, destinations, target, groundZ });
+  };
+  input.selectTool('attack');
+  input.handleClick({ clientX: 400, clientY: 300 });
+
+  assert.equal(pings.length, 1);
+  assert.deepEqual(pings[0].starts, [{ x: 10, y: 20 }], 'each arrow starts at the company\'s own position');
+  assert.deepEqual(pings[0].target, { x: 400, y: 300 });
+});
+
+test('a tap always closes the tier picker, since tapping the map means mustering is done', () => {
+  const hidden = [];
+  const { input } = attackReady();
+  input.hud.hideDispatchMenu = () => hidden.push(true);
+  input.selectTool('attack');
+  hidden.length = 0;
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(hidden.length, 1);
+});
+
+test('a tool with nothing of its own to say clears whatever hint was showing', () => {
+  const cleared = [];
+  const { input } = makeInput();
+  input.hud.clearActionHint = () => cleared.push(true);
+  input.selectTool('zoom');
+  assert.equal(cleared.length, 1);
+});
+
+test('every other tool names what to do with it', () => {
+  const { input } = makeInput();
+  const hints = [];
+  input.hud.showActionHint = (text) => hints.push(text);
+  for (const tool of ['build', 'destroy', 'repair', 'fortify', 'upgrade']) {
+    input.selectTool(tool);
+    input.selectTool(tool); // back to move, so the next iteration is a fresh pick
+  }
+  assert.equal(hints.length, 5, 'one hint per tool picked');
+  assert.ok(hints.every((text) => text.length > 0));
+});
+
+test('the attack tool stays up through a full select-then-command cycle', () => {
+  const { input, guards } = attackReady();
+  guards.push({ selected: true });
+  input.selectTool('attack');
+  input.handleClick({ clientX: 400, clientY: 300 }); // commands the group already in guards
   assert.equal(input.tool, 'attack', 'ordering should not put the tool away');
-  assert.equal(orders.length, 2);
-  assert.deepEqual(orders[1].target, { x: 500, y: 320 });
 });
 
 // --- touch and pointer gestures -----------------------------------------
@@ -191,7 +331,23 @@ function gestureInput({ tool = 'move', game = {} } = {}) {
 
 const finger = (pointerId, clientX, clientY) => ({ pointerId, pointerType: 'touch', clientX, clientY });
 
-test('one finger dragging the map pans it, the way the mouse does', () => {
+test('a finger landing on the map captures the pointer, so a drag cannot be lost to a button it crosses', () => {
+  const { input } = gestureInput();
+  const captured = [];
+  const target = { setPointerCapture: (id) => captured.push(id) };
+  input.handlePointerDown({ ...finger(7, 300, 300), target });
+  assert.deepEqual(captured, [7]);
+});
+
+test('a mouse click does not bother capturing the pointer', () => {
+  const { input } = gestureInput();
+  const captured = [];
+  const target = { setPointerCapture: (id) => captured.push(id) };
+  input.handlePointerDown({ pointerId: 1, pointerType: 'mouse', clientX: 300, clientY: 300, target });
+  assert.equal(captured.length, 0);
+});
+
+test('one finger dragging the map pans it, eased in gently rather than snapped onto', () => {
   const { input, calls } = gestureInput();
   input.handlePointerDown(finger(1, 300, 300));
   input.handlePointerMove(finger(1, 340, 310));
@@ -199,8 +355,70 @@ test('one finger dragging the map pans it, the way the mouse does', () => {
 
   assert.equal(calls.pan.length, 1);
   assert.deepEqual(calls.pan[0].from, { x: 300, y: 300 });
-  assert.deepEqual(calls.pan[0].to, { x: 340, y: 310 });
+  // The very first sample of a drag is the least steady moment of one -- a
+  // thumb settling reads as a little back-and-forth before it commits to a
+  // direction -- so it starts well short of the new point, not most of the
+  // way there. See PAN_RAMP_START.
+  assert.ok(calls.pan[0].to.x > 300 && calls.pan[0].to.x < 315, `x landed at ${calls.pan[0].to.x}`);
+  assert.ok(calls.pan[0].to.y > 300 && calls.pan[0].to.y < 303, `y landed at ${calls.pan[0].to.y}`);
   assert.equal(calls.release, 1, 'lifting the finger lets the camera coast');
+});
+
+test('a finger held still after a move settles onto it within a dozen samples', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  for (let sample = 0; sample < 12; sample += 1) {
+    input.handlePointerMove(finger(1, 100, 0));
+  }
+  const last = calls.pan.at(-1).to;
+  assert.ok(Math.abs(last.x - 100) < 1, `should have converged onto the finger, landed at ${last.x}`);
+});
+
+test('the pan eases in gently at first, then settles into a steady rate', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  for (let sample = 0; sample < 10; sample += 1) {
+    input.handlePointerMove(finger(1, 100, 0));
+  }
+  // What fraction of the remaining gap to the finger a sample closed --
+  // this is exactly the smoothing rate panMap used for it, independent of
+  // how far the gap itself had already shrunk by that point.
+  const rate = (call) => (call.to.x - call.from.x) / (100 - call.from.x);
+  assert.ok(rate(calls.pan[0]) < 0.15, `the very first sample should be gentle, was ${rate(calls.pan[0])}`);
+  assert.ok(rate(calls.pan.at(-1)) > 0.5, `once ramped up, the rate should have reached its full steady value, was ${rate(calls.pan.at(-1))}`);
+});
+
+test('a finger settling with a little back-and-forth barely moves the camera at all', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  // A thumb landing rarely reports a clean, single direction straight away.
+  for (const x of [4, -3, 5, -2]) {
+    input.handlePointerMove(finger(1, x, 0));
+  }
+  const net = calls.pan.reduce((total, call) => total + (call.to.x - call.from.x), 0);
+  assert.ok(Math.abs(net) < 1, `four samples of shake should net to almost nothing, was ${net}`);
+});
+
+test('a new drag starts smoothing fresh from wherever the finger actually lands', () => {
+  const { input, calls } = gestureInput();
+  input.handlePointerDown(finger(1, 0, 0));
+  input.handlePointerMove(finger(1, 100, 0));
+  input.handlePointerUp(finger(1, 100, 0));
+
+  calls.pan.length = 0;
+  input.handlePointerDown(finger(2, 500, 500));
+  input.handlePointerMove(finger(2, 540, 500));
+
+  assert.deepEqual(calls.pan[0].from, { x: 500, y: 500 }, 'not wherever the last drag left off');
+});
+
+test('a mouse drag is never smoothed -- it tracks exactly, the way it always has', () => {
+  const { input, calls } = gestureInput();
+  const mouse = (clientX, clientY) => ({ pointerId: 1, pointerType: 'mouse', clientX, clientY });
+  input.handlePointerDown(mouse(300, 300));
+  input.handlePointerMove(mouse(340, 310));
+
+  assert.deepEqual(calls.pan[0].to, { x: 340, y: 310 });
 });
 
 test('one finger with the build tool lays wall along the drag', () => {
@@ -216,6 +434,83 @@ test('one finger with the build tool lays wall along the drag', () => {
 
   assert.equal(built.length, 1, 'a drag long enough for one section should lay one');
   assert.deepEqual(built[0].to, { x: 200, y: 100 });
+});
+
+test('a refused build attempt turns the trail red, tracing the drag rather than just its ends', () => {
+  const trails = [];
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: () => ({ status: 'poor', start: { x: 1, y: 1 }, end: { x: 2, y: 2 } }) },
+  });
+  input.renderer.setBuildTrail = (points, valid) => trails.push({ points: [...points], valid });
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.equal(trails.at(-1).valid, false, 'the latest attempt failed, so the trail should read invalid');
+  assert.ok(trails.at(-1).points.length >= 2, 'the trail should carry every point along the drag, not just its ends');
+});
+
+test('a wall blocked by the city, in the water, or onto a crowded node all turn the trail red the same way', () => {
+  for (const status of ['blocked', 'water', 'crowded']) {
+    const trails = [];
+    const { input } = gestureInput({
+      tool: 'build',
+      game: { buildWall: () => ({ status, start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
+    });
+    input.renderer.setBuildTrail = (points, valid) => trails.push({ points: [...points], valid });
+    input.handlePointerDown(finger(1, 100, 100));
+    input.handlePointerMove(finger(1, 110, 100));
+    input.handlePointerMove(finger(1, 200, 100));
+
+    assert.equal(trails.at(-1).valid, false, status);
+  }
+});
+
+test('a successful segment keeps the trail gold, and lifting the finger releases it to fade', () => {
+  const trails = [];
+  const released = [];
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: (from, to) => ({ status: 'built', end: to }) },
+  });
+  input.renderer.setBuildTrail = (points, valid) => trails.push({ points: [...points], valid });
+  input.renderer.releaseBuildTrail = () => released.push(true);
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.equal(trails.at(-1).valid, true);
+
+  input.handlePointerUp(finger(1, 200, 100));
+  assert.equal(released.length, 1, 'lifting the finger should hand the trail off to fade rather than just vanish');
+});
+
+test('a wall refused for being blocked or wet keeps the chain -- the phantom wall snaps the same way a real one would', () => {
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: () => ({ status: 'blocked', start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
+  });
+  input.renderer.flashInvalidWall = () => {};
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.ok(input.chainPoint, 'the chain should still be live, ready to try a different end');
+});
+
+test('a crowded node still lets go of the chain and the tool -- a capacity limit, not a direction to try again', () => {
+  const { input } = gestureInput({
+    tool: 'build',
+    game: { buildWall: () => ({ status: 'crowded', start: { x: 0, y: 0 }, end: { x: 40, y: 0 } }) },
+  });
+  input.renderer.flashInvalidWall = () => {};
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 200, 100));
+
+  assert.equal(input.chainPoint, null);
+  assert.equal(input.tool, 'move', 'the tool itself is put away');
 });
 
 test('two fingers pinching apart zoom in around the point between them', () => {
@@ -328,19 +623,171 @@ test('two fingers panning hold the ground as well', () => {
   assert.ok(calls.pan.length > 0 && calls.pan.every((call) => call.direct));
 });
 
-test('the tier picker hangs over the roof, not the ground at sea level', () => {
-  const asked = [];
+test('the tier picker anchors to the Attack button, not a world point over the castle', () => {
+  const seen = [];
   const { input } = makeInput({
+    game: { dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }] },
+  });
+  input.hud.showDispatchMenu = (options, screen) => seen.push(screen);
+  const button = { getBoundingClientRect: () => ({ left: 120, top: 640, width: 60, height: 40 }) };
+  const previousDocument = globalThis.document;
+  globalThis.document = { getElementById: (id) => (id === 'attackTool' ? button : null) };
+  try {
+    input.selectTool('attack');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+  assert.deepEqual(seen[0], { x: 150, y: 640 }, 'centred above the button, at its own top edge');
+});
+
+test('with no Attack button to anchor to, the tier picker falls back to the middle of the screen', () => {
+  const seen = [];
+  const { input } = makeInput({
+    game: { dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }] },
+  });
+  input.hud.showDispatchMenu = (options, screen) => seen.push(screen);
+  input.selectTool('attack');
+  assert.deepEqual(seen[0], { x: input.camera.width / 2, y: input.camera.height / 2 });
+});
+
+// --- the open battleground mode ---------------------------------------------
+
+test('in the open battleground mode the Build tool lays earthworks, not walls, by a shorter yardstick', () => {
+  const built = [];
+  const span = 20;
+  assert.ok(span > EARTHWORK.minLength && span < EARTHWORK.maxLength, 'sanity: within the earthwork\'s own bound');
+  assert.ok(span <= WALL.minLength, 'sanity: too short a run to ever pass as a wall');
+  const { input } = gestureInput({
+    tool: 'build',
     game: {
-      castles: [{ position: { x: 5, y: 7 }, typeId: 'CC0' }],
-      buildings: { CC0: { name: 'keep' } },
-      dispatchOptions: () => [{ id: 'IG0', name: 'Guardsman', cost: 260 }],
-      terrain: { heightAt: () => 40 },
+      mode: 'battle',
+      buildEarthwork: (from, to) => { built.push({ from, to }); return { status: 'built', end: to }; },
+      buildWall: () => { throw new Error('should not lay stone in the open battleground mode'); },
     },
   });
-  input.renderer.structureFor = () => ({ height: 16 });
-  input.camera.toScreen = (point) => { asked.push(point); return { x: 100, y: 100 }; };
-  input.hud.showDispatchMenu = () => {};
-  input.selectTool('attack');
-  assert.deepEqual(asked[0], { x: 5, y: 7, z: 56 }, 'ground 40 up the hill plus a roof 16 high');
+  input.handlePointerDown(finger(1, 100, 100));
+  input.handlePointerMove(finger(1, 110, 100));
+  input.handlePointerMove(finger(1, 110 + span, 100));
+  input.handlePointerUp(finger(1, 110 + span, 100));
+
+  assert.equal(built.length, 1, 'a span too short for a wall is long enough for an earthwork');
+  assert.deepEqual(built[0].to, { x: 110 + span, y: 100 });
+});
+
+test('tapping the field places whatever roster unit is pending', () => {
+  const placed = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      placeGuard: (typeId, point) => { placed.push({ typeId, point }); return { placed: true }; },
+    },
+  });
+  input.selectPendingUnit('IG_LIGHT');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].typeId, 'IG_LIGHT');
+  assert.deepEqual(placed[0].point, { x: 400, y: 300 });
+});
+
+test('a placement refused for want of points, or for landing off the deployment zone, tells the player why', () => {
+  for (const [status, expected] of [['poor', /points/], ['zone', /start line/]]) {
+    const messages = [];
+    const { input } = makeInput({
+      game: { mode: 'battle', placeGuard: () => ({ placed: false, status }) },
+    });
+    input.hud.showMessage = (text) => messages.push(text);
+    input.selectPendingUnit('IG_LIGHT');
+    input.handleClick({ clientX: 0, clientY: 0 });
+    assert.match(messages[0], expected, `status '${status}' should explain itself`);
+  }
+});
+
+test('picking the same roster unit twice deselects it', () => {
+  const { input } = makeInput({ game: { mode: 'battle' } });
+  const selections = [];
+  input.hud.setBattleSelection = (typeId) => selections.push(typeId);
+  input.selectPendingUnit('IG0');
+  input.selectPendingUnit('IG0');
+  assert.deepEqual(selections, ['IG0', null]);
+  assert.equal(input.pendingUnit, null);
+});
+
+test('a click while the Build tool is up never also places the pending unit', () => {
+  const placed = [];
+  const { input } = makeInput({
+    game: { mode: 'battle', placeGuard: (typeId, point) => { placed.push({ typeId, point }); return { placed: true }; } },
+  });
+  input.selectPendingUnit('IG_LIGHT');
+  input.selectTool('build');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(placed.length, 0, 'the drag handles the Build tool\'s own click; placement only fires with Move up');
+});
+
+test('undo in the open battleground mode hands back the last placement, not a wall section', () => {
+  let placementsUndone = 0;
+  let wallsUndone = 0;
+  const budgetUpdates = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      undoLastPlacement: () => { placementsUndone += 1; return true; },
+      undoLastWall: () => { wallsUndone += 1; return true; },
+    },
+  });
+  input.hud.updateBattleBudget = () => budgetUpdates.push(true);
+  input.undo();
+  assert.equal(placementsUndone, 1);
+  assert.equal(wallsUndone, 0, 'a siege undo should never fire alongside a battle one');
+  assert.equal(budgetUpdates.length, 1, 'the budget readout should catch up with what undo just gave back');
+});
+
+test('beginPlacement shows the roster dock; endPlacement puts it away and clears the pending pick', () => {
+  const shown = [];
+  const hidden = [];
+  const { input } = makeInput({ game: { mode: 'battle', battleBudget: 10 } });
+  input.hud.showBattlePrep = (game, onPick) => shown.push(onPick);
+  input.hud.hideBattlePrep = () => hidden.push(true);
+
+  input.beginPlacement();
+  assert.equal(shown.length, 1, 'the roster dock should appear as placement begins');
+  shown[0]('IG0');
+  assert.equal(input.pendingUnit, 'IG0', 'picking a roster button should be wired straight to selectPendingUnit');
+
+  const cursors = [];
+  input.hud.setCursor = (cursor) => cursors.push(cursor);
+  input.endPlacement();
+  assert.equal(hidden.length, 1, 'Start Battle should put the dock away');
+  assert.equal(input.pendingUnit, null, 'and drop whatever was still pending');
+  assert.ok(cursors.at(-1).includes('attackBtn'), 'no Attack tool to pick in this mode, but the cursor should still say a tap commands');
+});
+
+test('once a battle has started, a tap always selects or commands -- no Attack tool needed to turn that on', () => {
+  const selected = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      started: true,
+      selectedGuards: [],
+      selectGuardsNear: (point) => { selected.push(point); return []; },
+    },
+  });
+  // Left on 'move' the whole time -- there is no Attack button in this mode
+  // to switch it (see Hud's own siegeOnlyToolIds) -- yet a tap still commands.
+  assert.equal(input.tool, 'move');
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 1, 'the tap should have gone to handleAttackTap regardless of the active tool');
+  assert.deepEqual(selected[0], { x: 400, y: 300 });
+});
+
+test('before the battle starts, a tap does not fall into command mode -- that would fight the placement flow', () => {
+  const selected = [];
+  const { input } = makeInput({
+    game: {
+      mode: 'battle',
+      started: false,
+      selectGuardsNear: (point) => { selected.push(point); return []; },
+    },
+  });
+  input.handleClick({ clientX: 400, clientY: 300 });
+  assert.equal(selected.length, 0, 'nothing to command yet -- the placement phase owns taps until Start Battle');
 });

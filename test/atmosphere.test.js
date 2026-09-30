@@ -404,3 +404,11 @@ test('summer draws no snow at all, not even at zero alpha', () => {
   atmosphere.drawSnow(context, 1.5);
   assert.equal(context.calls.arcs, 0);
 });
+
+test('rain falls only when asked for, and harder rain shows more drops', () => {
+  const atmosphere = new Atmosphere(camera(), { random: spread() });
+  assert.equal(atmosphere.placeRain(0).length, 0);
+  const light = atmosphere.placeRain(0.3).length;
+  const heavy = atmosphere.placeRain(1).length;
+  assert.ok(light > 0 && heavy > light);
+});

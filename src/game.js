@@ -1,8 +1,12 @@
-import { Castle, Guard, House, Raider, Wall } from './entities.js';
 import {
+  Castle, Emperor, Guard, House, Raider, Wall,
+} from './entities.js';
+import {
+  clamp,
   closestPointOnSquare,
   distance,
   distanceSquared,
+  distanceToSegment,
   distanceToSquare,
   isWithinSegmentBand,
   pointToLineDistance,
@@ -11,15 +15,26 @@ import {
 } from './geometry.js';
 import { steerCompany } from './pathfinding.js';
 import { buildNavigation, wallsNear } from './navigation.js';
-import { lockEngagements, resolveMelee } from './melee.js';
+import {
+  disengage, lockEngagements, resolveMelee, testMorale,
+} from './melee.js';
 import { Terrain } from './terrain.js';
+import { unitSize } from './units.js';
+import { blowOf } from './damage.js';
 import { LEVELS } from './levels.js';
 import { BUILDINGS } from './buildings/index.js';
 import {
   AVOIDANCE,
+  BATTLE,
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  BATTLE_MAPS,
+  DEFAULT_BATTLE_MAP,
+  DEFAULT_FACTIONS,
+  EARTHWORK,
+  EMPEROR_TIER_MULTIPLIER,
+  FACTIONS,
   FEAR,
   FPS,
   TERRAIN,
@@ -29,6 +44,7 @@ import {
   HARVEST_MULTIPLIER,
   INCOME_INTERVAL_SECONDS,
   RAIDER_SPAWN_INTERVAL_SECONDS,
+  ROUT,
   REGEN_FRACTION_PER_PAYOUT,
   SEASON_LENGTH_SECONDS,
   SEASON_MESSAGES,
@@ -48,6 +64,9 @@ const SEASONS_PER_YEAR = 4;
 const AUTUMN = 2;
 const WINTER = 3;
 const WALL_HINT_SECONDS = 20;
+// How many of the cheapest possible section the treasury must cover before
+// the Build button stops reading as affordable -- see canAffordToBuild.
+const MIN_AFFORDABLE_WALLS = 3;
 const UPGRADE_HINT_SECONDS = 40;
 
 /** Random offset that lands outside the safe radius around the castle. */
@@ -71,8 +90,28 @@ const LANDING_SPREAD = 26;
 const WATER_PROBE_SPACING = 6;
 
 /** Where a wall's own sound effect should seem to come from. */
+/** A scaled stat kept to hundredths, so fractional attacks are not rounded to whole ones. */
+function roundedStat(value) {
+  return Math.round(value * 100) / 100;
+}
+
 function wallMidpoint(wall) {
   return { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+}
+
+/**
+ * One of `count` points evenly ringed around `target` -- a single company
+ * gets the exact point, so a lone order still lands precisely where aimed.
+ */
+function spreadPoint(target, index, count) {
+  if (count <= 1) {
+    return { ...target };
+  }
+  const angle = (index / count) * Math.PI * 2;
+  return {
+    x: target.x + Math.cos(angle) * IMPERIAL.groupSpreadRadius,
+    y: target.y + Math.sin(angle) * IMPERIAL.groupSpreadRadius,
+  };
 }
 
 function spawnOffset(random) {
@@ -94,6 +133,9 @@ export class Game {
     random = Math.random,
     seed = 1,
     level = LEVELS[0],
+    factions = DEFAULT_FACTIONS,
+    battleMap = DEFAULT_BATTLE_MAP,
+    budget = BATTLE.budget,
   } = {}) {
     this.onMessage = onMessage;
     this.onEffect = onEffect;
@@ -104,7 +146,7 @@ export class Game {
     this.seed = seed;
     this.wallHintShown = false;
     this.upgradeHintShown = false;
-    this.loadLevel(level);
+    this.loadLevel(level, factions, battleMap, budget);
   }
 
   /**
@@ -112,8 +154,21 @@ export class Game {
    * a level's ground is fixed for its whole run, but the Game itself carries
    * on -- input and the renderer hold onto this object.
    */
-  loadLevel(level) {
+  loadLevel(level, factions = DEFAULT_FACTIONS, battleMap = DEFAULT_BATTLE_MAP, budget = BATTLE.budget) {
     this.level = level;
+    this.chosenBudget = budget;
+    // Which ground the open battleground is fought over -- see BATTLE_MAPS.
+    this.battleMap = BATTLE_MAPS[battleMap] ? battleMap : DEFAULT_BATTLE_MAP;
+    // Who fields what in the open battleground mode -- see FACTIONS. An id
+    // this game has never heard of falls back to the default for that side.
+    this.factions = {
+      player: FACTIONS[factions.player] ? factions.player : DEFAULT_FACTIONS.player,
+      enemy: FACTIONS[factions.enemy] ? factions.enemy : DEFAULT_FACTIONS.enemy,
+    };
+    // The one flag that turns the whole game from a siege into the open
+    // battleground mode -- see restart, and every `this.mode === 'battle'`
+    // branch below it.
+    this.mode = level.mode === 'battle' ? 'battle' : 'siege';
     // A level may raise its own buildings and field its own companies; what
     // it leaves out it inherits (see levels.js).
     this.buildings = { ...BUILDINGS, ...level.buildings };
@@ -130,7 +185,8 @@ export class Game {
     this.guardTiers = { ...CASTLE_GUARD_TIERS, ...level.guardTiers };
     // Null leaves the renderer on its own default house.
     this.houseDefinition = level.house ?? null;
-    this.terrain = new Terrain(this.seed, level.land, level.river, level.sea);
+    const land = level.mode === 'battle' ? { ...level.land, ...BATTLE_MAPS[this.battleMap].land } : level.land;
+    this.terrain = new Terrain(this.seed, land, level.river, level.sea);
     // The coves a seaborne level lands its boats at, fixed for the run: the
     // renderer beaches a hull at each, and spawnPoint puts raiders ashore
     // there (see levels.js).
@@ -148,10 +204,23 @@ export class Game {
     // its cached landscape is stale -- see Renderer#drawGround.
     this.terrainRevision = 0;
     this.guards = [];
+    // The one Emperor a game gets -- see dispatchOptions/spawnEmperor.
+    // Mustered only stays true for the run it happened on: a fresh level
+    // (or a restart) gets its own free launch back.
+    this.emperor = null;
+    this.emperorMustered = false;
     this.walls = [];
+    // The Build tool's own low ramps in the open battleground mode -- not
+    // walls at all, so they live apart from this.walls: see buildEarthwork.
+    this.earthworks = [];
     this.houses = [];
     this.houseSpawnCountdown = HOUSES.spawnIntervalSeconds;
-    this.castles = [new Castle(STARTING_CASTLE_TYPE, { x: 0, y: 0 }, { types: this.castleTypes })];
+    // No castle at all in the open battleground mode -- see spawnBattleLine
+    // for how the enemy is drawn up instead, and placeGuard for how the
+    // player fields companies without one.
+    this.castles = this.mode === 'battle'
+      ? []
+      : [new Castle(STARTING_CASTLE_TYPE, { x: 0, y: 0 }, { types: this.castleTypes })];
     this.levelUnderCities();
     this.raiders = [];
     this.tokens = STARTING_TOKENS;
@@ -161,6 +230,32 @@ export class Game {
     // Set once the last castle falls; counts up to BREACH.collapseSeconds
     // while the city burns, before the game actually ends.
     this.breachSeconds = null;
+    // Placement phase state for the open battleground mode: budget left to
+    // spend, and a log of what it went on so Undo can hand it back -- see
+    // placeGuard/buildEarthwork/undoLastPlacement. `started` marks the
+    // moment Start Battle is pressed: the field is drawn up before then,
+    // but nothing moves and nothing more may be placed after.
+    if (this.mode === 'battle') {
+      // Both sides field this many points: the player spends it placing
+      // companies, the enemy line is drawn up to use as much of it as it can.
+      this.battleBudgetLimit = clamp(this.chosenBudget, BATTLE.budgetRange.min, BATTLE.budgetRange.max);
+      this.battleBudget = this.battleBudgetLimit;
+      this.placementLog = [];
+      this.started = false;
+      this.spawnBattleLine();
+      // Tallied live as the fight goes, since a company's own health is
+      // gone the instant it dies -- see trackBattleLosses. `loss` on each
+      // side is in individual soldiers, not companies: the fraction of a
+      // company's health actually lost, times how many figures muster in
+      // it, so a company ground down to a sliver of health reads as most
+      // of its own troops down even while it is still technically standing.
+      // The `ByType` maps break that same figure down by which type it
+      // came from, for the end-of-round drill-down (see Hud#showBattleResult).
+      this.battleStats = {
+        kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0, enemyLossByType: {}, playerLossByType: {},
+        enemyFielded: 0, playerFielded: 0,
+      };
+    }
   }
 
   /**
@@ -207,7 +302,15 @@ export class Game {
   paceOn(company) {
     const { x, y } = company.position;
     const throughWoods = 1 - this.terrain.forestAt(x, y) * TERRAIN.forestDrag;
-    return throughWoods * this.climbPace(company);
+    const throughEarthworks = this.onEarthwork(company.position) ? EARTHWORK.slowFactor : 1;
+    return throughWoods * throughEarthworks * this.climbPace(company);
+  }
+
+  /** Whether a point stands astride one of the open battleground's earthworks. */
+  onEarthwork(position) {
+    return this.earthworks.some((earthwork) => (
+      distanceToSegment(position, earthwork.start, earthwork.end) <= EARTHWORK.thickness
+    ));
   }
 
   /**
@@ -221,6 +324,7 @@ export class Game {
   climbPace(company) {
     const speed = Math.hypot(company.velocity.x, company.velocity.y);
     if (speed === 0) {
+      company.descent = 1;
       return 1;
     }
     const step = TERRAIN.climbSample;
@@ -229,13 +333,34 @@ export class Game {
     const aheadY = y + (company.velocity.y / speed) * step;
     const climb = (this.terrain.heightAt(aheadX, aheadY) - this.terrain.heightAt(x, y)) / step;
     if (climb <= 0) {
-      return 1;
+      const descent = this.mode === 'battle' ? Math.min(TERRAIN.maxDescentPace, 1 - climb * TERRAIN.descentDrag) : 1;
+      company.descent = descent;
+      return descent;
     }
+    company.descent = 1;
     return Math.max(TERRAIN.minClimbPace, 1 / (1 + climb * TERRAIN.climbDrag));
   }
 
   get isDefeated() {
-    return this.castles.some((castle) => castle.health < 0);
+    if (this.mode === 'battle') {
+      // Instant, not a slow breach -- there is no city left burning to
+      // wait on. Only once the battle has actually started: an empty field
+      // before Start Battle is pressed is not a loss, it is an empty field.
+      if (!this.started) {
+        return false;
+      }
+      // A line that has broken and is running counts as beaten, whether or
+      // not any of it has actually left the field yet.
+      // Losing the Emperor is fatal here too, the same as in a siege --
+      // even with other companies still standing.
+      return this.guards.every((guard) => guard.routed) || (this.emperor !== null && !this.emperor.isAlive);
+    }
+    return this.castles.some((castle) => castle.health < 0) || (this.emperor !== null && !this.emperor.isAlive);
+  }
+
+  /** The open battleground mode's own win condition -- sieges never end. */
+  get isVictorious() {
+    return this.mode === 'battle' && this.started && this.raiders.every((raider) => raider.routed);
   }
 
   /** How far through its burning the city is, 0 to 1. */
@@ -275,11 +400,54 @@ export class Game {
    * first frame keeps exactly the same shape it always had, just shifted.
    */
   get seasonPhase() {
+    const pinned = this.battleWeather?.season;
+    if (pinned !== undefined) {
+      return pinned + 0.5;
+    }
     return this.seconds / SEASON_LENGTH_SECONDS + 0.5;
+  }
+
+  /** The chosen battle map's fixed weather, or null in a siege. */
+  get battleWeather() {
+    return this.mode === 'battle' ? BATTLE_MAPS[this.battleMap]?.weather ?? null : null;
+  }
+
+  /** Standing haze over the field: the map's own in a battle, else the level's. */
+  get mist() {
+    return this.battleWeather ? this.battleWeather.mist ?? null : this.level.mist;
+  }
+
+  get climate() {
+    return this.battleWeather ? this.battleWeather.climate ?? null : this.level.climate;
+  }
+
+  /** 0 to 1: how hard it rains. */
+  get rain() {
+    return this.battleWeather?.rain ?? 0;
   }
 
   wallCost(length) {
     return Math.trunc(length * WALL.costPerUnit * this.buildMultiplier);
+  }
+
+  /** Whether there is coin for at least a few of the cheapest possible section -- see Hud's own greying of the Build button. */
+  get canAffordToBuild() {
+    return this.tokens >= this.wallCost(WALL.minLength) * MIN_AFFORDABLE_WALLS;
+  }
+
+  /** Whether there is coin for the cheapest company this castle can field right now. */
+  get canAffordToAttack() {
+    const options = this.dispatchOptions();
+    return options.length > 0 && this.tokens >= Math.min(...options.map((option) => option.cost));
+  }
+
+  /** Whether there is coin for the castle's own next tier -- false once it is maxed out. */
+  get canAffordToUpgrade() {
+    const nextTypeId = this.castles[0]?.type.upgradesTo;
+    if (!nextTypeId) {
+      return false;
+    }
+    return this.tokens >= this.castleTypes[nextTypeId].cost;
   }
 
   // --- simulation ---------------------------------------------------------
@@ -309,6 +477,11 @@ export class Game {
     for (const house of this.houses) {
       house.advance(1 / FPS);
     }
+    // A snapshot from just before the blows land, so trackBattleLosses can
+    // see what each company actually lost this frame -- health taken by a
+    // company that goes on to die is gone from it by the time the filter
+    // below removes it.
+    const preBattleHealth = this.mode === 'battle' ? this.snapshotHealth() : null;
     lockEngagements(this.guards, this.raiders);
     resolveMelee([...this.guards, ...this.raiders], 1 / FPS);
     for (const guard of this.guards) {
@@ -325,8 +498,11 @@ export class Game {
     this.moveRaiders();
     this.moveGuards();
     this.resolveHouseContact();
-    this.raiders = this.raiders.filter((raider) => raider.isAlive);
-    this.guards = this.guards.filter((guard) => guard.isAlive);
+    if (preBattleHealth) {
+      this.trackBattleLosses(preBattleHealth);
+    }
+    this.raiders = this.raiders.filter((raider) => raider.isAlive && !raider.fled);
+    this.guards = this.guards.filter((guard) => guard.isAlive && !guard.fled);
     for (const wall of this.walls) {
       if (wall.health < 0) {
         this.onEffect('destroyed', wallMidpoint(wall));
@@ -338,13 +514,19 @@ export class Game {
     // the game-over screen actually waits on: see BREACH.collapseSeconds.
     if (this.isDefeated) {
       if (this.breachSeconds === null) {
-        this.onEffect('destroyed', this.castles.find((castle) => castle.health < 0)?.position);
+        const fallen = this.castles.find((castle) => castle.health < 0);
+        this.onEffect('destroyed', fallen?.position ?? this.emperor?.position);
       }
       this.breachSeconds = Math.min(BREACH.collapseSeconds, (this.breachSeconds ?? 0) + 1 / FPS);
     }
   }
 
   onSecondElapsed() {
+    // No economy, no seasons, no trickle of fresh raiders -- the whole
+    // enemy line was drawn up once, at Start Battle, by spawnBattleLine.
+    if (this.mode === 'battle') {
+      return;
+    }
     if (this.seconds % INCOME_INTERVAL_SECONDS === 1) {
       this.showHints();
       this.collectIncome();
@@ -458,6 +640,25 @@ export class Game {
     };
   }
 
+  /**
+   * Compass bearings (degrees, 0 east / 90 north -- see spawnPoint) raiders
+   * are expected from this level, for a warning shown once at the start --
+   * see Hud#showThreats. Landing points and a spawn arc already say exactly
+   * where; a level with neither spawns from anywhere, so the warning covers
+   * the whole compass instead of pointing anywhere in particular.
+   */
+  get threatBearings() {
+    if (this.landings.length > 0) {
+      const rounded = this.landings.map((landing) => Math.round((landing.bearing * 180) / Math.PI / 15) * 15);
+      return [...new Set(rounded)];
+    }
+    const arc = this.level.spawnArc;
+    if (arc) {
+      return [arc.centre];
+    }
+    return [0, 45, 90, 135, 180, 225, 270, 315];
+  }
+
   spawnRaider() {
     const target = this.castles[0];
     if (!target) {
@@ -469,6 +670,133 @@ export class Game {
     const raider = new Raider(typeId, from);
     raider.aimAt(target.position);
     this.raiders.push(raider);
+  }
+
+  /**
+   * Which companies the enemy fields for this battle's budget: picked at
+   * random from the faction's own infantry and flank pools, a little over a
+   * third of the points going on the flanks, until nothing in either pool
+   * is cheap enough for what is left -- so the line uses as much of the
+   * budget as it possibly can, and never more.
+   */
+  enemyLineup() {
+    const { line, roster } = FACTIONS[this.factions.enemy];
+    const costOf = (typeId) => roster.find((entry) => entry.id === typeId).cost;
+    const lineup = { infantry: [], flank: [] };
+    let remaining = this.battleBudgetLimit;
+    let spent = 0;
+    let flankSpent = 0;
+    for (;;) {
+      const affordable = (pool) => pool.filter((typeId) => costOf(typeId) <= remaining);
+      const infantryChoices = affordable(line.infantry);
+      const flankChoices = affordable(line.flank);
+      if (infantryChoices.length === 0 && flankChoices.length === 0) {
+        return lineup;
+      }
+      const wantsFlank = spent > 0 && flankSpent / spent < BATTLE.flankShare;
+      const useFlank = flankChoices.length > 0 && (wantsFlank || infantryChoices.length === 0);
+      const group = useFlank ? 'flank' : 'infantry';
+      const choices = useFlank ? flankChoices : infantryChoices;
+      const typeId = choices[Math.floor(this.random() * choices.length)];
+      lineup[group].push(typeId);
+      remaining -= costOf(typeId);
+      spent += costOf(typeId);
+      if (useFlank) {
+        flankSpent += costOf(typeId);
+      }
+    }
+  }
+
+  /**
+   * Draw up the enemy line for the open battleground mode: infantry across
+   * the centre, up front, and the faction's flank companies (cavalry, where
+   * it has any) held behind on both wings -- as many of each as the budget
+   * buys (see enemyLineup), in extra ranks once a row is full. A jitter on
+   * every position keeps the line recognisable but never quite the same
+   * shape twice.
+   */
+  spawnBattleLine() {
+    const { infantry, flank } = this.enemyLineup();
+    infantry.forEach((typeId, index) => {
+      const rank = Math.floor(index / BATTLE.infantryPerRank);
+      const inRank = Math.min(BATTLE.infantryPerRank, infantry.length - rank * BATTLE.infantryPerRank);
+      const spread = (index % BATTLE.infantryPerRank - (inRank - 1) / 2) * BATTLE.infantrySpacing;
+      this.spawnBattleCompany(typeId, spread, BATTLE.enemyBaselineY + rank * BATTLE.rankDepth);
+    });
+    flank.forEach((typeId, index) => {
+      const side = index % 2 === 0 ? -1 : 1;
+      const slot = Math.floor(index / 2);
+      const column = slot % BATTLE.flankPerRank;
+      const rank = Math.floor(slot / BATTLE.flankPerRank);
+      this.spawnBattleCompany(
+        typeId,
+        side * (BATTLE.cavalryFlankOffset + column * BATTLE.cavalrySpacing),
+        BATTLE.enemyBaselineY + BATTLE.cavalryDepthOffset + rank * BATTLE.rankDepth,
+      );
+    });
+  }
+
+  /** One company of the enemy line, jittered off its formation slot and aimed south. */
+  spawnBattleCompany(typeId, x, y) {
+    const jitter = () => (this.random() - 0.5) * BATTLE.formationJitter;
+    const position = { x: Math.trunc(x + jitter()), y: Math.trunc(y + jitter()) };
+    const raider = new Raider(typeId, position);
+    raider.aimAt({ x: position.x, y: -BATTLE.fieldHalfDepth });
+    this.raiders.push(raider);
+  }
+
+  /** Every company's health right now, keyed by the company itself -- see trackBattleLosses. */
+  snapshotHealth() {
+    const health = new Map();
+    for (const raider of this.raiders) {
+      health.set(raider, raider.health);
+    }
+    for (const guard of this.guards) {
+      health.set(guard, guard.health);
+    }
+    return health;
+  }
+
+  /**
+   * Folds this frame's fighting into the open battleground mode's running
+   * stats: a kill or death for every company that died since `before`, and
+   * on each side how many individual soldiers that amounts to -- the
+   * fraction of a company's own health actually lost, times how many
+   * figures muster in it (see units#unitSize), so a company ground down to
+   * a sliver of health reads as most of its own troops down even while it
+   * is technically still standing.
+   */
+  trackBattleLosses(before) {
+    for (const raider of this.raiders) {
+      const priorHealth = before.get(raider) ?? raider.health;
+      this.tallyBattleLoss(raider, priorHealth, 'enemyLoss', 'enemyLossByType');
+      // Run off the field counts the same as cut down: that company is out of the fight.
+      if (!raider.isAlive || raider.fled) {
+        this.battleStats.kills += 1;
+      }
+    }
+    for (const guard of this.guards) {
+      const priorHealth = before.get(guard) ?? guard.health;
+      this.tallyBattleLoss(guard, priorHealth, 'playerLoss', 'playerLossByType');
+      if (!guard.isAlive || guard.fled) {
+        this.battleStats.deaths += 1;
+      }
+    }
+  }
+
+  /** One company's share of a battle stat: individuals lost this frame, added to the running total and its own type's own line. */
+  tallyBattleLoss(company, priorHealth, totalKey, byTypeKey) {
+    // Capped at the company's own max health: a killing blow can carry a
+    // company's health well past zero, and none of that overkill is a
+    // soldier this company never actually had.
+    const lost = Math.min(priorHealth, company.type.maxHealth) - Math.max(company.health, 0);
+    if (lost <= 0) {
+      return;
+    }
+    const individuals = (lost / company.type.maxHealth) * unitSize(company.typeId);
+    this.battleStats[totalKey] += individuals;
+    const byType = this.battleStats[byTypeKey];
+    byType[company.typeId] = (byType[company.typeId] ?? 0) + individuals;
   }
 
   /**
@@ -523,22 +851,31 @@ export class Game {
     const navigation = this.navigation();
     for (const raider of this.raiders) {
       if (raider.isHeld) {
+        raider.halt();
         continue;
       }
-      raider.destination = this.raiderDestination(raider, target);
+      raider.destination = raider.routed
+        ? this.fleeDestination(raider, this.raiderThreats())
+        : this.raiderDestination(raider, target);
       this.trackProgress(raider, 1 / FPS);
       // Runs down whatever siege it has sworn to; at zero it may think again.
       raider.siegeSeconds = Math.max(0, raider.siegeSeconds - 1 / FPS);
       steerCompany(raider, navigation, this.random);
+      raider.gatherPace(1 / FPS);
       if (this.wallClimb) {
         this.updateCrossing(navigation, raider, this.wallClimb.reach);
       }
       this.advanceAgainstWalls(navigation, raider);
       this.chargeWallClimb(raider);
       raider.touchedThisFrame = false;
-      this.resolveWallContact(navigation, raider);
-      if (raider.isAlive && target) {
-        this.resolveCastleContact(raider, target);
+      if (raider.routed) {
+        // Running, not besieging: nothing gets battered on the way out.
+        this.checkEscape(raider, this.raiderThreats());
+      } else {
+        this.resolveWallContact(navigation, raider);
+        if (raider.isAlive && target) {
+          this.resolveCastleContact(raider, target);
+        }
       }
       if (!raider.touchedThisFrame) {
         // Contact broke this frame -- see it as a fresh engagement next time.
@@ -552,6 +889,22 @@ export class Game {
    * see. A negative FEAR.weight draws them in instead.
    */
   raiderDestination(raider, castle) {
+    // No city to make for, and no reason to shy off from a company it can
+    // see either -- the open battleground mode is a fight both sides came
+    // looking for. Whatever guard is nearest gets run down; with nothing
+    // close enough to notice, the raider makes straight for the Emperor
+    // instead if one is on the field, and only charges blindly south with
+    // neither to aim at.
+    if (this.mode === 'battle') {
+      const nearby = this.nearestGuard(raider.position, FEAR.noticeRadius);
+      if (nearby) {
+        return nearby.position;
+      }
+      if (this.emperor && this.emperor.isAlive) {
+        return this.emperor.position;
+      }
+      return { x: raider.position.x, y: -BATTLE.fieldHalfDepth };
+    }
     const city = castle ? castle.position : { x: 0, y: 0 };
     if (FEAR.weight === 0 || this.guards.length === 0) {
       return city;
@@ -590,11 +943,34 @@ export class Game {
       return [];
     }
     const tierIds = this.guardTiers[castle.typeId] ?? [];
-    return tierIds.map((id) => ({ id, ...GUARD_TYPES[id] }));
+    const options = tierIds.map((id) => ({ id, ...GUARD_TYPES[id] }));
+    // Offered the same way in every level, on top of whatever that level's
+    // own tiers are -- and only for as long as this game has not already
+    // spent its one launch. See spawnEmperor.
+    if (!this.emperorMustered) {
+      options.push({ id: 'EMPEROR', ...this.emperorStats(castle) });
+    }
+    return options;
+  }
+
+  /** The Emperor's own stats at a castle's current tier -- see spawnEmperor. */
+  emperorStats(castle = this.castles[0]) {
+    const base = GUARD_TYPES.EMPEROR;
+    const multiplier = EMPEROR_TIER_MULTIPLIER[castle?.typeId] ?? 1;
+    return {
+      ...base,
+      maxHealth: Math.round(base.maxHealth * multiplier),
+      attackAA: roundedStat(base.attackAA * multiplier),
+      attackNormal: roundedStat(base.attackNormal * multiplier),
+      defense: Math.round(base.defense * multiplier),
+    };
   }
 
   /** Send a company of the given tier to hold a patch of ground. */
-  sendGuard(typeId, target) {
+  sendGuard(typeId) {
+    if (typeId === 'EMPEROR') {
+      return this.spawnEmperor();
+    }
     const home = this.castles[0];
     if (!home) {
       return { sent: false, status: 'nocity' };
@@ -609,11 +985,276 @@ export class Game {
     this.tokens -= type.cost;
     const guard = new Guard(typeId, home.position);
     guard.home = { ...home.position };
-    guard.orders = { ...target };
-    guard.aimAt(target);
+    // No order yet: it stands at home until selected and sent (see
+    // selectGuardsNear/orderGuards), hunting anything that strays within
+    // IMPERIAL.huntRadius on its own the same way any mustered company
+    // already does -- see guardDestination.
     this.guards.push(guard);
     this.onEffect('attack', home.position);
     return { sent: true, guard };
+  }
+
+  /**
+   * Muster the one Emperor a game gets: free, scaled to the castle's
+   * current tier, and never on offer again once launched (see
+   * dispatchOptions). Strictly commanded rather than hunting on its own
+   * (see guardDestination), and losing it ends the game the same way
+   * losing the castle does (see isDefeated).
+   */
+  spawnEmperor() {
+    const home = this.castles[0];
+    if (!home) {
+      return { sent: false, status: 'nocity' };
+    }
+    if (this.emperorMustered) {
+      return { sent: false, status: 'unique' };
+    }
+    const emperor = new Emperor(home.position);
+    // A fresh object, scaled to this tier -- never the shared GUARD_TYPES
+    // entry itself, or mustering would permanently inflate every future
+    // game's own starting stats.
+    emperor.type = this.emperorStats(home);
+    emperor.health = emperor.type.maxHealth;
+    emperor.home = { ...home.position };
+    this.guards.push(emperor);
+    this.emperor = emperor;
+    this.emperorMustered = true;
+    this.onEffect('attack', home.position);
+    return { sent: true, guard: emperor };
+  }
+
+  /** What the player's chosen faction offers for points, in this mode. */
+  get battleRoster() {
+    return FACTIONS[this.factions.player].roster;
+  }
+
+  /** This mode's roster entry for a type id, or null if it is not on offer. */
+  battleRosterEntry(typeId) {
+    return this.battleRoster.find((entry) => entry.id === typeId) ?? null;
+  }
+
+  /** Whether a point falls inside the player's own deployment band, south of the start line. */
+  withinDeploymentZone(point) {
+    return Math.abs(point.x) <= BATTLE.fieldHalfWidth
+      && point.y <= BATTLE.baselineY
+      && point.y >= BATTLE.baselineY - BATTLE.placementDepth;
+  }
+
+  /**
+   * Field a company of the open battleground mode's own roster, spending
+   * from the placement budget rather than the treasury -- there is no
+   * income here to spend it out of. Stands exactly where placed and holds
+   * that ground on its own, the same autonomous "hunt anything that strays
+   * near" behaviour any mustered guard already has (see guardDestination) --
+   * only the Emperor opts out of it.
+   */
+  placeGuard(typeId, point) {
+    if (this.mode !== 'battle' || this.started) {
+      return { placed: false, status: 'blocked' };
+    }
+    const entry = this.battleRosterEntry(typeId);
+    if (!entry) {
+      return { placed: false, status: 'unknown' };
+    }
+    if (typeId === 'EMPEROR' && this.emperorMustered) {
+      return { placed: false, status: 'unique' };
+    }
+    if (this.battleBudget < entry.cost) {
+      return { placed: false, status: 'poor' };
+    }
+    if (!this.withinDeploymentZone(point)) {
+      return { placed: false, status: 'zone' };
+    }
+    this.battleBudget -= entry.cost;
+    const guard = typeId === 'EMPEROR' ? new Emperor(point) : new Guard(typeId, point);
+    if (typeId === 'EMPEROR') {
+      this.emperor = guard;
+      this.emperorMustered = true;
+    }
+    this.guards.push(guard);
+    this.placementLog.push({ type: 'guard', guard, cost: entry.cost });
+    this.onEffect('attack', point);
+    return { placed: true, guard };
+  }
+
+  /**
+   * Lay one of the open battleground mode's own low earthworks: a slow, not
+   * a barrier (see paceOn/onEarthwork), so it carries none of buildWall's
+   * cost, snapping or city/water checks -- there is neither a city nor a
+   * treasury here, and nothing routes around one regardless.
+   */
+  buildEarthwork(from, to) {
+    if (this.mode !== 'battle' || this.started) {
+      return { status: 'blocked' };
+    }
+    const start = { x: Math.trunc(from.x), y: Math.trunc(from.y) };
+    const end = { x: Math.trunc(to.x), y: Math.trunc(to.y) };
+    const length = distance(start, end);
+    if (length <= EARTHWORK.minLength || length >= EARTHWORK.maxLength) {
+      return { status: 'short', start, end };
+    }
+    const earthwork = { start, end };
+    this.earthworks.push(earthwork);
+    this.placementLog.push({ type: 'earthwork', earthwork });
+    this.onEffect('build', wallMidpoint(earthwork));
+    return { status: 'built', start, end };
+  }
+
+  /** Undo the last placement -- a company handed its points back, or an earthwork torn up. */
+  undoLastPlacement() {
+    const entry = this.placementLog.pop();
+    if (!entry) {
+      return false;
+    }
+    if (entry.type === 'guard') {
+      this.guards = this.guards.filter((guard) => guard !== entry.guard);
+      this.battleBudget += entry.cost;
+      if (entry.guard === this.emperor) {
+        this.emperor = null;
+        this.emperorMustered = false;
+      }
+    } else {
+      this.earthworks = this.earthworks.filter((earthwork) => earthwork !== entry.earthwork);
+    }
+    return true;
+  }
+
+  /** Close the placement phase: the line drawn up so far is what fights. */
+  startBattle() {
+    if (this.mode !== 'battle' || this.started) {
+      return false;
+    }
+    this.started = true;
+    this.battleStats.playerFielded = this.guards.reduce((total, guard) => total + unitSize(guard.typeId), 0);
+    this.battleStats.enemyFielded = this.raiders.reduce((total, raider) => total + unitSize(raider.typeId), 0);
+    return true;
+  }
+
+  /**
+   * Every company within ATTACK_SELECT_RADIUS of a point -- a tap to pick
+   * out whatever is nearby, whether it is still standing at home or
+   * already out on the field. Marks them selected and hands the group
+   * back, so Input knows who a following tap should command.
+   */
+  selectGuardsNear(point) {
+    const reach = IMPERIAL.selectRadius * IMPERIAL.selectRadius;
+    const found = this.guards.filter((guard) => (
+      distanceSquared(guard.position, point) <= reach
+    ));
+    for (const guard of this.guards) {
+      guard.selected = found.includes(guard);
+    }
+    return found;
+  }
+
+  /** Every company currently selected -- see selectGuardsNear. */
+  get selectedGuards() {
+    return this.guards.filter((guard) => guard.selected);
+  }
+
+  deselectGuards() {
+    for (const guard of this.guards) {
+      guard.selected = false;
+    }
+  }
+
+  /**
+   * Send a selected group to hold new ground, spread a little around the
+   * point instead of stacked on the exact same spot. A company already
+   * trading blows breaks off and goes (see melee.js's disengage), and a
+   * routed one goes too -- but it stays routed, weak and unwilling, so it
+   * is likely to break again (see moveGuards).
+   */
+  orderGuards(guards, target) {
+    guards.forEach((guard, index) => {
+      disengage(guard);
+      guard.orders = spreadPoint(target, index, guards.length);
+      guard.recalled = false;
+      guard.selected = false;
+      guard.holding = false;
+      // A fresh order overrides a stagger too: the company shakes off
+      // whatever a charge did to it and moves.
+      guard.recoverySeconds = 0;
+      // A fresh order takes the company's whole attention until it gets
+      // there, and then it stands hold -- see guardDestination.
+      guard.arrived = false;
+    });
+  }
+
+  /**
+   * Put a group on hold, or take it off: a group already all holding is
+   * released, anything else is told to hold. Returns whether it is now
+   * holding. A company on hold stands exactly where it is -- no hunting, no
+   * marching -- and only fights what comes to it (see moveGuards and
+   * melee.js's bracing). Released, it takes up from where it stands.
+   */
+  toggleHold(guards) {
+    const commandable = guards.filter((guard) => !guard.routed);
+    const holding = !commandable.every((guard) => guard.holding);
+    for (const guard of commandable) {
+      guard.holding = holding;
+      guard.quarry = null;
+      guard.orders = { ...guard.position };
+      guard.arrived = true;
+    }
+    return holding;
+  }
+
+  /**
+   * Where a routed company runs: straight away from the nearest enemy, or on
+   * along its own line if there is none about.
+   */
+  fleeDestination(company, enemies) {
+    let nearest = null;
+    let nearestGap = Infinity;
+    for (const enemy of enemies) {
+      const gap = distanceSquared(company.position, enemy.position);
+      if (gap < nearestGap) {
+        nearest = enemy;
+        nearestGap = gap;
+      }
+    }
+    let awayX = company.velocity.x;
+    let awayY = company.velocity.y;
+    if (nearest && nearestGap > 0) {
+      awayX = company.position.x - nearest.position.x;
+      awayY = company.position.y - nearest.position.y;
+    }
+    const length = Math.hypot(awayX, awayY) || 1;
+    return {
+      x: company.position.x + awayX / length * ROUT.fleeReach,
+      y: company.position.y + awayY / length * ROUT.fleeReach,
+    };
+  }
+
+  /** A routed company obeys a fresh order until it gets there, then goes back to running. */
+  routedDestination(guard) {
+    if (!guard.arrived) {
+      if (distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2) {
+        guard.arrived = true;
+      } else {
+        return guard.orders;
+      }
+    }
+    return this.fleeDestination(guard, this.raiders);
+  }
+
+  /**
+   * A routed company has left the field once it has run ROUT.runDistance
+   * from where it broke and is clear of every enemy by ROUT.escapeDistance.
+   */
+  checkEscape(company, enemies) {
+    const from = company.routedAt ?? company.position;
+    if (distanceSquared(company.position, from) < ROUT.runDistance ** 2) {
+      return;
+    }
+    const clear = ROUT.escapeDistance * ROUT.escapeDistance;
+    company.fled = enemies.every((enemy) => distanceSquared(company.position, enemy.position) > clear);
+  }
+
+  /** What a routed raider runs from: every imperial company, and the city it was sent against. */
+  raiderThreats() {
+    return [...this.guards, ...this.castles];
   }
 
   /** The nearest live raider within `radius`, or null. */
@@ -634,12 +1275,48 @@ export class Game {
     return closest;
   }
 
+  /** The nearest live guard within `radius`, or null -- a raider's own mirror of nearestRaider. */
+  nearestGuard(from, radius) {
+    const reach = radius * radius;
+    let closest = null;
+    let closestGap = Infinity;
+    for (const guard of this.guards) {
+      const gap = distanceSquared(from, guard.position);
+      if (gap < reach && gap < closestGap) {
+        closest = guard;
+        closestGap = gap;
+      }
+    }
+    return closest;
+  }
+
+  /** A company that reaches its ordered ground stands hold there until commanded again. */
+  settleOnArrival(guard) {
+    guard.arrived = true;
+    guard.holding = true;
+    guard.quarry = null;
+    guard.halt();
+  }
+
   /**
    * A company runs down the nearest raider it can see, falls back on its
    * ordered ground, and goes home when there is nothing left to do.
    */
   guardDestination(guard) {
-    if (guard.quarry && !guard.quarry.isAlive) {
+    // The Emperor: no hunting, no auto-recall, no yo-yoing off a leash --
+    // it goes exactly where it was last commanded and stays there until
+    // ordered elsewhere (see Emperor#followsOrdersOnly). It will still
+    // trade blows if a raider actually reaches it -- that is handled
+    // through the same proximity-based melee every company shares, not
+    // through this destination at all.
+    if (!guard.arrived && distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2) {
+      this.settleOnArrival(guard);
+      return guard.position;
+    }
+    if (guard.followsOrdersOnly) {
+      return guard.orders;
+    }
+    if (guard.quarry && (!guard.quarry.isAlive || guard.quarry.fled)) {
       guard.quarry = null;
     }
     // A company that cannot reach what it is chasing picks something else.
@@ -647,6 +1324,18 @@ export class Game {
       guard.quarry = null;
       guard.stuckSeconds = 0;
       guard.closestApproach = Infinity;
+    }
+
+    // An open order takes precedence over the hunt: the company beelines for
+    // it and fights only what actually catches it in melee (see
+    // lockEngagements) rather than breaking off because a raider strayed
+    // near. `arrived` is sticky rather than a fresh distance check every
+    // frame -- once it flips, a later hunt that carries the company back
+    // away from that point must not immediately read as "order still open"
+    // and snap it back.
+    if (!guard.arrived) {
+      guard.quarry = null;
+      return guard.orders;
     }
 
     // Once past the leash it heads home and stays deaf to the hunt until it
@@ -670,8 +1359,7 @@ export class Game {
     if (guard.quarry) {
       return guard.quarry.position;
     }
-    const arrived = distanceSquared(guard.position, guard.orders) < IMPERIAL.arriveRadius ** 2;
-    return arrived ? guard.home : guard.orders;
+    return guard.home;
   }
 
   /**
@@ -692,12 +1380,25 @@ export class Game {
   moveGuards() {
     const navigation = this.navigation();
     for (const guard of this.guards) {
-      if (guard.isHeld) {
+      // Locked in a fight, staggered, or told to stand its ground: it does
+      // not move, and whatever pace it had is gone.
+      if (guard.isHeld || guard.holding) {
+        guard.halt();
         continue;
       }
-      guard.destination = this.guardDestination(guard);
+      guard.destination = guard.routed
+        ? this.routedDestination(guard)
+        : this.guardDestination(guard);
+      if (guard.holding) {
+        guard.halt();
+        continue;
+      }
       this.trackProgress(guard, 1 / FPS);
       steerCompany(guard, navigation, this.random);
+      guard.gatherPace(1 / FPS);
+      if (guard.routed) {
+        this.checkEscape(guard, this.raiders);
+      }
       this.updateCrossing(navigation, guard);
       // Walls do not stop them, but squeezing past one does slow them.
       const squeeze = 1 - guard.crossing * (1 - IMPERIAL.crossSpeed);
@@ -754,7 +1455,8 @@ export class Game {
       raider.advance(pace / FPS);
       return;
     }
-    const step = { x: raider.velocity.x * pace / FPS, y: raider.velocity.y * pace / FPS };
+    const stride = raider.momentum * pace / FPS;
+    const step = { x: raider.velocity.x * stride, y: raider.velocity.y * stride };
     const ahead = { x: raider.position.x + step.x, y: raider.position.y + step.y };
     const blocking = this.wallAcross(navigation, raider.position, ahead);
     if (!blocking) {
@@ -825,15 +1527,17 @@ export class Game {
     for (const wall of wallsNear(navigation.grid, raider.position, raider.type.range + reachMargin)) {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
-        wall.takeHit(raider.type.attack * wear);
+        wall.takeHit(blowOf(raider.type, wear));
         raider.touchedThisFrame = true;
         if (!raider.soundedEngage) {
           this.onEffect('engaging', wallMidpoint(wall));
           raider.soundedEngage = true;
         }
         if (!climb) {
-          raider.takeHit(WALL.attack);
-          if (!raider.isAlive) {
+          raider.takeHit({ aa: WALL.attack, normal: 0 });
+          // Battering stone that fights back breaks morale the same way melee
+          // does; a routed raider stops swinging and runs (see moveRaiders).
+          if (!raider.isAlive || testMorale(raider)) {
             return;
           }
         }
@@ -844,8 +1548,8 @@ export class Game {
   resolveCastleContact(raider, castle) {
     const reach = castle.type.hitbox + raider.type.range;
     if (distanceSquared(castle.position, raider.position) < reach * reach) {
-      castle.takeHit(raider.type.attack);
-      raider.takeHit(castle.type.attack);
+      castle.takeHit(blowOf(raider.type));
+      raider.takeHit({ aa: castle.type.attack, normal: 0 });
       raider.touchedThisFrame = true;
       if (!raider.soundedEngage) {
         this.onEffect('engaging', castle.position);
@@ -1097,6 +1801,7 @@ export class Game {
     }
     this.tokens -= cost;
     wall.beginRepair();
+    wall.flash();
     this.onEffect('repair', wallMidpoint(wall));
     return { status: 'repairing', wall, cost };
   }
@@ -1132,7 +1837,10 @@ export class Game {
       return { status: 'short', start, end };
     }
     const cost = this.wallCost(wall.length);
-    if (this.tokens < cost) {
+    // Ties Build's own refusal to the same threshold that greys its button
+    // (see canAffordToBuild) -- a segment cheap enough to afford on its own
+    // still will not go up once the treasury reads as too poor to build at all.
+    if (this.tokens < cost || !this.canAffordToBuild) {
       return { status: 'poor', start, end };
     }
     this.tokens -= cost;
@@ -1141,21 +1849,44 @@ export class Game {
     return { status: 'built', wall, start, end };
   }
 
-  /** Demolish anything standing where a structure now does, refunding it. */
-  clearWallsUnder(castle) {
+  /**
+   * A section the castle's larger footprint would now stand on is not
+   * demolished -- it is pushed straight back to the new edge, the same
+   * offset carrying both ends so the section keeps its own length and
+   * orientation, just moved. Only one a plain push cannot clear -- a corner
+   * clipped rather than crossed square-on, or one so short afterwards it
+   * would collapse to nothing -- falls back to being razed and refunded,
+   * the way every section here used to be.
+   */
+  pushWallsToNewBrim(castle) {
     const standing = [];
-    let cleared = 0;
+    let moved = 0;
+    let razed = 0;
     for (const wall of this.walls) {
-      if (!wall.isPlanned
-        && segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
-        this.tokens += wall.refundValue;
-        cleared += 1;
-      } else {
+      if (wall.isPlanned || !segmentEntersSquare(wall.start, wall.end, castle.position, castle.type.footprint)) {
         standing.push(wall);
+        continue;
       }
+      const midpoint = { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
+      const brim = closestPointOnSquare(midpoint, castle.position, castle.type.footprint);
+      const offset = { x: brim.x - midpoint.x, y: brim.y - midpoint.y };
+      const start = { x: wall.start.x + offset.x, y: wall.start.y + offset.y };
+      const end = { x: wall.end.x + offset.x, y: wall.end.y + offset.y };
+      const stillCrosses = segmentEntersSquare(start, end, castle.position, castle.type.footprint);
+      if (stillCrosses || distance(start, end) < WALL.minLength) {
+        this.tokens += wall.refundValue;
+        razed += 1;
+        continue;
+      }
+      wall.start = start;
+      wall.end = end;
+      wall.length = distance(start, end);
+      wall.flash();
+      standing.push(wall);
+      moved += 1;
     }
     this.walls = standing;
-    return cleared;
+    return { moved, razed };
   }
 
   /**
@@ -1227,6 +1958,7 @@ export class Game {
     }
     this.tokens -= cost;
     wall.beginUpgrade();
+    wall.flash();
     this.onEffect('fortify', wallMidpoint(wall));
     return { status: 'working', wall, cost, name: next.name };
   }
@@ -1277,11 +2009,15 @@ export class Game {
     this.castles[index] = upgraded;
     this.levelUnderCities();
     this.clearHousesUnder(upgraded);
-    const cleared = this.clearWallsUnder(upgraded);
-    const razed = cleared > 0
-      ? ` ${cleared} wall section${cleared === 1 ? '' : 's'} cleared for it.`
-      : '';
-    this.onMessage(`Upgraded to ${upgraded.type.name}.${razed}`);
+    const { moved, razed } = this.pushWallsToNewBrim(upgraded);
+    const parts = [];
+    if (moved > 0) {
+      parts.push(` ${moved} wall section${moved === 1 ? '' : 's'} pushed back to the new wall line.`);
+    }
+    if (razed > 0) {
+      parts.push(` ${razed} wall section${razed === 1 ? '' : 's'} could not be saved and ${razed === 1 ? 'was' : 'were'} cleared.`);
+    }
+    this.onMessage(`Upgraded to ${upgraded.type.name}.${parts.join('')}`);
     return true;
   }
 }

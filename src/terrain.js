@@ -423,6 +423,9 @@ export class Terrain {
    * slope stops short of the bank rather than wading into it.
    */
   standsClearOfWater(mountain) {
+    if (this.overlapsMountainClearing(mountain)) {
+      return false;
+    }
     if (this.sea) {
       // A peak that would wade off the island's edge is never placed.
       const edge = Math.hypot(mountain.x, mountain.y) + mountain.radius + this.land.mountainSkirt;
@@ -457,6 +460,23 @@ export class Terrain {
       circles.push({ x, y: river.y + wander, radius: river.halfWidth });
     }
     return circles;
+  }
+
+  /**
+   * Whether a mountain's footprint reaches into the land's own mountain-free
+   * corridor (see TERRAIN.mountainClearing) -- an open battleground keeps its
+   * middle open so the two lines can meet, and lets peaks close in on
+   * either flank.
+   */
+  overlapsMountainClearing(mountain) {
+    const clearing = this.land.mountainClearing;
+    if (!clearing) {
+      return false;
+    }
+    const nearestX = Math.max(-clearing.halfWidth, Math.min(clearing.halfWidth, mountain.x));
+    const nearestY = Math.max(clearing.minY, Math.min(clearing.maxY, mountain.y));
+    const reach = mountain.radius + this.land.mountainSkirt;
+    return Math.hypot(mountain.x - nearestX, mountain.y - nearestY) < reach;
   }
 
   /** Every mountain whose cell could possibly reach this point. */
@@ -842,7 +862,7 @@ export class Terrain {
     if (patch <= this.land.snowPatchThreshold) {
       return 0;
     }
-    return (patch - this.land.snowPatchThreshold) / (1 - this.land.snowPatchThreshold);
+    return Math.min(1, (patch - this.land.snowPatchThreshold) / (1 - this.land.snowPatchThreshold));
   }
 
   /** How thick the woodland is here, 0 to 1. */

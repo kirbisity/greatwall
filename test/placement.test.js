@@ -228,54 +228,73 @@ test('pointing the repair tool at open ground does nothing', () => {
   assert.equal(game.walls[0].isRepairing, false);
 });
 
-// --- upgrading clears what it builds over ---------------------------------
+// --- upgrading pushes back what it builds over -----------------------------
 
-test('upgrading demolishes the walls its larger footprint covers', () => {
+test('upgrading pushes the walls its larger footprint would cover back to its new edge', () => {
   const game = gameWith('CC0');
   const smallHalf = CASTLE_TYPES.CC0.footprint;
   const mediumHalf = CASTLE_TYPES.CC1.footprint;
 
   // One ring inside the coming compound, one safely beyond it.
-  const doomed = new Wall({ x: -40, y: smallHalf + 12 }, { x: 40, y: smallHalf + 12 });
+  const pushed = new Wall({ x: -40, y: smallHalf + 12 }, { x: 40, y: smallHalf + 12 });
   const spared = new Wall({ x: -40, y: mediumHalf + 60 }, { x: 40, y: mediumHalf + 60 });
-  game.walls.push(doomed, spared);
+  game.walls.push(pushed, spared);
 
   const messages = [];
   game.onMessage = (text) => messages.push(text);
   assert.equal(game.upgradeCastle(0), true);
 
-  assert.deepEqual(game.walls, [spared], 'only the covered wall went');
-  assert.match(messages.at(-1), /1 wall section cleared/);
+  assert.equal(game.walls.length, 2, 'nothing was demolished');
+  assert.ok(game.walls.includes(spared), 'the section already clear was left exactly where it was');
+  assert.ok(game.walls.includes(pushed), 'the covered section is the same entity, just relocated');
+  assert.equal(pushed.start.y, mediumHalf, 'pushed flush onto the new edge');
+  assert.equal(pushed.end.y, mediumHalf);
+  assert.equal(pushed.length, 80, 'moving it does not change its own length');
+  assert.ok(pushed.isFlashing, 'blinks to show something happened to it');
+  assert.match(messages.at(-1), /1 wall section pushed back to the new wall line/);
 });
 
-test('cleared walls are refunded, so upgrading never quietly costs extra', () => {
+test('a wall a straight push cannot save is razed and refunded instead, so upgrading never quietly costs extra', () => {
   const game = gameWith('CC0');
-  const doomed = new Wall({ x: -40, y: 34 }, { x: 40, y: 34 });
-  doomed.health = WALL.maxHealth;
-  game.walls.push(doomed);
+  // Runs from just past the centre out beyond the new edge -- pushed back by
+  // its own midpoint's offset, the near end is still left standing inside.
+  const radial = new Wall({ x: 0, y: 10 }, { x: 0, y: 80 });
+  radial.health = WALL.maxHealth;
+  game.walls.push(radial);
 
   const before = game.tokens;
+  const messages = [];
+  game.onMessage = (text) => messages.push(text);
   game.upgradeCastle(0);
-  assert.equal(game.tokens, before - CASTLE_TYPES.CC1.cost + doomed.refundValue);
+
+  assert.equal(game.walls.length, 0, 'could not be saved by a straight push');
+  assert.equal(game.tokens, before - CASTLE_TYPES.CC1.cost + radial.refundValue);
+  assert.match(messages.at(-1), /1 wall section could not be saved and was cleared/);
 });
 
-test('an upgrade that covers nothing says nothing about clearing', () => {
+test('an upgrade that covers nothing says nothing about pushing or clearing', () => {
   const game = gameWith('CC0');
   game.walls.push(new Wall({ x: -40, y: 400 }, { x: 40, y: 400 }));
   const messages = [];
   game.onMessage = (text) => messages.push(text);
   game.upgradeCastle(0);
   assert.equal(game.walls.length, 1);
-  assert.doesNotMatch(messages.at(-1), /cleared/);
+  assert.doesNotMatch(messages.at(-1), /pushed|cleared/);
 });
 
-test('every tier clears the walls its own footprint covers', () => {
+test('every tier resolves the walls its own footprint covers, one way or another', () => {
   for (const [typeId, type] of Object.entries(CASTLE_TYPES)) {
     const game = gameWith(typeId);
     const inside = new Wall({ x: -5, y: 0 }, { x: 5, y: 0 });
     game.walls.push(inside);
-    assert.equal(game.clearWallsUnder(game.castles[0]), 1, `${typeId} should clear it`);
-    assert.ok(segmentEntersSquare(inside.start, inside.end, game.castles[0].position, type.footprint));
+    const { moved, razed } = game.pushWallsToNewBrim(game.castles[0]);
+    assert.equal(moved + razed, 1, `${typeId} should have dealt with it one way or the other`);
+    for (const wall of game.walls) {
+      assert.ok(
+        !segmentEntersSquare(wall.start, wall.end, game.castles[0].position, type.footprint),
+        `${typeId} should leave nothing standing under the new footprint`,
+      );
+    }
   }
 });
 

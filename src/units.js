@@ -261,7 +261,7 @@ function seededRandom(seed) {
 
 const FORMATIONS = {
   IR0: () => ({
-    places: swarm(14, at(1.9), seededRandom(7)),
+    places: swarm(18, at(1.9), seededRandom(7)),
     figure: footSoldier({
       cloth: MATERIALS.tanCloth,
       skin: MATERIALS.tanSkin,
@@ -269,7 +269,7 @@ const FORMATIONS = {
     }),
   }),
   IR1: () => ({
-    places: grid(4, 4, at(1.45)),
+    places: grid(5, 4, at(1.45)),
     figure: footSoldier({
       cloth: MATERIALS.darkMail,
       skin: MATERIALS.darkSteel,
@@ -277,15 +277,15 @@ const FORMATIONS = {
     }),
   }),
   CR0: () => ({
-    places: ranks(5, 2, at(1.7), at(2.4)),
+    places: ranks(6, 2, at(1.7), at(2.4)),
     figure: horseman({ weapon: sabreArm() }),
   }),
   CR1: () => ({
-    places: wedge(4, 1.8 * SCALE, 2.3 * SCALE),
+    places: wedge(5, 1.8 * SCALE, 2.3 * SCALE),
     figure: horseman({ weapon: shaft({ x: at(0.34), y: 0, z: at(0.4) }, at(2.4), at(0.09), 0.05, MATERIALS.shaft) }),
   }),
   IG_LIGHT: () => ({
-    places: grid(5, 4, at(1.55)),
+    places: grid(8, 6, at(1.55)),
     figure: footSoldier({
       cloth: MATERIALS.imperialTrim,
       skin: MATERIALS.imperialTrim,
@@ -293,7 +293,7 @@ const FORMATIONS = {
     }),
   }),
   IG0: () => ({
-    places: grid(7, 5, at(1.6)),
+    places: grid(8, 6, at(1.6)),
     figure: footSoldier({
       cloth: MATERIALS.imperialGold,
       skin: MATERIALS.imperialTrim,
@@ -308,10 +308,10 @@ const FORMATIONS = {
       weapon: swordArm(MATERIALS.imperialGold),
     }),
   }),
-  // The island's own companies, on the same formations as the imperial army
-  // -- a level swaps who holds the ground, not how a company musters.
+  // The island's clans muster fewer men in each higher tier -- 42, 30, 24 --
+  // where the imperial army keeps a full 48 in every tier.
   JG_ASHIGARU: () => ({
-    places: grid(5, 4, at(1.55)),
+    places: grid(7, 6, at(1.55)),
     figure: footSoldier({
       cloth: MATERIALS.indigo,
       skin: MATERIALS.indigoPale,
@@ -319,7 +319,7 @@ const FORMATIONS = {
     }),
   }),
   JG_SAMURAI: () => ({
-    places: grid(7, 5, at(1.6)),
+    places: grid(6, 5, at(1.6)),
     figure: footSoldier({
       cloth: MATERIALS.lacquer,
       skin: MATERIALS.crimson,
@@ -327,12 +327,20 @@ const FORMATIONS = {
     }),
   }),
   JG_SOHEI: () => ({
-    places: grid(8, 6, at(1.65)),
+    places: grid(6, 4, at(1.65)),
     figure: footSoldier({
       cloth: MATERIALS.hemp,
       skin: MATERIALS.lacquer,
       weapon: spearArm(2.6),
     }),
+  }),
+  // A single mounted figure, not a company -- the Emperor musters alone.
+  // The same horseman a raiding cavalry rides, sabre and all, the same way
+  // every other tier already shares its formation builder rather than
+  // carrying its own bespoke geometry.
+  EMPEROR: () => ({
+    places: [{ x: 0, y: 0 }],
+    figure: horseman({ weapon: sabreArm() }),
   }),
 };
 
@@ -365,4 +373,21 @@ export function compileUnit(typeId) {
     return { phase: jitter() * Math.PI * 2, place };
   });
   return { figures, geometry: figure, radius: radius + 1.5 };
+}
+
+// How many individual figures a type's own formation musters, cached per
+// type id rather than recomputed -- see unitSize. compileUnit builds the
+// full figure geometry, which is more than a headcount needs every frame.
+const sizeCache = new Map();
+
+/** How many figures muster in one company of this type -- see Game's battle stats. */
+export function unitSize(typeId) {
+  const cached = sizeCache.get(typeId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const build = FORMATIONS[typeId];
+  const size = build ? build().places.length : 1;
+  sizeCache.set(typeId, size);
+  return size;
 }

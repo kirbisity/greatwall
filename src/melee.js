@@ -1,37 +1,233 @@
 import { distanceSquared } from './geometry.js';
-import { MELEE } from './config.js';
+import {
+  CHARGE, HOLD, MASS, MELEE, ROUT,
+} from './config.js';
+import { addBlows, blowOf, scaleBlow } from './damage.js';
 
 /**
  * Hand-to-hand between the two sides.
  *
  * A company locks with everything it touches, so one body can be swarmed and
  * several can pile onto the same target. Locked companies stop dead and trade
- * damage until one side is gone, then the survivor gathers itself and moves on.
+ * damage until one side is gone or breaks and runs, then the survivor gathers
+ * itself and moves on. How a bout opens matters: the pace and line a company
+ * came in on sets how hard its first blows land (see chargeImpact), and heavy
+ * cavalry may ride straight through light infantry or be stopped dead on a
+ * braced spear wall instead (see engage).
  */
 
-/** Pair up anything from the two sides that has come within reach. */
-export function lockEngagements(guards, raiders) {
-  const reach = MELEE.engageDistance * MELEE.engageDistance;
-  for (const guard of guards) {
-    if (guard.recoverySeconds > 0) {
+// --- the charge ------------------------------------------------------------------
+
+/** How fast a company is going, as a share of a full-tilt cavalry charge. */
+export function chargeSpeed(company) {
+  return (company.descent ?? 1) * Math.min(1, company.momentum * company.type.speed / CHARGE.referenceSpeed);
+}
+
+/**
+ * How squarely a company is heading at another: 1 dead on, -1 dead away, and
+ * 0 when it is not heading anywhere at all.
+ */
+export function facingToward(company, other) {
+  const speed = Math.hypot(company.velocity.x, company.velocity.y);
+  const dx = other.position.x - company.position.x;
+  const dy = other.position.y - company.position.y;
+  const gap = Math.hypot(dx, dy);
+  if (speed === 0 || gap === 0) {
+    return 0;
+  }
+  return (company.velocity.x * dx + company.velocity.y * dy) / (speed * gap);
+}
+
+/**
+ * What a company's first CHARGE.seconds of blows are multiplied by, from the
+ * pace and line it met `foe` on. Standing still is plain strength; a head-on
+ * charge at full cavalry speed doubles it; caught running the other way, the
+ * same speed counts against it instead.
+ */
+export function chargeImpact(company, foe) {
+  const alignment = facingToward(company, foe);
+  const weight = alignment >= 0 ? CHARGE.bonus : CHARGE.retreatPenalty;
+  return 1 + chargeSpeed(company) * alignment * weight;
+}
+
+function isCharging(company, target) {
+  return !company.routed
+    && chargeSpeed(company) >= MASS.chargeSpeed
+    && facingToward(company, target) >= MASS.chargeAlignment;
+}
+
+/** Spears set to meet a charge: on hold, or standing near enough still. */
+export function isBraced(company) {
+  return Boolean(company.type.spears)
+    && !company.routed
+    && (company.holding || company.momentum <= MASS.bracedMomentum);
+}
+
+/** The unit vector a company is moving along, or null if it is standing. */
+function headingOf(company) {
+  const speed = Math.hypot(company.velocity.x, company.velocity.y);
+  if (speed === 0) {
+    return null;
+  }
+  return { x: company.velocity.x / speed, y: company.velocity.y / speed };
+}
+
+/** How much a shove from `mover` carries against `moved`: heavier moves lighter further. */
+function massLeverage(mover, moved) {
+  const [least, most] = MASS.knockMassRange;
+  return Math.min(most, Math.max(least, mover.type.mass / moved.type.mass));
+}
+
+/** Add to a company's knock velocity; the shove plays out over the next few frames (see driftKnocked). */
+function knockAlong(company, direction, speed) {
+  company.knock.x += direction.x * speed;
+  company.knock.y += direction.y * speed;
+}
+
+/** Slide knocked companies along their knock and let it bleed off. */
+function driftKnocked(companies, seconds) {
+  const bleed = Math.exp(-MASS.knockDecay * seconds);
+  for (const company of companies) {
+    if (company.knock.x === 0 && company.knock.y === 0) {
       continue;
     }
+    company.position.x += company.knock.x * seconds;
+    company.position.y += company.knock.y * seconds;
+    company.knock.x *= bleed;
+    company.knock.y *= bleed;
+    if (Math.hypot(company.knock.x, company.knock.y) < 0.5) {
+      company.knock.x = 0;
+      company.knock.y = 0;
+    }
+  }
+}
+
+function tramples(cavalry, target) {
+  return Boolean(cavalry.type.cavalry)
+    && cavalry.type.mass >= MASS.heavy
+    && !target.type.cavalry
+    && target.type.mass <= MASS.light
+    && !isBraced(target)
+    && isCharging(cavalry, target);
+}
+
+function meetsSpears(cavalry, spears) {
+  return Boolean(cavalry.type.cavalry) && isBraced(spears) && isCharging(cavalry, spears);
+}
+
+/**
+ * Heavy cavalry rides a light company down and carries on: a blow scaled by
+ * its speed, the target shoved off its line and knocked flat for a moment,
+ * and the riders keep most of their pace rather than stopping to fight.
+ */
+function trample(cavalry, target) {
+  target.takeHit(blowOf(cavalry.type, MASS.trampleMultiplier * chargeSpeed(cavalry)));
+  const ahead = headingOf(cavalry);
+  // Whichever side of the riders' line it already stood, it is flung further that way.
+  const side = Math.sign(
+    (target.position.x - cavalry.position.x) * -ahead.y
+    + (target.position.y - cavalry.position.y) * ahead.x,
+  ) || 1;
+  const push = MASS.trampleKnock * chargeSpeed(cavalry) * massLeverage(cavalry, target);
+  knockAlong(target, {
+    x: ahead.x + -ahead.y * side * MASS.trampleSideways,
+    y: ahead.y + ahead.x * side * MASS.trampleSideways,
+  }, push / Math.hypot(1, MASS.trampleSideways));
+  target.recoverySeconds = Math.max(target.recoverySeconds, MASS.trampleStaggerSeconds);
+  cavalry.momentum *= MASS.trampleMomentumKept;
+}
+
+/** Cavalry run onto set spears: stopped dead, its charge spent on the points. */
+function counterCharge(cavalry, spears, speed) {
+  cavalry.takeHit(blowOf(spears.type, MASS.counterChargeMultiplier * speed));
+  const ahead = headingOf(cavalry);
+  if (ahead) {
+    knockAlong(cavalry, { x: -ahead.x, y: -ahead.y }, MASS.counterChargeRebound * speed * massLeverage(spears, cavalry));
+    knockAlong(spears, ahead, MASS.counterChargeShove * speed * massLeverage(cavalry, spears));
+  }
+  cavalry.momentum = 0;
+  cavalry.impact = 1;
+}
+
+/** A company's opening blows are fixed the moment its first foe of a bout is. */
+function openBout(company, foe) {
+  if (company.foes.size === 0) {
+    company.impact = chargeImpact(company, foe);
+  }
+}
+
+/** A company meeting a foe at the charge shoves it back along its line as the two collide. */
+function shoveOnImpact(company, foe) {
+  const ahead = headingOf(company);
+  if (ahead && isCharging(company, foe)) {
+    knockAlong(foe, ahead, MASS.impactKnock * chargeSpeed(company) * massLeverage(company, foe));
+  }
+}
+
+function engage(guard, raider) {
+  if (tramples(raider, guard)) {
+    trample(raider, guard);
+    return;
+  }
+  if (tramples(guard, raider)) {
+    trample(guard, raider);
+    return;
+  }
+  // Read before either side's bout opens: the counter-charge itself stops
+  // the riders, and it is the pace they came in with that it punishes.
+  const raiderOnSpears = meetsSpears(raider, guard) ? chargeSpeed(raider) : null;
+  const guardOnSpears = meetsSpears(guard, raider) ? chargeSpeed(guard) : null;
+  if (raiderOnSpears === null) {
+    shoveOnImpact(raider, guard);
+  }
+  if (guardOnSpears === null) {
+    shoveOnImpact(guard, raider);
+  }
+  openBout(guard, raider);
+  openBout(raider, guard);
+  guard.foes.add(raider);
+  raider.foes.add(guard);
+  if (raiderOnSpears !== null) {
+    counterCharge(raider, guard, raiderOnSpears);
+  }
+  if (guardOnSpears !== null) {
+    counterCharge(guard, raider, guardOnSpears);
+  }
+}
+
+/**
+ * Pair up anything from the two sides that has come within reach. A routed
+ * company is running rather than looking for a fight, so it is only pinned
+ * by an enemy that actually catches it up -- see ROUT.catchDistance.
+ */
+export function lockEngagements(guards, raiders) {
+  const reach = MELEE.engageDistance * MELEE.engageDistance;
+  const caught = ROUT.catchDistance * ROUT.catchDistance;
+  for (const guard of guards) {
     for (const raider of raiders) {
+      if (guard.recoverySeconds > 0) {
+        break;
+      }
       if (raider.recoverySeconds > 0 || guard.foes.has(raider)) {
         continue;
       }
-      if (distanceSquared(guard.position, raider.position) <= reach) {
-        guard.foes.add(raider);
-        raider.foes.add(guard);
+      if (guard.routed && raider.routed) {
+        continue;
+      }
+      const limit = guard.routed || raider.routed ? caught : reach;
+      if (distanceSquared(guard.position, raider.position) <= limit) {
+        engage(guard, raider);
       }
     }
   }
 }
 
+// --- the bout --------------------------------------------------------------------
+
 /**
  * Draw locked companies into each other so the ranks interleave. Fighting at
  * arm's length reads as two blocks standing apart; overlapping reads as a
- * melee.
+ * melee. The heavier of two gives the less ground.
  */
 function closeIn(companies, seconds) {
   for (const company of companies) {
@@ -47,7 +243,8 @@ function closeIn(companies, seconds) {
       if (gap <= MELEE.lockedGap || gap === 0) {
         continue;
       }
-      const step = Math.min(MELEE.closeRate * seconds, (gap - MELEE.lockedGap) / 2);
+      const yielding = (2 * foe.type.mass) / (company.type.mass + foe.type.mass);
+      const step = Math.min(MELEE.closeRate * seconds, (gap - MELEE.lockedGap) / 2) * yielding;
       pullX += dx / gap * step;
       pullY += dy / gap * step;
     }
@@ -68,6 +265,72 @@ function prunedFoes(company) {
   return company.foes;
 }
 
+/** What a company strikes with right now: its charge early in a bout, halved in a rout. */
+function strikingPower(company) {
+  const charge = company.meleeSeconds <= CHARGE.seconds ? company.impact : 1;
+  const morale = company.routed ? ROUT.attackMultiplier : 1;
+  return blowOf(company.type, charge * morale);
+}
+
+/** How much a company on hold shrugs off, for the first HOLD.seconds of a bout. */
+function bracing(company) {
+  const bonus = company.type.holdBonus ?? HOLD.defenseBonus;
+  return company.holding && company.meleeSeconds <= HOLD.seconds ? 1 + bonus : 1;
+}
+
+function breaksNow(company) {
+  return !company.routed
+    && company.isAlive
+    && company.type.breaksAt > 0
+    && company.healthFraction <= company.type.breaksAt;
+}
+
+/** Rout a company whose health has just fallen past its breaking point; true if it did. */
+export function testMorale(company) {
+  if (!breaksNow(company)) {
+    return false;
+  }
+  rout(company);
+  return true;
+}
+
+/**
+ * Morale breaks: the company drops out of every fight it is in and runs,
+ * at a sprint -- panic needs no run-up. Whatever it was fighting is a beat
+ * slow to give chase, so the rout is a real chance to get away rather than
+ * a formality, but only a real chance: anything faster will run it down.
+ */
+export function rout(company) {
+  company.routed = true;
+  company.routedAt = { ...company.position };
+  company.holding = false;
+  company.selected = false;
+  // Whatever order it was last under is forgotten: it runs first.
+  if ('arrived' in company) {
+    company.arrived = true;
+  }
+  disengage(company);
+  company.recoverySeconds = 0;
+  company.momentum = 1;
+}
+
+/**
+ * Break off every fight a company is in. Whatever it was fighting is a beat
+ * slow to give chase, so slipping away is a real chance rather than a
+ * formality -- anything faster will still run it down.
+ */
+export function disengage(company) {
+  for (const foe of company.foes) {
+    foe.foes.delete(company);
+    if (foe.foes.size === 0) {
+      foe.meleeSeconds = 0;
+    }
+    foe.recoverySeconds = MELEE.recoverySeconds;
+  }
+  company.foes.clear();
+  company.meleeSeconds = 0;
+}
+
 /**
  * Advance every fight. Damage is split across however many are piled on, so
  * being outnumbered is punishing without a lone company hitting for a crowd.
@@ -83,6 +346,7 @@ export function resolveMelee(companies, seconds) {
     prunedFoes(company);
   }
 
+  driftKnocked(companies, seconds);
   closeIn(companies, seconds);
 
   const struck = new Map();
@@ -91,13 +355,20 @@ export function resolveMelee(companies, seconds) {
       continue;
     }
     company.meleeSeconds += seconds;
-    const share = company.type.attack * MELEE.damageRate * seconds / company.foes.size;
+    const share = scaleBlow(strikingPower(company), MELEE.damageRate * seconds / company.foes.size);
     for (const foe of company.foes) {
-      struck.set(foe, (struck.get(foe) ?? 0) + share);
+      struck.set(foe, struck.has(foe) ? addBlows(struck.get(foe), share) : share);
     }
   }
   for (const [company, blows] of struck) {
-    company.takeHit(blows);
+    company.takeHit(blows, bracing(company));
+  }
+
+  // Only blows break morale -- here, and from a wall that strikes back at
+  // whoever batters it (see Game#resolveWallContact). A raider bloodied
+  // merely climbing over one is shaken, not beaten.
+  for (const company of struck.keys()) {
+    testMorale(company);
   }
 
   // Break off the dead, and anything that has been at it too long.

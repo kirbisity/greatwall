@@ -42,7 +42,7 @@ body {
 }
 
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--bronze); outline-offset: 2px; }
 
 .layer { position: absolute; left: 0; top: 0; }
 /* The map takes every gesture itself -- drag, pinch, tap -- so the browser
@@ -185,8 +185,178 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .toolButton.is-active img { filter: invert(78%) sepia(64%) saturate(520%) hue-rotate(2deg); }
 .toolButton.is-active .toolName { color: var(--bronze); }
 
-.toolButton.is-disabled { opacity: .35; cursor: not-allowed; }
+.toolButton.is-disabled { opacity: .4; filter: grayscale(.7); cursor: not-allowed; }
 .toolButton.is-disabled:hover { border-color: transparent; transform: none; }
+
+/* --- open battleground mode --------------------------------------------- */
+
+/*
+ * Its own dock entirely, not a shared .toolDock -- sharing that class used
+ * to mean every responsive rule aimed at #toolDock (the Build/Attack dock,
+ * bottom-left) landed on this roster dock too, since both carried the same
+ * class. On a narrow phone that put them at the exact same full-width strip
+ * along the bottom, one drawn over the other; in short landscape it was
+ * worse, both pinned to the same left-edge column. Defined independently
+ * here, the two can never collide: #toolDock keeps the bottom-left corner
+ * it has always had, and this one owns the bottom-centre strip above it.
+ */
+.battleDock {
+	position: absolute;
+	left: 50%;
+	bottom: calc(22px + env(safe-area-inset-bottom));
+	transform: translateX(-50%);
+	z-index: 6;
+	display: none;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: center;
+	padding: 8px;
+	max-width: min(560px, 92vw);
+	background: var(--panel);
+	border: var(--frame);
+	border-radius: 4px;
+	box-shadow: var(--lift);
+}
+
+/* One portrait and its point cost per company; the full name is the tooltip. */
+.battleUnitButton {
+	width: 66px;
+	gap: 4px;
+	padding: 6px 4px 6px;
+}
+
+.battleUnitButton .battlePortrait { height: 44px; width: auto; max-width: 100%; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+.battleUnitButton:hover .battlePortrait,
+.battleUnitButton.is-active .battlePortrait { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .6)); }
+
+.battleUnitButton, .rosterChip { position: relative; }
+
+.unitSizeBadge {
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	padding: 0 5px;
+	font-family: var(--display);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 14px;
+	color: var(--parchment, #e8dcc0);
+	background: rgba(14, 11, 8, .85);
+	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 7px;
+	pointer-events: none;
+}
+
+.battleCost {
+	min-width: 34px;
+	padding: 0 7px;
+	font-family: var(--display);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .06em;
+	line-height: 16px;
+	text-align: center;
+	color: var(--bronze);
+	background: rgba(14, 11, 8, .8);
+	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 8px;
+}
+
+
+.battleStartBtn {
+	display: none;
+	align-items: center;
+	padding: 0 16px;
+	height: 34px;
+	font-family: var(--display);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: .1em;
+	text-transform: uppercase;
+	color: var(--bronze);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 3px;
+	background: linear-gradient(180deg, rgba(90, 71, 24, .55), rgba(44, 34, 16, .55));
+	transition: var(--ease);
+}
+
+.battleStartBtn:hover {
+	color: var(--ink);
+	background: linear-gradient(180deg, #e2c866, var(--bronze-deep));
+	box-shadow: var(--glow);
+}
+
+.readout-battle { display: none; }
+
+/* Nothing here spends coin, earns income or turns a season -- so none of
+   those readouts have anything to say in this mode. */
+.is-battleMode .readout-treasury,
+.is-battleMode .readout-income,
+.is-battleMode .readout-season {
+	display: none;
+}
+
+/* Shown over the field itself, not the main menu -- see Hud#showBattleResult. */
+.battleResultContent {
+	background: var(--panel);
+	border-color: var(--bronze-deep);
+	text-align: center;
+}
+
+.battleResultSummary {
+	margin: 0 0 20px;
+	font-size: 15px;
+	line-height: 1.9;
+	color: var(--parchment-dim);
+	white-space: pre-line;
+}
+
+.battleBreakdown {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 24px;
+	justify-content: center;
+	margin-bottom: 4px;
+}
+
+.battleBreakdownColumn { flex: 1 1 200px; max-width: 260px; }
+
+.battleBreakdownColumn h3 {
+	margin: 0 0 10px;
+	font-family: var(--display);
+	font-size: 12px;
+	letter-spacing: .12em;
+	text-transform: uppercase;
+	color: var(--bronze);
+}
+
+.battleBreakdownEmpty { margin: 0; font-size: 13px; color: var(--parchment-dim); opacity: .7; }
+
+.battleBreakdownRow { display: flex; flex-direction: column; gap: 8px; }
+
+.battleBreakdownItem {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 4px 8px;
+	border-radius: 3px;
+	background: rgba(0, 0, 0, .2);
+	font-size: 13px;
+	text-align: left;
+	color: var(--parchment);
+}
+
+.battleBreakdownItem img {
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	object-fit: cover;
+	object-position: top center;
+	background: rgba(0, 0, 0, .3);
+	flex: none;
+}
+
+.is-battleMode .readout-battle { display: flex; }
 
 /* --- dispatch menu ------------------------------------------------------ */
 
@@ -223,6 +393,29 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 }
 
 .dispatchButton:hover { border-color: var(--bronze); box-shadow: var(--glow); transform: translateY(-2px); }
+
+/* --- hold toggle, floated over the selected companies ------------------ */
+
+.holdToggle {
+	position: fixed;
+	display: none;
+	z-index: 7;
+	transform: translate(-50%, 4px);
+	padding: 5px 12px;
+	font-family: var(--display);
+	font-size: 11px;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 3px;
+	box-shadow: var(--lift);
+	transition: border-color 160ms, box-shadow 160ms;
+}
+
+.holdToggle:hover { border-color: var(--bronze); box-shadow: var(--glow); }
+.holdToggle.is-holding { border-color: var(--bronze); color: var(--bronze); }
 
 /* --- full screen overlays ---------------------------------------------- */
 
@@ -265,13 +458,13 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .gameTagline,
 .panelTitle {
 	font-family: var(--display);
-	letter-spacing: .2em;
+	letter-spacing: .16em;
 	text-transform: uppercase;
 	color: var(--parchment-dim);
 }
 
 /* showGameOver writes "Score / Best" as two lines. */
-.gameTagline { margin: 10px 0 0; font-size: 13px; line-height: 1.9; white-space: pre-line; }
+.gameTagline { margin: 10px 0 0; font-size: 14px; line-height: 1.9; white-space: pre-line; }
 
 .panelTitle { margin: 0 0 18px; font-size: clamp(20px, 2.4vw, 30px); color: var(--bronze); }
 
@@ -290,16 +483,17 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .menuItem {
 	display: block;
 	width: min(320px, 70vw);
-	padding: 12px 18px;
+	padding: 13px 18px;
 	font-family: var(--display);
 	font-size: 17px;
 	font-weight: 500;
-	letter-spacing: .18em;
+	letter-spacing: .13em;
 	text-transform: uppercase;
 	text-decoration: none;
 	text-align: center;
 	color: var(--parchment-dim);
 	border: 1px solid rgba(138, 109, 36, .45);
+	border-radius: 4px;
 	background: linear-gradient(180deg, rgba(44, 38, 29, .7), rgba(16, 13, 9, .8));
 	transition: var(--ease);
 }
@@ -309,6 +503,7 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	border-color: var(--bronze);
 	background: linear-gradient(180deg, #e2c866, var(--bronze-deep));
 	box-shadow: var(--glow);
+	transform: translateY(-1px);
 }
 
 .menuItem-primary { color: var(--bronze); border-color: var(--bronze-deep); }
@@ -326,17 +521,21 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	text-align: left;
 	background: none;
 	border: 1px solid transparent;
-	border-radius: 3px;
+	border-radius: 4px;
 	color: inherit;
 	font: inherit;
 	cursor: pointer;
-	opacity: .55;
+	opacity: .7;
 	transition: var(--ease);
 }
 
-.levelItem:hover { opacity: .85; }
+.levelItem:hover { opacity: .92; background: rgba(138, 109, 36, .12); }
 
-.levelItem.is-chosen { opacity: 1; border-color: var(--bronze-deep); }
+.levelItem.is-chosen {
+	opacity: 1;
+	border-color: var(--bronze-deep);
+	background: rgba(138, 109, 36, .18);
+}
 
 /*
  * Drawn at THUMBNAIL_COLUMNS x THUMBNAIL_ROWS (see levelThumbnail.js) and
@@ -355,9 +554,197 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 
 .levelText { flex: 1; min-width: 0; }
 
-.levelName { display: block; font-size: 14px; letter-spacing: .09em; text-transform: uppercase; }
+.levelName { display: block; font-size: 15px; letter-spacing: .07em; text-transform: uppercase; }
 
-.levelBlurb { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; opacity: .7; }
+.levelBlurb { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; opacity: .8; }
+
+/* --- open field setup page: the map and each side's army ---------------- */
+
+#battleSetupPage { z-index: 12; }
+
+.battleSetupContent { padding-top: 4.5vh; }
+
+.battleSetupContent .panelTitle { margin-bottom: 8px; }
+
+.battleStory {
+	width: min(640px, 90vw);
+	margin: 0 auto 18px;
+	font-size: 14px;
+	line-height: 1.5;
+	font-style: italic;
+	color: var(--parchment-dim);
+	opacity: .85;
+}
+
+/* The ground across the top; the two armies side by side beneath it. */
+.battleSetupBody {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 14px;
+	width: min(1080px, 94vw);
+	margin: 0 auto;
+	text-align: left;
+}
+
+.setupSection {
+	padding: 12px 14px 14px;
+	background: linear-gradient(180deg, rgba(38, 32, 22, .62), rgba(14, 11, 8, .72));
+	border: 1px solid rgba(138, 109, 36, .32);
+	border-radius: 6px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(236, 224, 196, .05);
+}
+
+.setupSection-map,
+.setupSection-budget { grid-column: 1 / -1; }
+
+.budgetRow { display: flex; align-items: center; gap: 16px; }
+.budgetSlider { flex: 1; min-width: 0; accent-color: var(--bronze); cursor: pointer; }
+.budgetValue {
+	min-width: 132px;
+	font-family: var(--display);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: .12em;
+	text-align: right;
+	text-transform: uppercase;
+	color: var(--bronze);
+}
+
+.setupHeading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 0 0 10px;
+	font-family: var(--display);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: .2em;
+	text-transform: uppercase;
+	color: var(--bronze);
+}
+
+/* A hairline after the heading, fading out towards the panel's edge. */
+.setupHeading::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: linear-gradient(90deg, rgba(138, 109, 36, .5), transparent);
+}
+
+.setupSection-player { --side: #6fa3dd; }
+.setupSection-enemy { --side: #d9705c; }
+.setupSection-player .setupHeading,
+.setupSection-enemy .setupHeading { color: var(--side); }
+
+.setupCards { display: grid; gap: 10px; }
+.setupCards-maps { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
+.setupCards-armies { grid-template-columns: repeat(3, 1fr); }
+
+.setupCard {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 7px;
+	font: inherit;
+	text-align: center;
+	color: var(--parchment-dim);
+	background: rgba(16, 13, 9, .55);
+	border: 1px solid rgba(138, 109, 36, .3);
+	border-radius: 5px;
+	cursor: pointer;
+	transition: var(--ease);
+}
+
+.setupCard:hover {
+	color: var(--parchment);
+	border-color: var(--bronze-deep);
+	transform: translateY(-2px);
+}
+
+.setupCard.is-chosen {
+	color: var(--parchment);
+	border-color: var(--bronze);
+	background: linear-gradient(180deg, rgba(120, 92, 30, .5), rgba(30, 24, 12, .7));
+	box-shadow: var(--glow), 0 0 0 1px var(--bronze) inset;
+}
+
+.setupCard.is-chosen .setupCardName { color: var(--bronze); }
+
+.setupCardName {
+	font-family: var(--display);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .08em;
+	line-height: 1.25;
+	text-transform: uppercase;
+}
+
+.setupCardTag { font-size: 12px; font-style: italic; opacity: .75; }
+
+/* A map: its picture, with the weather it is fought in pinned to a corner. */
+.mapFrame { position: relative; display: block; width: 100%; line-height: 0; }
+.setupThumb { width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 3px; }
+
+.weatherBadge {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 22px;
+	height: 22px;
+	padding: 3px;
+	background: rgba(14, 11, 8, .78);
+	border: 1px solid rgba(201, 162, 39, .55);
+	border-radius: 50%;
+}
+
+.setupCaption {
+	margin: 10px 0 0;
+	font-size: 14px;
+	font-style: italic;
+	text-align: center;
+	color: var(--parchment-dim);
+}
+
+/* An army: a portrait over its name. */
+.armyCard { padding-top: 8px; }
+.armyPortrait { height: 52px; width: auto; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .6)); }
+.armyCard .setupCardText { display: flex; flex-direction: column; gap: 2px; }
+.setupSection-player .setupCard.is-chosen,
+.setupSection-enemy .setupCard.is-chosen { border-color: var(--side); box-shadow: 0 0 12px rgba(0, 0, 0, .5), 0 0 0 1px var(--side) inset; }
+
+/* What the chosen army fields, at a glance. */
+.rosterStrip { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
+
+.rosterChip {
+	position: relative;
+	display: grid;
+	place-items: end center;
+	width: 52px;
+	height: 44px;
+	background: rgba(16, 13, 9, .6);
+	border: 1px solid rgba(138, 109, 36, .28);
+	border-radius: 4px;
+}
+
+.rosterPortrait { position: absolute; inset: 2px 2px 12px; width: calc(100% - 4px); height: calc(100% - 14px); object-fit: contain; }
+
+.rosterCost {
+	position: relative;
+	padding: 0 6px;
+	margin-bottom: 2px;
+	font-family: var(--display);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: .04em;
+	line-height: 14px;
+	color: var(--bronze);
+	background: rgba(14, 11, 8, .85);
+	border-radius: 7px;
+}
+
+.battleSetupContent .menuList { flex-direction: row; justify-content: center; margin-top: 20px; }
+.battleSetupContent .menuItem { width: min(220px, 42vw); padding: 11px 14px; font-size: 15px; }
 
 /* --- modals ------------------------------------------------------------ */
 
@@ -399,6 +786,13 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 /* The toast must not swallow clicks meant for the map behind it. */
 .modal.infomodal { background: transparent; padding: 0; pointer-events: none; }
 
+/*
+ * Plain text, not another panel -- a passing notice, not a document, so it
+ * should not read as one. It blinks hard a few times first, which is what
+ * actually catches a glance already on the map, then fades: the same job a
+ * banner's slide-in used to do, without the box that made a one-line aside
+ * look as weighty as a menu.
+ */
 .infomodal-content {
 	pointer-events: none;
 	position: fixed;
@@ -406,22 +800,29 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	right: 22px;
 	width: min(330px, 76vw);
 	margin: 0;
-	padding: 16px 18px;
-	font-size: 16px;
-	line-height: 1.45;
+	padding: 0;
+	border: none;
+	box-shadow: none;
+	font-family: var(--body);
+	font-size: 17px;
+	font-weight: 500;
+	line-height: 1.4;
+	text-align: right;
 	color: var(--parchment);
-	background: var(--panel);
-	border: 1px solid var(--bronze-deep);
-	border-left: 3px solid var(--bronze);
-	box-shadow: var(--lift);
-	animation: slideIn 260ms cubic-bezier(.2, .9, .3, 1);
+	text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 0 16px rgba(0, 0, 0, .7);
+	animation: notifyBlink 900ms ease-out both;
 }
 
 .infomodal-content p { margin: 0; }
 
-@keyframes slideIn {
-	from { opacity: 0; transform: translateX(24px); }
-	to { opacity: 1; transform: translateX(0); }
+@keyframes notifyBlink {
+	0% { opacity: 0; }
+	8% { opacity: 1; }
+	18% { opacity: .15; }
+	28% { opacity: 1; }
+	38% { opacity: .15; }
+	48% { opacity: 1; }
+	100% { opacity: 0; }
 }
 
 /*
@@ -454,6 +855,65 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 .storyBanner.is-shown { opacity: 1; pointer-events: auto; }
 
 .storyBanner p { margin: 0; }
+
+/*
+ * Where the raid is coming from, at a glance, before it arrives -- placed
+ * around the edge of the view rather than the map itself, since the camera
+ * never turns and north is always the same way up. A flash, not a fixture:
+ * full strength the moment the level starts, then gone within a couple of
+ * seconds, so it reads as a warning rather than clutter on the field.
+ */
+.threatMarkers {
+	position: fixed;
+	inset: 0;
+	z-index: 13;
+	pointer-events: none;
+}
+
+.threatMarker {
+	position: absolute;
+	width: 0;
+	height: 0;
+	border-left: 15px solid transparent;
+	border-right: 15px solid transparent;
+	border-bottom: 26px solid #7a1414;
+	filter: drop-shadow(0 0 8px rgba(122, 20, 20, .75));
+	opacity: 1;
+	transition: opacity .7s ease-in;
+}
+
+.threatMarker.is-fading { opacity: 0; }
+
+/*
+ * What a freshly picked tool wants next, above the dock it belongs to
+ * rather than the top of the screen -- the eye is already down there.
+ * Advisory, not a prompt: it steps aside for a click on the map rather
+ * than waiting on one, and fades on its own besides.
+ */
+.actionHint {
+	position: fixed;
+	left: 50%;
+	bottom: calc(112px + env(safe-area-inset-bottom));
+	transform: translateX(-50%);
+	z-index: 6;
+	margin: 0;
+	padding: 8px 16px;
+	font-size: 13px;
+	letter-spacing: .02em;
+	color: var(--parchment);
+	background: var(--panel);
+	border: 1px solid var(--bronze-deep);
+	border-radius: 4px;
+	box-shadow: var(--lift);
+	opacity: 0;
+	pointer-events: none;
+	white-space: nowrap;
+	transition: opacity .3s ease;
+}
+
+.actionHint.is-shown { opacity: 1; }
+
+.actionHint p { margin: 0; }
 
 .close {
 	position: absolute;
@@ -552,6 +1012,19 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	.toolButton { flex: 1 1 0; width: auto; min-width: 0; padding: 8px 0 6px; }
 	.toolName { font-size: 9px; letter-spacing: .06em; }
 
+	/* #toolDock spans edge to edge at this width (see above) -- stacked
+	   clear above it rather than sharing the same bottom strip. */
+	.battleDock {
+		left: calc(8px + env(safe-area-inset-left));
+		right: calc(8px + env(safe-area-inset-right));
+		bottom: calc(8px + env(safe-area-inset-bottom) + 92px);
+		transform: none;
+		max-width: none;
+	}
+	.battleUnitButton { flex: 1 1 0; width: auto; min-width: 0; padding: 8px 0 6px; }
+
+	.actionHint { bottom: calc(90px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); white-space: normal; text-align: center; }
+
 	.overlay-content { padding-top: 7vh; }
 }
 
@@ -588,3 +1061,15 @@ button, .menuItem, .levelItem { touch-action: manipulation; }
 	.toolName { font-size: 9px; letter-spacing: .06em; }
 }
 
+
+@media (max-width: 760px) {
+	.battleSetupBody { grid-template-columns: 1fr; }
+	.setupCards-maps { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (max-width: 480px) {
+	.setupCards-maps { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+	.setupCards-maps .setupCardName { font-size: 9px; letter-spacing: 0; }
+	.armyPortrait { height: 42px; }
+	.setupCardTag { display: none; }
+}

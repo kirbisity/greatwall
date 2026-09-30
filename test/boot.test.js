@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { LEVELS } from '../src/levels.js';
+import { BATTLE_MAPS } from '../src/config.js';
 
 /**
  * Boots main.js against a stub DOM whose element ids come from the real page,
@@ -29,14 +31,22 @@ function stubContext() {
 }
 
 function stubElement(id) {
+  const classes = new Set();
   return {
     id,
     style: {},
+    dataset: {},
     className: '',
-    classList: { toggle: () => {} },
+    classList: {
+      toggle: (name, on) => { if (on) { classes.add(name); } else { classes.delete(name); } },
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
     children: [],
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren() { this.children = []; },
+    querySelectorAll: () => [],
     innerText: '',
     loop: false,
     volume: 0,
@@ -90,8 +100,11 @@ function installDom() {
   return { elements, documentListeners, windowListeners, frames };
 }
 
+let bootedDom = null;
+
 test('the app boots, plays frames and reacts to input without touching a missing element', async () => {
   const dom = installDom();
+  bootedDom = dom;
   const { app } = await import('../src/main.js');
 
   // Pointer events, so a finger reaches the same handlers a mouse does.
@@ -160,4 +173,54 @@ test('the app boots, plays frames and reacts to input without touching a missing
 
   dom.documentListeners.get('keydown')({ key: 'Escape' });
   assert.equal(app.running, false, 'escape pauses and opens the menu');
+});
+
+test('the open field has its own setup page -- story, map and both armies -- and begins without a popup', async () => {
+  const dom = bootedDom;
+  const { app } = await import('../src/main.js');
+  const openFieldIndex = LEVELS.findIndex((level) => level.mode === 'battle');
+  const cardsFor = (title) => dom.elements.get('battleSetupBody').children
+    .find((section) => section.className.includes(title)).children[1].children;
+  const cardFor = (title, id) => cardsFor(title).find((card) => card.dataset.id === id);
+
+  const levelButtons = dom.elements.get('levelList').children;
+  levelButtons[openFieldIndex].listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '100%', 'picking the open field opens its page');
+  assert.equal(dom.elements.get('battleSetupBtn').style.display, 'block');
+  assert.equal(app.game.mode, 'siege', 'picking the level waits for Start rather than beginning it');
+  assert.equal(dom.elements.get('battleSetupStory').innerText, LEVELS[openFieldIndex].story, 'the story is told on the page');
+  assert.equal(cardsFor('setupSection-map').length, Object.keys(BATTLE_MAPS).length, 'a card for every map');
+
+  const slider = dom.elements.get('battleSetupBody').children
+    .find((section) => section.className.includes('setupSection-budget')).children[1].children[0];
+  slider.value = '48';
+  slider.listeners.get('input')();
+  assert.equal(app.chosenBudget(), 48, 'the slider sets the points each side fields');
+
+  cardFor('setupSection-map', 'greenwood').listeners.get('click')();
+  cardFor('setupSection-player', 'japan').listeners.get('click')();
+  cardFor('setupSection-enemy', 'imperial').listeners.get('click')();
+  assert.deepEqual(app.chosenFactions(), { player: 'japan', enemy: 'imperial' });
+  assert.equal(app.chosenMap(), 'greenwood');
+  assert.ok(cardFor('setupSection-map', 'greenwood').className.includes('is-chosen'));
+
+  dom.elements.get('battleSetupBack').listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
+  dom.elements.get('startBtn2').listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '100%', 'Start on a fresh battle goes through the page');
+  assert.equal(app.game.mode, 'siege');
+
+  dom.elements.get('battleSetupStart').listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupPage').style.height, '0%');
+  assert.equal(app.game.mode, 'battle');
+  assert.equal(app.game.battleMap, 'greenwood');
+  assert.equal(app.game.battleBudget, 48, 'the player gets the chosen budget');
+  assert.deepEqual(app.game.factions, { player: 'japan', enemy: 'imperial' });
+  assert.ok(app.game.raiders.every((raider) => raider.typeId.startsWith('IG_') || raider.typeId === 'IG0'));
+  assert.equal(dom.elements.get('storyBanner').classList.contains('is-shown'), false, 'no story popup over the field');
+  assert.notEqual(dom.elements.get('helpInfo').style.display, 'block', 'no wall-building help over the field');
+
+  dom.elements.get('menuBtn').listeners.get('click')();
+  levelButtons[0].listeners.get('click')();
+  assert.equal(dom.elements.get('battleSetupBtn').style.display, 'none', 'a siege level has no armies to pick');
 });

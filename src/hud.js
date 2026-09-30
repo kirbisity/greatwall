@@ -1,5 +1,9 @@
-import { AUDIO_VOLUME_STEP, INITIAL_SOUND_LEVEL, SEASONS } from './config.js';
+import {
+  AUDIO_VOLUME_STEP, AVATARS, BATTLE, BATTLE_MAPS, FACTIONS, INITIAL_SOUND_LEVEL, SEASONS, UNIT_TYPES,
+} from './config.js';
 import { paintLevelThumbnail } from './levelThumbnail.js';
+import { iconSource } from './menuIcons.js';
+import { unitSize } from './units.js';
 import { Sfx } from './sfx.js';
 
 const SOUND_LEVEL_STEP = 20;
@@ -11,6 +15,17 @@ const TOAST_DURATION_MS = 900;
 // on top of the fade-in (see greatwall.css's own .storyBanner) it takes to
 // appear -- but any game action (see main.js's own onEffect) clears it early.
 const STORY_DURATION_MS = 15000;
+// How long into a level before the threat markers appear at all -- the
+// player's own first few seconds to get their bearings, not another thing
+// competing with the story banner for their eye right at the start.
+const THREAT_DELAY_MS = 5000;
+// A beat solid before the threat markers start fading, then the fade itself
+// (see greatwall.css's own .threatMarker) -- a flash, not a fixture.
+const THREAT_HOLD_MS = 400;
+const THREAT_FADE_MS = 700;
+// Long enough to act on, short enough to get out of the way on its own if
+// the player does not -- see Input's own selectTool/openDispatchMenu.
+const ACTION_HINT_DURATION_MS = 5000;
 
 /** Which button lights up for each tool. */
 const TOOL_BUTTONS = {
@@ -48,6 +63,24 @@ export function clampIntoView(box, view, margin) {
 // How far the tier picker keeps from the edges of the screen.
 const MENU_MARGIN = 8;
 
+/**
+ * Companies destroyed and lost, then the finer-grained count of individual
+ * soldiers lost on each side -- see Game#trackBattleLosses for how that is
+ * worked out, and Hud#renderBattleBreakdown for the same figure broken down
+ * by which type it came from. K/D is over soldiers, not companies: a company
+ * ground to a sliver counts for most of its troops.
+ */
+export function formatBattleStats(stats) {
+  const kd = stats.playerLoss === 0
+    ? (stats.enemyLoss > 0 ? '∞' : '0.00')
+    : (stats.enemyLoss / stats.playerLoss).toFixed(2);
+  const outOf = (fielded) => (fielded > 0 ? ` of ${fielded}` : '');
+  return `Enemy companies destroyed ${stats.kills} · Your companies lost ${stats.deaths}\n`
+    + `Enemy soldiers lost: ${Math.round(stats.enemyLoss)}${outOf(stats.enemyFielded)}\n`
+    + `Your soldiers lost: ${Math.round(stats.playerLoss)}${outOf(stats.playerFielded)}\n`
+    + `K/D ${kd}`;
+}
+
 function element(id) {
   const node = document.getElementById(id);
   if (!node) {
@@ -68,22 +101,54 @@ export class Hud {
     this.menuInfo = element('navinfo');
     this.startButton = element('startBtn2');
     this.levelList = element('levelList');
+    this.battleSetupPage = element('battleSetupPage');
+    this.battleSetupStory = element('battleSetupStory');
+    this.battleSetupBody = element('battleSetupBody');
+    this.battleSetupButton = element('battleSetupBtn');
     this.settings = element('settingMenu');
     this.helpModal = element('helpInfo');
     this.messageModal = element('gameInfo');
     this.messageText = element('infoP');
     this.storyBanner = element('storyBanner');
     this.storyText = element('storyText');
+    this.threatLayer = element('threatMarkers');
+    this.actionHint = element('actionHint');
+    this.actionHintText = element('actionHintText');
     this.soundButton = element('soundBtn');
     this.atmosphereButton = element('atmosphereBtn');
     this.routesButton = element('routesBtn');
     this.music = element('backgroundmusic');
+    this.buildToolButton = element('buildTool');
+    this.attackToolButton = element('attackTool');
+    this.upgradeToolButton = element('upgradeTool');
     this.dispatchMenu = element('dispatchMenu');
+    this.holdToggle = element('holdToggle');
+    this.shownHoldLabel = null;
     this.dispatchButtons = [
       element('dispatchOption0'),
       element('dispatchOption1'),
       element('dispatchOption2'),
     ];
+    // The open battleground mode's own dock: a roster of companies to place,
+    // a budget readout, and the button that closes placement and starts the
+    // fight -- see showBattlePrep/hideBattlePrep.
+    this.battleDock = element('battleDock');
+    this.battleBudgetReadout = element('battleBudgetReadout');
+    this.battleBudgetValue = element('battleBudgetValue');
+    this.startBattleButton = element('startBattleBtn');
+    // Every tool that means nothing without a castle, plus Attack: the open
+    // battleground mode has nothing to muster once the fight starts, so
+    // commanding a company is just how tapping the field always behaves
+    // there -- see Input#handleClick. No button to pick that behaviour, so
+    // none needed to show it is on.
+    // The top bar's undo and help buttons have nothing to offer a battle: the
+    // field is set out with a tap, and its one hint sits over the dock.
+    this.siegeOnlyViewToolIds = ['undo', 'help'];
+    this.siegeOnlyToolIds = ['upgradeTool', 'fortifyTool', 'repairTool', 'destroyTool', 'attackTool'];
+    this.battleResultModal = element('battleResult');
+    this.battleResultTitle = element('battleResultTitle');
+    this.battleResultSummary = element('battleResultSummary');
+    this.battleResultBreakdown = element('battleResultBreakdown');
 
     this.sfx = new Sfx();
     this.soundLevel = INITIAL_SOUND_LEVEL;
@@ -95,6 +160,10 @@ export class Hud {
     this.shownSeason = null;
     this.toastTimer = null;
     this.storyTimer = null;
+    this.threatDelayTimer = null;
+    this.threatTimer = null;
+    this.threatFadeTimer = null;
+    this.actionHintTimer = null;
 
     this.music.loop = true;
     this.music.volume = AUDIO_VOLUME_STEP * this.soundLevel;
@@ -142,6 +211,40 @@ export class Hud {
       this.shownSeason = game.season;
       this.seasonLabel.innerText = SEASONS[game.season % SEASONS.length].name;
     }
+    if (game.mode === 'battle') {
+      // Nothing here costs coin, so nothing here greys out for want of it.
+      this.buildToolButton.classList.remove('is-disabled');
+      this.attackToolButton.classList.remove('is-disabled');
+    } else {
+      // Greyed rather than hidden or blocked: a poor treasury is a reason to
+      // wait, not a reason the tool should stop working the moment it can.
+      this.buildToolButton.classList.toggle('is-disabled', !game.canAffordToBuild);
+      this.attackToolButton.classList.toggle('is-disabled', !game.canAffordToAttack);
+      this.upgradeToolButton.classList.toggle('is-disabled', !game.canAffordToUpgrade);
+    }
+    this.applyMode(game);
+  }
+
+  /**
+   * The open battleground mode swaps out a good part of the chrome: no
+   * treasury or income or season to show, no upgrade/fortify/repair/raze
+   * tools (there is no castle and no stone to work), and no Attack tool
+   * either -- once the fight starts there is nothing left to muster, so
+   * commanding a placed company is just how tapping the field behaves the
+   * whole time, with no button needed to turn that on (see Input#handleClick).
+   * The Build tool -- earthworks here, not stone -- only makes sense before
+   * that, during placement.
+   */
+  applyMode(game) {
+    const isBattle = game.mode === 'battle';
+    document.body?.classList?.toggle('is-battleMode', isBattle);
+    for (const id of [...this.siegeOnlyToolIds, ...this.siegeOnlyViewToolIds]) {
+      const button = document.getElementById(id);
+      if (button) {
+        button.style.display = isBattle ? 'none' : '';
+      }
+    }
+    this.buildToolButton.style.display = (isBattle && game.started) ? 'none' : '';
   }
 
   /** Light up the button for the active tool and dim the rest. */
@@ -167,6 +270,8 @@ export class Hud {
     this.menu.style.height = '100%';
     this.stopMusic();
     this.closeStory();
+    this.clearThreats();
+    this.clearActionHint();
   }
 
   closeMenu() {
@@ -207,6 +312,201 @@ export class Hud {
       button.addEventListener('click', () => onPick(index));
       this.levelList.append(button);
     });
+  }
+
+  /**
+   * The open battleground's own page: the level's story, then a card to
+   * pick for the map and for each side's army. `choice` is `{ factions,
+   * map }` as currently chosen and `onPick(kind, id)` is told about every
+   * change, kind being 'map', 'player' or 'enemy'; this only redraws what
+   * it is handed back.
+   */
+  showBattleSetup(level, choice, onPick) {
+    this.battleSetupStory.innerText = level.story ?? '';
+    this.battleSetupBody.replaceChildren();
+    this.battleSetupBody.append(
+      this.buildSetupSection(
+        'setupSection-map', 'The ground', this.buildMapCards(level, choice.map, onPick), this.mapCaption(choice.map),
+      ),
+      this.buildSetupSection('setupSection-budget', 'Army size', this.buildBudgetSlider(choice.budget, onPick)),
+      this.buildSetupSection(
+        'setupSection-player', 'Your army', this.buildFactionCards('player', choice.factions.player, onPick),
+        this.buildRosterStrip(choice.factions.player),
+      ),
+      this.buildSetupSection(
+        'setupSection-enemy', 'The enemy', this.buildFactionCards('enemy', choice.factions.enemy, onPick),
+        this.buildRosterStrip(choice.factions.enemy),
+      ),
+    );
+  }
+
+  openBattleSetup() {
+    this.battleSetupPage.style.height = '100%';
+  }
+
+  closeBattleSetup() {
+    this.battleSetupPage.style.height = '0%';
+  }
+
+  /** The menu's own shortcut into the setup page, shown only for the open battleground. */
+  showBattleSetupButton(visible) {
+    this.battleSetupButton.style.display = visible ? 'block' : 'none';
+  }
+
+  buildSetupSection(className, heading, cards, ...extras) {
+    const section = document.createElement('section');
+    section.className = `setupSection ${className}`;
+    const title = document.createElement('h3');
+    title.className = 'setupHeading';
+    title.innerText = heading;
+    section.append(title, cards, ...extras);
+    return section;
+  }
+
+  buildSetupCard(chosen, kind, id, tooltip = '') {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = chosen ? 'setupCard is-chosen' : 'setupCard';
+    card.dataset.kind = kind;
+    card.dataset.id = id;
+    card.title = tooltip;
+    return card;
+  }
+
+  /** Both sides field this many points -- the enemy line is drawn up to match. */
+  buildBudgetSlider(value, onPick) {
+    const { min, max, step } = BATTLE.budgetRange;
+    const row = document.createElement('div');
+    row.className = 'budgetRow';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.className = 'budgetSlider';
+    slider.min = min;
+    slider.max = max;
+    slider.step = step;
+    slider.value = value;
+    slider.setAttribute?.('aria-label', 'Points each side fields');
+    const readout = document.createElement('span');
+    readout.className = 'budgetValue';
+    readout.innerText = `${value} points a side`;
+    slider.addEventListener('input', () => {
+      readout.innerText = `${slider.value} points a side`;
+      onPick('budget', slider.value);
+    });
+    row.append(slider, readout);
+    return row;
+  }
+
+  buildCaption(text) {
+    const caption = document.createElement('p');
+    caption.className = 'setupCaption';
+    caption.innerText = text;
+    return caption;
+  }
+
+  buildMapCards(level, chosen, onPick) {
+    const row = document.createElement('div');
+    row.className = 'setupCards setupCards-maps';
+    for (const [id, map] of Object.entries(BATTLE_MAPS)) {
+      const card = this.buildSetupCard(id === chosen, 'map', id, map.blurb);
+      card.className += ' mapCard';
+      const frame = document.createElement('span');
+      frame.className = 'mapFrame';
+      const thumb = document.createElement('canvas');
+      thumb.className = 'levelThumb setupThumb';
+      paintLevelThumbnail(
+        thumb,
+        { land: { ...level.land, ...map.land }, weather: map.weather },
+        { marked: false, relief: true, detail: 3 },
+      );
+      frame.append(thumb);
+      const icon = iconSource(map.weather?.icon);
+      if (icon) {
+        const badge = document.createElement('img');
+        badge.className = 'weatherBadge';
+        badge.src = icon;
+        badge.alt = map.weather.label;
+        frame.append(badge);
+      }
+      const name = document.createElement('span');
+      name.className = 'setupCardName';
+      name.innerText = map.name;
+      card.append(frame, name);
+      card.addEventListener('click', () => onPick('map', id));
+      row.append(card);
+    }
+    return row;
+  }
+
+  mapCaption(chosen) {
+    const map = BATTLE_MAPS[chosen];
+    return this.buildCaption(map ? `${map.tag} \u00b7 ${map.weather?.label ?? ''}` : '');
+  }
+
+  buildFactionCards(side, chosen, onPick) {
+    const row = document.createElement('div');
+    row.className = 'setupCards setupCards-armies';
+    for (const [id, faction] of Object.entries(FACTIONS)) {
+      const card = this.buildSetupCard(id === chosen, side, id, faction.blurb);
+      card.className += ' armyCard';
+      const portrait = document.createElement('img');
+      portrait.className = 'armyPortrait';
+      portrait.src = faction.avatar;
+      portrait.alt = '';
+      const name = document.createElement('span');
+      name.className = 'setupCardName';
+      name.innerText = faction.name;
+      const tag = document.createElement('span');
+      tag.className = 'setupCardTag';
+      tag.innerText = faction.tag;
+      const text = document.createElement('span');
+      text.className = 'setupCardText';
+      text.append(name, tag);
+      card.append(portrait, text);
+      card.addEventListener('click', () => onPick(side, id));
+      row.append(card);
+    }
+    return row;
+  }
+
+  /** How many soldiers muster in one company of this type. */
+  buildSizeBadge(typeId) {
+    const badge = document.createElement('span');
+    badge.className = 'unitSizeBadge';
+    badge.innerText = `${unitSize(typeId)}`;
+    return badge;
+  }
+
+  /** The chosen army's companies, one portrait apiece with its point cost. */
+  buildRosterStrip(factionId) {
+    const strip = document.createElement('div');
+    strip.className = 'rosterStrip';
+    for (const entry of FACTIONS[factionId]?.roster ?? []) {
+      const type = UNIT_TYPES[entry.id];
+      const chip = document.createElement('span');
+      chip.className = 'rosterChip';
+      chip.title = `${type?.name ?? entry.id} - ${entry.cost} points, ${unitSize(entry.id)} soldiers`;
+      chip.append(this.buildUnitPortrait(entry.id, 'rosterPortrait'), this.buildSizeBadge(entry.id));
+      const cost = document.createElement('span');
+      cost.className = 'rosterCost';
+      cost.innerText = entry.cost === 0 ? 'free' : `${entry.cost}`;
+      chip.append(cost);
+      strip.append(chip);
+    }
+    return strip;
+  }
+
+  /** A unit's portrait -- the imperial heavy's stands in where a type has none yet. */
+  buildUnitPortrait(typeId, className) {
+    const portrait = document.createElement('img');
+    portrait.className = className;
+    portrait.alt = '';
+    portrait.src = UNIT_TYPES[typeId]?.avatar ?? AVATARS.imperialHeavy;
+    portrait.onerror = () => {
+      portrait.onerror = null;
+      portrait.src = AVATARS.imperialHeavy;
+    };
+    return portrait;
   }
 
   openSettings() {
@@ -259,6 +559,70 @@ export class Hud {
   }
 
   /**
+   * A dark red marker at the edge of the view for each bearing raiders are
+   * expected from (see Game#threatBearings) -- not the moment a level opens,
+   * but THREAT_DELAY_MS into it, once the player has had a beat to get their
+   * bearings, and even then only as a flash rather than a fixture.
+   */
+  showThreats(bearings) {
+    clearTimeout(this.threatDelayTimer);
+    this.threatDelayTimer = setTimeout(() => this.revealThreats(bearings), THREAT_DELAY_MS);
+  }
+
+  revealThreats(bearings) {
+    this.threatLayer.replaceChildren();
+    for (const bearing of bearings) {
+      this.threatLayer.append(this.buildThreatMarker(bearing));
+    }
+    clearTimeout(this.threatTimer);
+    this.threatTimer = setTimeout(() => {
+      this.threatLayer.querySelectorAll('.threatMarker').forEach((marker) => {
+        marker.classList.add('is-fading');
+      });
+    }, THREAT_HOLD_MS);
+    this.threatFadeTimer = setTimeout(() => this.clearThreats(), THREAT_HOLD_MS + THREAT_FADE_MS);
+  }
+
+  /**
+   * Placed by direction from the centre of the view rather than on the
+   * ground itself -- the camera never turns, so a bearing (see
+   * projection.js: x east, y north) maps straight onto a fixed screen
+   * angle without needing the camera's own perspective math at all.
+   */
+  buildThreatMarker(bearingDegrees) {
+    const radians = (bearingDegrees * Math.PI) / 180;
+    // North (+y, world) is up the screen (-y, screen), not down it.
+    const outward = { x: Math.cos(radians), y: -Math.sin(radians) };
+    const rotation = (Math.atan2(-outward.x, outward.y) * 180) / Math.PI;
+    const marker = document.createElement('div');
+    marker.className = 'threatMarker';
+    marker.style.left = `${50 + outward.x * 42}%`;
+    marker.style.top = `${50 + outward.y * 42}%`;
+    marker.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
+    return marker;
+  }
+
+  clearThreats() {
+    clearTimeout(this.threatDelayTimer);
+    clearTimeout(this.threatTimer);
+    clearTimeout(this.threatFadeTimer);
+    this.threatLayer.replaceChildren();
+  }
+
+  /** A one-line nudge toward what a freshly picked tool wants next. */
+  showActionHint(text) {
+    this.actionHintText.innerText = text;
+    this.actionHint.classList.add('is-shown');
+    clearTimeout(this.actionHintTimer);
+    this.actionHintTimer = setTimeout(() => this.clearActionHint(), ACTION_HINT_DURATION_MS);
+  }
+
+  clearActionHint() {
+    clearTimeout(this.actionHintTimer);
+    this.actionHint.classList.remove('is-shown');
+  }
+
+  /**
    * The tier picker, pinned above the castle. Each button carries its own
    * click handler and stops the event there, or it would also bubble up to
    * the map's click listener and dispatch a company to wherever the button
@@ -303,6 +667,29 @@ export class Hud {
     node.style.top = `${Math.round(screen.y + dy)}px`;
   }
 
+  /**
+   * The Hold button, floated over whatever companies are selected: "Hold"
+   * to plant them where they stand, "Release" once every one of them
+   * already is. `screen` is where over them to put it, or null to hide it.
+   */
+  updateHoldToggle(selected, screen) {
+    // A routed company can be sent somewhere but not told to stand its ground.
+    const guards = selected.filter((guard) => !guard.routed);
+    if (guards.length === 0 || !screen) {
+      this.holdToggle.style.display = 'none';
+      return;
+    }
+    const allHolding = guards.every((guard) => guard.holding);
+    const label = allHolding ? 'Release' : 'Hold';
+    if (label !== this.shownHoldLabel) {
+      this.shownHoldLabel = label;
+      this.holdToggle.innerText = label;
+      this.holdToggle.classList.toggle('is-holding', allHolding);
+    }
+    this.holdToggle.style.display = 'block';
+    this.placeOnScreen(this.holdToggle, screen);
+  }
+
   hideDispatchMenu() {
     this.dispatchMenu.style.display = 'none';
   }
@@ -313,8 +700,132 @@ export class Hud {
     this.openMenu();
   }
 
+  /**
+   * The open battleground mode's own placement dock: one button per roster
+   * entry, each carrying its own point cost, plus the budget readout and
+   * the Start Battle button. `onPick` is Input's own selectPendingUnit, so
+   * a tap here only ever picks what the next tap on the field will place.
+   */
+  showBattlePrep(game, onPick) {
+    this.battleDock.replaceChildren();
+    for (const entry of game.battleRoster) {
+      const type = UNIT_TYPES[entry.id];
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'toolButton battleUnitButton';
+      button.dataset.unit = entry.id;
+      button.title = `${type?.name ?? entry.id} - ${entry.cost} points, ${unitSize(entry.id)} soldiers`;
+      const cost = document.createElement('span');
+      cost.className = 'battleCost';
+      cost.innerText = entry.cost === 0 ? 'free' : `${entry.cost}`;
+      button.append(this.buildUnitPortrait(entry.id, 'battlePortrait'), this.buildSizeBadge(entry.id), cost);
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        onPick(entry.id);
+      });
+      this.battleDock.append(button);
+    }
+    this.battleDock.style.display = 'flex';
+    this.startBattleButton.style.display = 'inline-flex';
+    this.updateBattleBudget(game);
+  }
+
+  hideBattlePrep() {
+    this.battleDock.style.display = 'none';
+    this.startBattleButton.style.display = 'none';
+  }
+
+  setBattleSelection(typeId) {
+    this.battleDock.querySelectorAll('.battleUnitButton').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.unit === typeId);
+    });
+  }
+
+  updateBattleBudget(game) {
+    this.battleBudgetValue.innerText = `${Math.max(0, Math.trunc(game.battleBudget))} / ${game.battleBudgetLimit}`;
+  }
+
+  /**
+   * The open battleground mode's own end-of-round screen: shown over the
+   * field itself -- see #battleResult in the markup -- rather than the main
+   * menu, so the line as it stood at the last moment is still visible
+   * behind it. Start's own label is set here too, ready for whenever the
+   * player does go back to the menu (see App#continueFromBattleResult).
+   */
+  showBattleResult(won, seconds, stats) {
+    this.startButton.innerText = 'Start';
+    this.battleResultTitle.innerText = won ? 'Victory' : 'Defeat';
+    const headline = won
+      ? `The enemy line broke after ${seconds}s.`
+      : `Your line was overrun after ${seconds}s.`;
+    this.battleResultSummary.innerText = `${headline}\n${formatBattleStats(stats)}`;
+    this.renderBattleBreakdown(stats);
+    this.battleResultModal.style.display = 'block';
+  }
+
+  closeBattleResult() {
+    this.battleResultModal.style.display = 'none';
+  }
+
+  /** Each side's losses, broken down by type -- a small avatar per type, and how many of it fell. */
+  renderBattleBreakdown(stats) {
+    this.battleResultBreakdown.replaceChildren(
+      this.buildBattleBreakdownColumn('Enemy losses', stats.enemyLossByType, UNIT_TYPES),
+      this.buildBattleBreakdownColumn('Your losses', stats.playerLossByType, UNIT_TYPES),
+    );
+  }
+
+  buildBattleBreakdownColumn(title, lossByType, typeTable) {
+    const column = document.createElement('div');
+    column.className = 'battleBreakdownColumn';
+    const heading = document.createElement('h3');
+    heading.innerText = title;
+    column.append(heading);
+
+    // Under half a soldier is a graze, not a loss worth a line of its own.
+    const entries = Object.entries(lossByType)
+      .filter(([, lost]) => lost >= 0.5)
+      .sort((first, second) => second[1] - first[1]);
+    if (entries.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'battleBreakdownEmpty';
+      empty.innerText = 'None';
+      column.append(empty);
+      return column;
+    }
+
+    const rows = document.createElement('div');
+    rows.className = 'battleBreakdownRow';
+    for (const [typeId, lost] of entries) {
+      const type = typeTable[typeId];
+      const row = document.createElement('div');
+      row.className = 'battleBreakdownItem';
+      if (type?.avatar) {
+        const avatar = document.createElement('img');
+        // A portrait that has not actually shipped yet (see AVATARS in
+        // config.js) quietly goes undrawn, the same as everywhere else a
+        // company's avatar is shown -- not a broken-image icon.
+        avatar.addEventListener('error', () => avatar.remove(), { once: true });
+        avatar.src = type.avatar;
+        avatar.alt = '';
+        row.append(avatar);
+      }
+      const label = document.createElement('span');
+      label.innerText = `${type?.name ?? typeId} ×${Math.round(lost)}`;
+      row.append(label);
+      rows.append(row);
+    }
+    column.append(rows);
+    return column;
+  }
+
   markStarted() {
     this.startButton.innerText = 'Continue';
+  }
+
+  /** The menu's main button, for a level picked but not yet begun. */
+  markUnstarted() {
+    this.startButton.innerText = 'Start';
   }
 
   // --- audio --------------------------------------------------------------

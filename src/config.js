@@ -76,6 +76,9 @@ export const WALL = {
   repairSeconds: 10,
   // How close a wall end must come to a city edge before it snaps onto it.
   brimSnapRadius: 26,
+  // A wall's armour is total: only anti-armour blows hurt it.
+  armor: 1,
+  // Its counter-blow against whoever batters it: falling stone, not a sword, so armour is no help.
   attack: 1,
   defense: 2,
   costPerUnit: 2,
@@ -86,6 +89,9 @@ export const WALL = {
   // to count it as the one being pointed at.
   pickRadius: 20,
   reachMargin: 2,
+  // How long a section blinks for after a repair or fortify order lands, or
+  // after it is pushed back to a newly grown city's edge -- see Wall#flash.
+  flashSeconds: 0.6,
   // Coin per standing section, charged with the rest of the income each
   // payout — a wall is upkeep, not just a one-off purchase.
   upkeepPerSection: 1,
@@ -104,14 +110,14 @@ export const WALL = {
  * ========================================================================== */
 
 /** Most a company may turn in one frame. Higher turns tighter. */
-export const RAIDER_STEERING_RADIANS = 0.032;
+export const RAIDER_STEERING_RADIANS = 0.045;
 
 /**
  * How much of the remaining turn is taken each frame, before the cap above.
  * Low values ease into a new heading instead of snapping onto it, which is
  * what keeps a company from sawing back and forth around its aim.
  */
-export const TURN_EASE = 0.1;
+export const TURN_EASE = 0.14;
 
 /** How companies treat walls. */
 export const AVOIDANCE = {
@@ -161,18 +167,105 @@ export const AVOIDANCE = {
 /** Melee: what happens when the two sides meet. */
 export const MELEE = {
   // Companies lock together once their centres are this close.
-  engageDistance: 32,
+  engageDistance: 20,
   // Once locked they close right up and interleave, rather than trading blows
   // at arm's length. This is the separation they settle at.
   lockedGap: 4,
-  // How fast they close that last distance, in world units a second.
-  closeRate: 26,
+  // How fast they close that last distance, in world units a second -- a
+  // little brisker than a marching pace (most companies march at 5-10, the
+  // fastest cavalry nearer 20), not a lurch that outpaces even a horse.
+  closeRate: 12,
   // Damage is scaled so a typical pairing resolves in about five seconds.
   damageRate: 1.7,
   // A fight that has not resolved by now breaks off, so nothing locks forever.
   maxSeconds: 9,
   // Both sides are held still for this long after a fight before moving on.
   recoverySeconds: 0.6,
+};
+
+/**
+ * How a company gathers pace. Nothing starts at full speed: it builds up
+ * over `accelerationSeconds`, and a turn caps how much of it can be kept --
+ * an about-turn to `1 - turnSlowdown` of full pace, a gentler turn
+ * proportionally less -- bleeding off any excess at `brakeRate` (a share of
+ * full pace a second). Pace is also what a charge hits with; see CHARGE.
+ */
+export const MOMENTUM = {
+  accelerationSeconds: 5,
+  turnSlowdown: 0.7,
+  brakeRate: 1.5,
+};
+
+/**
+ * The first blows of a bout carry the pace a company came in with. A head-on
+ * charge at `referenceSpeed` -- the fastest cavalry -- lands at 1 + `bonus`
+ * (200%) for the first `seconds`, scaled down with speed and with how
+ * squarely it came on. Caught running the other way, the same speed counts
+ * against it instead, down to 1 - `retreatPenalty`.
+ */
+export const CHARGE = {
+  seconds: 1,
+  referenceSpeed: 20,
+  bonus: 1,
+  retreatPenalty: 0.5,
+};
+
+/** A company told to hold its ground braces for the first shock of a fight. */
+export const HOLD = {
+  // A unit type may set its own `holdBonus` (the Chinese are steadier at it).
+  defenseBonus: 0.2,
+  seconds: 2,
+};
+
+/**
+ * A company whose morale breaks (see each unit type's `breaksAt`) runs for
+ * it: it hits at `attackMultiplier` and defends at `defenseMultiplier` of its strength, can only be pinned by
+ * an enemy that gets within `catchDistance` of it, and once it is clear of
+ * every enemy by `escapeDistance` it has left the field altogether. For a
+ * raider, the city itself counts as an enemy -- see Game#raiderThreats.
+ */
+export const ROUT = {
+  attackMultiplier: 0.5,
+  defenseMultiplier: 0.5,
+  catchDistance: 8,
+  escapeDistance: 160,
+  // And it must have run at least this far from where it broke -- it is seen
+  // to run, rather than vanishing where it stood.
+  runDistance: 80,
+  // How far ahead of itself a fleeing company aims.
+  fleeReach: 100,
+};
+
+/**
+ * Mass. Every unit type carries a `mass` (1 light, 2 medium, 3 heavy); some
+ * are `cavalry`, and some carry `spears`. Heavy cavalry at the charge rides
+ * light infantry down and carries on through, but a braced spear wall stops
+ * any cavalry charge dead and punishes it. A charge only counts as one at
+ * `chargeSpeed` or more (see melee.js's chargeSpeed) and aimed within
+ * `chargeAlignment` (a cosine) of its target; spears are braced when on hold
+ * or at no more than `bracedMomentum` of their pace.
+ */
+export const MASS = {
+  heavy: 3,
+  light: 1,
+  chargeSpeed: 0.4,
+  chargeAlignment: 0.5,
+  bracedMomentum: 0.25,
+  trampleMultiplier: 2,
+  // Knockback is a velocity that bleeds off at knockDecay per second, so the
+  // knocked company slides and slows instead of jumping; a shove of speed v
+  // carries it about v / knockDecay units. Every impulse scales with the
+  // mover's mass over the moved company's (clamped to knockMassRange).
+  knockDecay: 4,
+  knockMassRange: [0.5, 2],
+  trampleKnock: 90,
+  trampleSideways: 0.8,
+  counterChargeRebound: 80,
+  counterChargeShove: 25,
+  impactKnock: 45,
+  trampleStaggerSeconds: 1,
+  trampleMomentumKept: 0.7,
+  counterChargeMultiplier: 4,
 };
 
 /** How the imperial army behaves once ordered out. Cost lives on each tier. */
@@ -192,6 +285,14 @@ export const IMPERIAL = {
   // their formation, but they pick their way over the stone: astride a
   // section (see WALL.crossDistance) they slow to this much of their pace.
   crossSpeed: 0.45,
+  // How close an Attack-tool tap must land to a company to pick it out --
+  // see Game#selectGuardsNear. Shared with the renderer, which draws the
+  // tap's own ping at the same radius, so what the player sees searched is
+  // exactly what was searched.
+  selectRadius: 28,
+  // How far apart a selected group spreads around a shared destination --
+  // see Game#orderGuards.
+  groupSpreadRadius: 18,
 };
 
 /**
@@ -224,15 +325,15 @@ export const SPAWN_MAX_DISTANCE = 400;
 export const CASTLE_TYPES = {
   CC0: {
     name: 'Small Castle', cost: 300, maxHealth: 500, wealth: 40,
-    attack: 2, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
+    attack: 2, armor: 0, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
   },
   CC1: {
     name: 'Medium Castle', cost: 1000, maxHealth: 1000, wealth: 80,
-    attack: 2, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
+    attack: 2, armor: 0, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
   },
   CC2: {
     name: 'Fortified City', cost: 3000, maxHealth: 2000, wealth: 160,
-    attack: 2, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
+    attack: 2, armor: 0, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
   },
 };
 
@@ -262,6 +363,9 @@ export const AVATARS = {
   japanLight: 'images/unit_avatar/avatar_japanese_light.png',
   japanRegular: 'images/unit_avatar/avatar_japanese_regular.png',
   japanHeavy: 'images/unit_avatar/avatar_japanese_heavy.png',
+  // Not shipped yet -- the portrait quietly goes undrawn (see Renderer#drawAvatar)
+  // until a real file lands here, the same as any other missing image would.
+  emperor: 'images/unit_avatar/avatar_emperor.png',
 };
 
 export const AVATAR = {
@@ -300,22 +404,36 @@ export const FLAG = {
   maxWidth: 34,
 };
 
+/**
+ * Every unit type's `breaksAt` is the share of its health at which its
+ * morale breaks and it routs (see ROUT): the less disciplined, the sooner --
+ * 0.7 for the lightest levies, down to 0.15 for the steadiest heavy troops.
+ * The Emperor's 0 means it never does. `mass`, `cavalry` and `spears`: see MASS.
+ *
+ * A unit strikes with `attackAA` (anti-armour, which ignores armour) plus
+ * `attackNormal` (worth only what its target's `armor`, 0 to 1, lets through);
+ * the target's `defense` then blunts the total. See src/damage.js.
+ */
 export const RAIDER_TYPES = {
   CR0: {
-    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
-    defense: 2, range: 5, lineOfSight: 40, avatar: AVATARS.steppeRegular,
+    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 20,
+    attackAA: 1, attackNormal: 2, armor: 0.05, defense: 3, range: 5, lineOfSight: 40,
+    mass: 2, cavalry: true, breaksAt: 0.6, avatar: AVATARS.steppeRegular,
   },
   IR0: {
-    name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
-    defense: 3, range: 2, lineOfSight: 30, avatar: AVATARS.steppeLight,
+    name: 'Steppe Light Infantry', speed: 7, maxHealth: 20,
+    attackAA: 1, attackNormal: 1, armor: 0.05, defense: 3, range: 2, lineOfSight: 30,
+    mass: 1, breaksAt: 0.7, avatar: AVATARS.steppeLight,
   },
   IR1: {
-    name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
-    defense: 5, range: 2, lineOfSight: 30, avatar: AVATARS.steppeHeavy,
+    name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20,
+    attackAA: 1.5, attackNormal: 1.5, armor: 0.5, defense: 5, range: 2, lineOfSight: 30,
+    mass: 2, breaksAt: 0.45, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
-    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 8,
-    defense: 2, range: 6, lineOfSight: 50, avatar: AVATARS.steppeHeavy,
+    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 20,
+    attackAA: 2, attackNormal: 3, armor: 0.5, defense: 3, range: 6, lineOfSight: 50,
+    mass: 3, cavalry: true, breaksAt: 0.5, avatar: AVATARS.steppeHeavy,
   },
 };
 
@@ -328,32 +446,48 @@ export const STARTING_CASTLE_TYPE = 'CC0';
  */
 export const GUARD_TYPES = {
   IG_LIGHT: {
-    name: 'Imperial Light Guard', speed: 7, maxHealth: 25, attack: 2,
-    defense: 3, range: 2, cost: 260, avatar: AVATARS.imperialLight,
+    name: 'Imperial Light Guard', speed: 7, maxHealth: 30,
+    attackAA: 1, attackNormal: 1.5, armor: 0.1, defense: 4, range: 2, cost: 260,
+    holdBonus: 0.3, mass: 1, breaksAt: 0.6, avatar: AVATARS.imperialLight,
   },
   IG0: {
-    name: 'Imperial Guardsman', speed: 6, maxHealth: 30, attack: 3,
-    defense: 4, range: 2, cost: 450, avatar: AVATARS.imperialRegular,
+    name: 'Imperial Guardsman', speed: 6, maxHealth: 30,
+    attackAA: 1.5, attackNormal: 1.5, armor: 0.6, defense: 5, range: 2, cost: 450,
+    holdBonus: 0.3, mass: 2, breaksAt: 0.45, avatar: AVATARS.imperialRegular,
   },
   IG_HEAVY: {
-    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40, attack: 3,
-    defense: 6, range: 2, cost: 680, avatar: AVATARS.imperialHeavy,
+    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 30,
+    attackAA: 2, attackNormal: 1.5, armor: 0.8, defense: 5, range: 2, cost: 680,
+    holdBonus: 0.3, mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.imperialHeavy,
   },
   // The island garrison. Same three rungs at the same prices as the imperial
   // army, so a level can swap the defenders it fields without also changing
   // what the player can afford: the ashigaru trade a little armour for pace,
   // and the sohei a little pace for reach off the wall.
   JG_ASHIGARU: {
-    name: 'Ashigaru Spearman', speed: 8, maxHealth: 24, attack: 2,
-    defense: 3, range: 3, cost: 260, avatar: AVATARS.japanLight,
+    name: 'Ashigaru Spearman', speed: 7, maxHealth: 25,
+    attackAA: 0.5, attackNormal: 1.5, armor: 0.2, defense: 3, range: 2, cost: 260,
+    mass: 1, spears: true, breaksAt: 0.4, avatar: AVATARS.japanLight,
   },
   JG_SAMURAI: {
-    name: 'Samurai Retainer', speed: 6, maxHealth: 30, attack: 4,
-    defense: 4, range: 2, cost: 450, avatar: AVATARS.japanRegular,
+    name: 'Samurai Retainer', speed: 6, maxHealth: 30,
+    attackAA: 1, attackNormal: 2, armor: 0.6, defense: 4, range: 2, cost: 450,
+    mass: 2, breaksAt: 0.1, avatar: AVATARS.japanRegular,
   },
   JG_SOHEI: {
-    name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42, attack: 3,
-    defense: 6, range: 3, cost: 680, avatar: AVATARS.japanHeavy,
+    name: 'Sohei Warrior Monk', speed: 6, maxHealth: 30,
+    attackAA: 1, attackNormal: 3, armor: 0.7, defense: 6, range: 2, cost: 680,
+    mass: 2, spears: true, breaksAt: 0.05, avatar: AVATARS.japanHeavy,
+  },
+  // The one company every level fields the same way -- see Game#dispatchOptions
+  // and #spawnEmperor. About a regular guard's own stats, but with three
+  // times the health, and free to muster since only one is ever on offer.
+  // These are its stats at a castle's first tier; EMPEROR_TIER_MULTIPLIER
+  // scales attack, defense and health up as the city grows.
+  EMPEROR: {
+    name: 'The Emperor', speed: 10, maxHealth: 90,
+    attackAA: 2, attackNormal: 1.5, armor: 0.8, defense: 7, range: 2, cost: 0,
+    holdBonus: 0.3, mass: 3, breaksAt: 0, avatar: AVATARS.emperor,
   },
 };
 
@@ -362,6 +496,274 @@ export const CASTLE_GUARD_TIERS = {
   CC0: ['IG_LIGHT'],
   CC1: ['IG_LIGHT', 'IG0'],
   CC2: ['IG_LIGHT', 'IG0', 'IG_HEAVY'],
+};
+
+/** How much stronger the Emperor's own base stats grow at each castle tier. */
+export const EMPEROR_TIER_MULTIPLIER = { CC0: 1, CC1: 1.3, CC2: 1.6 };
+
+/**
+ * The open battleground mode: no castle, no economy. The player spends a
+ * fixed budget of points placing companies south of the start line before
+ * clicking Start, at which point the enemy line -- already drawn up to the
+ * north, freshly randomised every time -- advances. See Game#restart,
+ * Game#placeGuard and Game#spawnBattleLine.
+ */
+export const BATTLE = {
+  // The points each side fields, unless the player slides it (see budgetRange).
+  budget: 32,
+  budgetRange: { min: 16, max: 96, step: 4 },
+  // North is +y (see Game#spawnPoint's own bearing convention); the player
+  // deploys south of the start line, the enemy is drawn up north of it.
+  fieldHalfWidth: 220,
+  baselineY: -60,
+  placementDepth: 90,
+  enemyBaselineY: 90,
+  // How far past the enemy's own baseline the field runs -- also how deep
+  // into the player's own ground a raider's marching order aims, so it
+  // always has ground to charge across rather than stopping at y 0.
+  fieldHalfDepth: 260,
+  // What a line is made of -- which infantry across the centre, which
+  // companies on the flanks -- is the faction's own: see FACTIONS.
+  // A line wider than this starts a second rank behind the first.
+  infantryPerRank: 9,
+  infantrySpacing: 24,
+  rankDepth: 22,
+  // How much of the enemy's points go on its flank companies.
+  flankShare: 0.35,
+  flankPerRank: 6,
+  cavalrySpacing: 22,
+  cavalryFlankOffset: 125,
+  cavalryDepthOffset: 40,
+  // Random jitter applied to every spawn point, so the line never lines up
+  // in a perfect row -- see Game#spawnBattleLine.
+  formationJitter: 18,
+};
+
+/** Every unit type by id, whichever side of a field it is fielded for. */
+export const UNIT_TYPES = { ...RAIDER_TYPES, ...GUARD_TYPES };
+
+/**
+ * The armies the open battleground mode lets either side field. A faction is
+ * a roster and a battle line, not a side: the player and the enemy each pick
+ * one (see Game#loadLevel), and both may pick the same.
+ *
+ * `roster` is what the player can buy with BATTLE.budget, priced in points.
+ * `line` is what the enemy draws up when it fields the faction: `infantry`
+ * is drawn from across the centre, `flank` from the companies held back
+ * on either wing. The Emperor is imperial alone, free and unique (see
+ * Game#placeGuard).
+ */
+export const FACTIONS = {
+  imperial: {
+    name: 'Imperial Army',
+    tag: 'Drilled heavy foot',
+    avatar: AVATARS.imperialRegular,
+    blurb: 'Drilled and well armoured, with no horse at all. A set wall of heavy guards turns any charge -- but it must stand still to do it. The Emperor may take the field with them.',
+    roster: [
+      { id: 'IG_LIGHT', cost: 3 },
+      { id: 'IG0', cost: 5 },
+      { id: 'IG_HEAVY', cost: 8 },
+      { id: 'EMPEROR', cost: 0 },
+    ],
+    line: { infantry: ['IG_LIGHT', 'IG_LIGHT', 'IG0'], flank: ['IG0', 'IG_HEAVY'] },
+  },
+  steppe: {
+    name: 'Steppe Horde',
+    tag: 'Fast riders',
+    avatar: AVATARS.steppeRegular,
+    blurb: 'Fast riders and cheap foot. Saber cavalry run down anything that flees; heavy lancers ride through light infantry, but break on a braced spear wall.',
+    roster: [
+      { id: 'IR0', cost: 2 },
+      { id: 'IR1', cost: 4 },
+      { id: 'CR0', cost: 5 },
+      { id: 'CR1', cost: 8 },
+    ],
+    line: { infantry: ['IR0', 'IR0', 'IR1'], flank: ['CR0', 'CR1'] },
+  },
+  japan: {
+    name: 'Island Clans',
+    tag: 'Spears and samurai',
+    avatar: AVATARS.japanRegular,
+    blurb: 'Ashigaru and sohei carry spears and turn a charge when they stand set; samurai retainers hit hardest of any foot. The heavier ranks are slow to break.',
+    roster: [
+      { id: 'JG_ASHIGARU', cost: 3 },
+      { id: 'JG_SAMURAI', cost: 5 },
+      { id: 'JG_SOHEI', cost: 8 },
+    ],
+    line: { infantry: ['JG_ASHIGARU', 'JG_ASHIGARU', 'JG_SAMURAI'], flank: ['JG_SAMURAI', 'JG_SOHEI'] },
+  },
+};
+
+/**
+ * The grounds the open battleground can be fought over: each patches the
+ * level's own flat field (see levels.js) with hills, woodland or mountains,
+ * and sets the weather over it. Hills tire whoever climbs them, trees slow
+ * whoever pushes through, and a peak has to be marched round, so the ground
+ * decides who gains from a charge. `land` is read by Terrain like a level's.
+ *
+ * `weather` is fixed for the whole fight: `season` pins the sky and the
+ * ground's colour to one of SEASONS (by index) so a map looks the same from
+ * first frame to last, `mist` and `climate` are a level's own (see
+ * levels.js), and `rain` (0 to 1) is how hard it falls. `label` and `icon`
+ * are only for the setup page. `tag` is that page's short caption.
+ */
+const MOUNTAIN_FLANKS = { halfWidth: 150, minY: -170, maxY: 280 };
+
+export const BATTLE_MAPS = {
+  plains: {
+    name: 'Open Plains',
+    tag: 'Flat and bare',
+    blurb: 'Flat, bare ground. Nothing but the enemy between the lines.',
+    land: {},
+    weather: { label: 'Clear', icon: 'sun', season: 0 },
+  },
+  greenwood: {
+    name: 'The Greenwood',
+    tag: 'Thick woods, steady rain',
+    blurb: 'Dense stands of wet trees drag at any company pushing through them. Nobody sees far, and nobody moves fast.',
+    land: {
+      forestThreshold: 0.3,
+      forestScale: 170,
+      mossColor: '#3f5a37',
+      hillScale: 300,
+      hillHeight: 14,
+      slopeRelief: 3,
+    },
+    weather: {
+      label: 'Steady rain',
+      icon: 'rain',
+      season: 0,
+      rain: 0.7,
+      mist: { color: '150, 172, 158', blend: 0.55, density: 1.7, start: 0.4, windSpeed: 1.5 },
+    },
+  },
+  ridges: {
+    name: 'Razorback Ridges',
+    tag: 'Deep folds, steep drops',
+    blurb: 'Sharp ridges and deep gullies run across the field. Whoever charges down off a crest hits hardest; whoever climbs to meet it is broken on the way up.',
+    land: {
+      hillScale: 240,
+      hillHeight: 72,
+      detailHeight: 3,
+      slopeRelief: 5.5,
+      ridge: { angle: 0, scale: 85, alongScale: 520, height: 36 },
+      rockThreshold: 0.58,
+      forestThreshold: 0.8,
+    },
+    weather: { label: 'Golden dusk', icon: 'sun', season: 2 },
+  },
+  pass: {
+    name: 'Mountain Pass',
+    tag: 'Peaks on both flanks',
+    blurb: 'A road between two ranges. Bare rock, sudden slopes, and nowhere to go but forward.',
+    land: {
+      grassColor: '#8a8672',
+      mossColor: '#77735f',
+      dirtColor: '#6f6250',
+      rockColor: '#8d8b86',
+      hillScale: 360,
+      hillHeight: 10,
+      slopeRelief: 3,
+      mountainChance: 0.95,
+      mountainSpacing: 240,
+      mountainMinRadius: 60,
+      mountainMaxRadius: 115,
+      mountainMinHeight: 90,
+      mountainMaxHeight: 150,
+      mountainClearing: MOUNTAIN_FLANKS,
+      rockThreshold: 0.35,
+      dirtThreshold: 0.25,
+      forestThreshold: 1,
+    },
+    weather: {
+      label: 'Overcast',
+      icon: 'cloud',
+      season: 0,
+      mist: { color: '168, 178, 192', blend: 0.6, density: 1.9, start: 0.4, windSpeed: 2 },
+    },
+  },
+  alpine: {
+    name: 'Snowcapped Summit',
+    tag: 'High peaks, deep snow',
+    blurb: 'A high col between towering white peaks. Every step is on a slope, and the wind never lets up.',
+    land: {
+      hillScale: 260,
+      hillHeight: 110,
+      detailHeight: 4,
+      slopeRelief: 5,
+      ridge: { angle: 90, scale: 90, alongScale: 500, height: 24 },
+      mountainChance: 0.95,
+      mountainSpacing: 230,
+      mountainMinRadius: 70,
+      mountainMaxRadius: 130,
+      mountainMinHeight: 120,
+      mountainMaxHeight: 190,
+      mountainClearing: { halfWidth: 120, minY: -170, maxY: 280 },
+      snowPatchThreshold: -0.8,
+      rockThreshold: 0.55,
+      forestThreshold: 0.8,
+    },
+    weather: {
+      label: 'Blizzard',
+      icon: 'wind',
+      season: 3,
+      climate: { offset: -12 },
+      mist: { color: '214, 224, 238', blend: 0.3, density: 1.1, start: 0.8, windSpeed: 5 },
+    },
+  },
+  badlands: {
+    name: 'Scorched Badlands',
+    tag: 'Dry mesas and heat',
+    blurb: 'Cracked clay and broad mesas under a white sun. No shade, no water, no mercy.',
+    land: {
+      grassColor: '#c9b078',
+      mossColor: '#b8975c',
+      dirtColor: '#a07a48',
+      rockColor: '#9a8570',
+      hillScale: 420,
+      hillHeight: 20,
+      detailHeight: 1.5,
+      slopeRelief: 2.4,
+      mountainChance: 0.8,
+      mountainSpacing: 260,
+      mountainMinRadius: 60,
+      mountainMaxRadius: 120,
+      mountainMinHeight: 35,
+      mountainMaxHeight: 70,
+      mountainShapeScale: 1.3,
+      mountainSkirt: 50,
+      mountainClearing: MOUNTAIN_FLANKS,
+      ridge: { angle: 35, scale: 90, alongScale: 420, height: 9 },
+      forestThreshold: 1,
+      turnsInAutumn: false,
+    },
+    weather: {
+      label: 'Scorching heat',
+      icon: 'heat',
+      season: 1,
+      climate: { offset: 20 },
+      mist: { color: '232, 204, 140', blend: 0.6, density: 1.8, start: 0.35, windSpeed: 2.5 },
+    },
+  },
+};
+export const DEFAULT_BATTLE_MAP = 'plains';
+
+/** Who fights whom until the player says otherwise. */
+export const DEFAULT_FACTIONS = { player: 'imperial', enemy: 'steppe' };
+
+/**
+ * Earthworks: the low ramps the Build tool throws up in the open battleground
+ * mode instead of stone. They are not barriers at all -- nothing routes
+ * around one, and nothing may batter it -- they only slow whatever crosses
+ * them (see Game#paceOn), which is what keeps them a tactic rather than a
+ * wall by another name.
+ */
+export const EARTHWORK = {
+  minLength: 12,
+  maxLength: 70,
+  // How close a company must stand to a run's own line to be slowed by it.
+  thickness: 8,
+  slowFactor: 0.5,
 };
 
 // One row per season; the last row repeats once the seasons run past it.
@@ -473,6 +875,11 @@ export const TERRAIN = {
   // Nothing is ever slowed past this, so no slope can leave a company
   // looking stuck.
   minClimbPace: 0.25,
+  // Open battleground only: coming down a slope quickens a company, and a
+  // charge that comes down one hits harder. Capped so the steepest ridge
+  // is a tactic rather than a catapult.
+  descentDrag: 0.9,
+  maxDescentPace: 1.4,
   // How far ahead the ground is sampled to work out that gradient. Short
   // enough to feel the slope underfoot rather than the hill as a whole.
   climbSample: 6,
@@ -499,6 +906,10 @@ export const TERRAIN = {
   // How far out from a settlement mountains are worth asking about at all --
   // comfortably past where a raider could ever spawn.
   mountainFieldRadius: 500,
+  // A rectangle -- `{ halfWidth, minY, maxY }` -- no mountain may reach into.
+  // Null leaves them wherever the lattice puts them; the open battleground's
+  // mountain maps use it to keep the ground between the lines passable.
+  mountainClearing: null,
 
   // Mesh drawn for the ground: a fixed-size tile in world units, a quarter
   // the size of the old zoom-compensated cell. It is not resized for the
@@ -657,6 +1068,20 @@ export const SNOW_MAX_SIZE = 0.4;
 export const SNOW_MIN_FALL = 3;
 export const SNOW_MAX_FALL = 7;
 export const SNOW_DRIFT = 4;
+
+/**
+ * Falling rain, laid out exactly as snow is (see Atmosphere#placeRain) but
+ * fast and streaked: each drop is a short vertical line in the world, so a
+ * closer one draws longer on screen. Only a battle map with `rain` set in
+ * BATTLE_MAPS ever shows it.
+ */
+export const RAIN_COUNT = 170;
+export const RAIN_FIELD = 90;
+export const RAIN_ALTITUDE_TOP = 24;
+export const RAIN_ALTITUDE_BOTTOM = 0;
+export const RAIN_FALL = 42;
+export const RAIN_STREAK = 2.4;
+export const RAIN_SLANT = 0.35;
 
 export const HEALTH_COLORS = [
   { above: 0.66, color: '#7fb069' },

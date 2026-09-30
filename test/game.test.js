@@ -1,11 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
-import { Castle, Raider, Wall } from '../src/entities.js';
 import {
+  Castle, Emperor, Guard, Raider, Wall,
+} from '../src/entities.js';
+import { LEVELS } from '../src/levels.js';
+import { compileUnit, unitSize } from '../src/units.js';
+import {
+  BATTLE,
+  BATTLE_MAPS,
   BREACH,
   CASTLE_GUARD_TIERS,
   CASTLE_TYPES,
+  EARTHWORK,
+  EMPEROR_TIER_MULTIPLIER,
+  DEFAULT_FACTIONS,
+  FACTIONS,
+  FEAR,
   FPS,
   GUARD_TYPES,
   RAIDER_SPAWN_INTERVAL_SECONDS,
@@ -13,6 +24,8 @@ import {
   STARTING_TOKENS,
   WALL,
 } from '../src/config.js';
+
+const BATTLE_LEVEL = LEVELS.find((level) => level.mode === 'battle');
 
 function fixedRandom(value = 0) {
   return () => value;
@@ -161,7 +174,7 @@ test('an unfinished wall keeps rising after being attacked', () => {
   game.tokens = 1000;
   const wall = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall;
   stepSeconds(game, WALL.planSeconds + 1);
-  wall.takeHit(20);
+  wall.takeHit({ aa: 20, normal: 0 });
   const wounded = wall.health;
   stepSeconds(game, 1);
   assert.ok(wall.health > wounded, 'construction makes good the damage');
@@ -279,10 +292,10 @@ test('game over is held off for BREACH.collapseSeconds after the last castle fal
 
 // --- dispatching the imperial army in tiers --------------------------------
 
-test('a level 1 city can only field its light company', () => {
+test('a level 1 city can only field its light company (plus the Emperor, offered everywhere)', () => {
   const game = new Game({ random: fixedRandom() });
   const options = game.dispatchOptions();
-  assert.deepEqual(options.map((option) => option.id), CASTLE_GUARD_TIERS.CC0);
+  assert.deepEqual(options.map((option) => option.id), [...CASTLE_GUARD_TIERS.CC0, 'EMPEROR']);
 });
 
 test('each upgrade unlocks the next guard tier without losing the ones below it', () => {
@@ -294,9 +307,9 @@ test('each upgrade unlocks the next guard tier without losing the ones below it'
   game.upgradeCastle(0);
   seenAtEachLevel.push(game.dispatchOptions().map((option) => option.id));
   assert.deepEqual(seenAtEachLevel, [
-    CASTLE_GUARD_TIERS.CC0,
-    CASTLE_GUARD_TIERS.CC1,
-    CASTLE_GUARD_TIERS.CC2,
+    [...CASTLE_GUARD_TIERS.CC0, 'EMPEROR'],
+    [...CASTLE_GUARD_TIERS.CC1, 'EMPEROR'],
+    [...CASTLE_GUARD_TIERS.CC2, 'EMPEROR'],
   ]);
 });
 
@@ -305,7 +318,7 @@ test('sendGuard charges the tier it was asked for, not a flat rate', () => {
   game.tokens = 100000;
   for (const [typeId, type] of Object.entries(GUARD_TYPES)) {
     const before = game.tokens;
-    const result = game.sendGuard(typeId, { x: 10, y: 10 });
+    const result = game.sendGuard(typeId);
     assert.equal(result.sent, true, typeId);
     assert.equal(before - game.tokens, type.cost, `${typeId} should cost $${type.cost}`);
     assert.equal(result.guard.typeId, typeId);
@@ -315,10 +328,316 @@ test('sendGuard charges the tier it was asked for, not a flat rate', () => {
 test('sendGuard refuses a company the treasury cannot afford', () => {
   const game = new Game({ random: fixedRandom() });
   game.tokens = 0;
-  const result = game.sendGuard('IG0', { x: 10, y: 10 });
+  const result = game.sendGuard('IG0');
   assert.equal(result.sent, false);
   assert.equal(result.status, 'poor');
   assert.equal(game.guards.length, 0);
+});
+
+// --- the Emperor: one free, unique, strictly-commanded company ------------
+
+test('the Emperor costs nothing to muster', () => {
+  const game = new Game({ random: fixedRandom() });
+  const before = game.tokens;
+  const result = game.sendGuard('EMPEROR');
+  assert.equal(result.sent, true);
+  assert.equal(game.tokens, before, 'mustering it should not have spent a thing');
+});
+
+test('the Emperor is never offered again once mustered, and a second launch is refused', () => {
+  const game = new Game({ random: fixedRandom() });
+  assert.ok(game.dispatchOptions().some((option) => option.id === 'EMPEROR'));
+
+  game.sendGuard('EMPEROR');
+  assert.ok(!game.dispatchOptions().some((option) => option.id === 'EMPEROR'), 'should be gone from the list');
+
+  const second = game.sendGuard('EMPEROR');
+  assert.equal(second.sent, false);
+  assert.equal(second.status, 'unique');
+});
+
+test('the Emperor is about a medium company\'s own stats, but with three times the health', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  const medium = GUARD_TYPES.IG0; // the level's own medium tier, at CC0
+  assert.equal(emperor.type.maxHealth, medium.maxHealth * 3);
+  assert.equal(emperor.health, emperor.type.maxHealth);
+});
+
+test('the Emperor moves faster than every ordinary guard tier', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  const fastestOrdinary = Math.max(...Object.values(GUARD_TYPES)
+    .filter((type) => type !== GUARD_TYPES.EMPEROR)
+    .map((type) => type.speed));
+  assert.ok(emperor.type.speed > fastestOrdinary, `${emperor.type.speed} should outrun ${fastestOrdinary}`);
+});
+
+test('the Emperor\'s own stats scale up with the castle\'s tier, at the moment it musters', () => {
+  for (const [typeId, multiplier] of Object.entries(EMPEROR_TIER_MULTIPLIER)) {
+    const game = new Game({ random: fixedRandom() });
+    game.tokens = 100000;
+    while (game.castles[0].typeId !== typeId) {
+      game.upgradeCastle(0);
+    }
+    const emperor = game.sendGuard('EMPEROR').guard;
+    assert.equal(emperor.type.maxHealth, Math.round(GUARD_TYPES.EMPEROR.maxHealth * multiplier), typeId);
+  }
+});
+
+test('mustering the Emperor never mutates the shared base stats other games read', () => {
+  const first = new Game({ random: fixedRandom() });
+  first.tokens = 100000;
+  first.upgradeCastle(0);
+  first.upgradeCastle(0);
+  first.sendGuard('EMPEROR'); // at CC2, its strongest tier
+
+  const second = new Game({ random: fixedRandom() });
+  const freshOption = second.dispatchOptions().find((option) => option.id === 'EMPEROR');
+  assert.equal(freshOption.maxHealth, GUARD_TYPES.EMPEROR.maxHealth, 'a new game at CC0 should see the true base stats');
+});
+
+test('the Emperor never breaks off to hunt a raider on its own, even one right beside it', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  emperor.orders = { ...emperor.home };
+  game.raiders = [new Raider('CR0', { ...emperor.position })];
+
+  assert.deepEqual(game.guardDestination(emperor), emperor.orders, 'should hold its order, not chase the raider');
+  assert.equal(emperor.quarry, null);
+});
+
+test('an ordinary guard still hunts nearby raiders exactly as before -- only the Emperor is exempt', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG_LIGHT').guard;
+  const raider = new Raider('CR0', { x: guard.position.x + 50, y: guard.position.y });
+  game.raiders = [raider];
+  assert.deepEqual(game.guardDestination(guard), raider.position);
+});
+
+test('losing the Emperor ends the game, even with the castle still standing', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  assert.equal(game.isDefeated, false);
+
+  emperor.health = -1;
+  assert.equal(game.castles[0].health >= 0, true, 'the castle itself is untouched');
+  assert.equal(game.isDefeated, true, 'losing the Emperor alone should be enough');
+});
+
+test('the Emperor still fights back if a raider actually reaches it, despite never hunting', () => {
+  const game = new Game({ random: fixedRandom() });
+  const emperor = game.sendGuard('EMPEROR').guard;
+  const raider = new Raider('CR0', { ...emperor.position });
+  game.raiders = [raider];
+
+  game.step();
+  assert.ok(emperor.foes.size > 0 || raider.foes.size > 0, 'proximity alone should still lock them into melee');
+});
+
+// --- mustering stands idle until selected and sent ------------------------
+
+test('a mustered company stands at home rather than marching anywhere', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const { guard } = game.sendGuard('IG0');
+  assert.deepEqual(guard.orders, guard.home);
+  assert.deepEqual(guard.position, guard.home);
+});
+
+test('selectGuardsNear picks out only the companies within range, and marks them', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const near = game.sendGuard('IG0').guard;
+  const far = game.sendGuard('IG0').guard;
+  far.position = { x: 900, y: 900 };
+  far.home = { x: 900, y: 900 };
+
+  const found = game.selectGuardsNear(near.position);
+
+  assert.deepEqual(found, [near]);
+  assert.equal(near.selected, true);
+  assert.equal(far.selected, false);
+});
+
+test('deselectGuards clears every company\'s own selected flag', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.selectGuardsNear(guard.position);
+  assert.equal(guard.selected, true);
+
+  game.deselectGuards();
+  assert.equal(guard.selected, false);
+});
+
+test('orderGuards sends a single company exactly where aimed', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.orderGuards([guard], { x: 300, y: 40 });
+  assert.deepEqual(guard.orders, { x: 300, y: 40 });
+  assert.equal(guard.selected, false, 'commanding a company deselects it');
+});
+
+test('orderGuards spreads a group around the shared destination rather than stacking them', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guards = [game.sendGuard('IG0').guard, game.sendGuard('IG0').guard, game.sendGuard('IG0').guard];
+  const target = { x: 300, y: 40 };
+
+  game.orderGuards(guards, target);
+
+  const distinctOrders = new Set(guards.map((guard) => `${guard.orders.x},${guard.orders.y}`));
+  assert.equal(distinctOrders.size, guards.length, 'each company should land somewhere different');
+  for (const guard of guards) {
+    const distance = Math.hypot(guard.orders.x - target.x, guard.orders.y - target.y);
+    assert.ok(distance > 0 && distance < 30, `order should stay near the target, was ${distance}`);
+  }
+});
+
+test('a company under open orders beelines for them and ignores a raider that merely strays near', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.orderGuards([guard], { x: 300, y: 40 });
+  game.raiders = [new Raider('CR0', { x: guard.position.x + 5, y: guard.position.y })];
+
+  assert.deepEqual(game.guardDestination(guard), guard.orders, 'the order should win, not a raider a few steps away');
+  assert.equal(guard.quarry, null, 'no quarry should be picked up while an order is still open');
+});
+
+test('once it reaches its order, a company stands hold there and ignores a raider that comes near', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  const target = { x: 300, y: 40 };
+  game.orderGuards([guard], target);
+  guard.position = { ...target };
+  game.raiders = [new Raider('CR0', { x: target.x + 50, y: target.y })];
+
+  game.moveGuards();
+
+  assert.equal(guard.arrived, true);
+  assert.equal(guard.holding, true, 'arrived, so it holds still rather than running the raider down');
+  assert.deepEqual(guard.position, target, 'and it did not budge');
+  assert.equal(guard.quarry, null);
+});
+
+test('a company on hold that is released goes back to hunting whatever is near', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  const target = { x: 300, y: 40 };
+  game.orderGuards([guard], target);
+  guard.position = { ...target };
+  game.raiders = [new Raider('CR0', { x: target.x + 50, y: target.y })];
+  game.moveGuards();
+
+  game.toggleHold([guard]);
+
+  assert.equal(guard.holding, false);
+  assert.deepEqual(game.guardDestination(guard), game.raiders[0].position);
+});
+
+test('a company keeps marching on its order until it arrives, then stands hold until commanded again', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  const target = { x: guard.position.x + 80, y: guard.position.y };
+  game.orderGuards([guard], target);
+  game.raiders = [new Raider('CR0', { x: guard.position.x + 40, y: guard.position.y + 60 })];
+
+  for (let frame = 0; frame < 60 * 60 && !guard.holding; frame += 1) {
+    game.moveGuards();
+  }
+
+  assert.equal(guard.holding, true, 'it made it to the ordered ground and stopped');
+  assert.ok(Math.hypot(guard.position.x - target.x, guard.position.y - target.y) < 40);
+
+  game.orderGuards([guard], { x: target.x, y: target.y + 100 });
+  assert.equal(guard.holding, false, 'a new command releases the hold');
+  assert.equal(guard.arrived, false);
+});
+
+test('a fresh order shakes off a stagger', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  guard.recoverySeconds = 1;
+  game.orderGuards([guard], { x: 300, y: 40 });
+  assert.equal(guard.recoverySeconds, 0);
+});
+
+test('a company left idle at home still hunts a raider that strays close, on its own', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  const guard = game.sendGuard('IG0').guard;
+  game.raiders = [new Raider('CR0', { x: guard.home.x + 50, y: guard.home.y })];
+
+  const destination = game.guardDestination(guard);
+
+  assert.deepEqual(destination, game.raiders[0].position, 'never ordered anywhere, but a raider is close enough to chase');
+});
+
+// --- affordability, for Hud's own greying of the Build and Attack tools ---
+
+test('canAffordToBuild wants coin for a few sections, not just one', () => {
+  const game = new Game({ random: fixedRandom() });
+  const oneSection = game.wallCost(WALL.minLength);
+
+  game.tokens = oneSection;
+  assert.equal(game.canAffordToBuild, false, 'one section worth is not enough to read as affordable');
+
+  game.tokens = oneSection * 3;
+  assert.equal(game.canAffordToBuild, true);
+});
+
+test('canAffordToAttack looks at the cheapest company this castle can field', () => {
+  const game = new Game({ random: fixedRandom() });
+  const cheapest = Math.min(...game.dispatchOptions().map((option) => option.cost));
+
+  game.tokens = cheapest - 1;
+  assert.equal(game.canAffordToAttack, false);
+
+  game.tokens = cheapest;
+  assert.equal(game.canAffordToAttack, true);
+});
+
+test('canAffordToAttack is false with no castle left to field a company', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.tokens = 100000;
+  game.castles = [];
+  assert.equal(game.canAffordToAttack, false);
+});
+
+test('canAffordToUpgrade looks at the castle\'s own next tier', () => {
+  const game = new Game({ random: fixedRandom() });
+  const nextCost = CASTLE_TYPES[game.castles[0].type.upgradesTo].cost;
+
+  game.tokens = nextCost - 1;
+  assert.equal(game.canAffordToUpgrade, false);
+
+  game.tokens = nextCost;
+  assert.equal(game.canAffordToUpgrade, true);
+});
+
+test('canAffordToUpgrade is false once the castle is already at its final tier', () => {
+  const game = new Game({ random: fixedRandom() });
+  game.castles = [new Castle('CC2')];
+  game.tokens = 100000;
+  assert.equal(game.canAffordToUpgrade, false);
+});
+
+test('a section too cheap on its own to trip canAffordToBuild still will not go up', () => {
+  const game = new Game({ random: fixedRandom() });
+  // Enough for one short section, but not the three canAffordToBuild wants.
+  game.tokens = game.wallCost(WALL.minLength) + 5;
+  assert.equal(game.canAffordToBuild, false, 'the gate should already be closed');
+
+  const result = game.buildWall({ x: 200, y: 0 }, { x: 240, y: 0 });
+  assert.equal(result.status, 'poor', 'building is refused even though this one section was affordable');
 });
 
 // --- upgrading rebuilds gradually, keeping the old stats meanwhile ---------
@@ -366,4 +685,506 @@ test('advanceRebuild moves through demolish then build, then clears itself', () 
   stepSeconds(game, buildSeconds);
   assert.equal(castle.rebuild, null, 'construction finished');
   assert.equal(castle.effectiveType.maxHealth, castle.type.maxHealth, 'now on the new stats');
+});
+
+// --- the open battleground mode --------------------------------------------
+
+test('the open battleground mode starts with no castle, a placement budget, and the enemy line already drawn up', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.equal(game.mode, 'battle');
+  assert.equal(game.castles.length, 0, 'no castle stands on an open field');
+  assert.equal(game.started, false);
+  assert.equal(game.battleBudget, BATTLE.budget);
+  assert.ok(game.raiders.length > 0, 'the enemy line is drawn up before Start Battle, not spawned into it');
+  assert.equal(game.guards.length, 0, 'the player has placed nothing yet');
+});
+
+test('the enemy line fields infantry across the centre, up front, and cavalry behind on the flanks', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const infantry = game.raiders.filter((raider) => raider.typeId.startsWith('IR'));
+  const cavalry = game.raiders.filter((raider) => raider.typeId.startsWith('CR'));
+  assert.ok(infantry.length >= 3, 'a real line, not a token few');
+  assert.ok(cavalry.length >= 2, 'cavalry on both flanks');
+  const infantryMaxAbsX = Math.max(...infantry.map((raider) => Math.abs(raider.position.x)));
+  const infantryMaxY = Math.max(...infantry.map((raider) => raider.position.y));
+  for (const raider of cavalry) {
+    assert.ok(Math.abs(raider.position.x) > infantryMaxAbsX, 'cavalry stands wider than the infantry line');
+    assert.ok(raider.position.y > infantryMaxY, 'cavalry stands behind the infantry line');
+  }
+});
+
+test('placing a company spends its cost from the budget and stands it exactly where tapped', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const point = { x: 20, y: BATTLE.baselineY - 10 };
+  const result = game.placeGuard('IG_LIGHT', point);
+  assert.equal(result.placed, true);
+  assert.equal(game.guards.length, 1);
+  assert.deepEqual(game.guards[0].position, point);
+  const entry = game.battleRoster.find((one) => one.id === 'IG_LIGHT');
+  assert.equal(game.battleBudget, BATTLE.budget - entry.cost);
+});
+
+test('a company too dear for what is left is refused, and the budget is untouched', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.battleBudget = 1;
+  const result = game.placeGuard('IG_HEAVY', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, false);
+  assert.equal(result.status, 'poor');
+  assert.equal(game.guards.length, 0);
+  assert.equal(game.battleBudget, 1);
+});
+
+test('a company placed north of the start line, or off the sides of the field, is refused', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const north = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY + 10 });
+  assert.equal(north.status, 'zone', 'past the start line is the enemy\'s ground, not a deployment zone');
+  const wide = game.placeGuard('IG_LIGHT', { x: BATTLE.fieldHalfWidth + 50, y: BATTLE.baselineY - 10 });
+  assert.equal(wide.status, 'zone', 'off the side of the field is not a deployment zone either');
+  assert.equal(game.guards.length, 0);
+  assert.equal(game.battleBudget, BATTLE.budget, 'a refused placement never spends anything');
+});
+
+test('nothing may be placed once the battle has started', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.startBattle();
+  const result = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, false);
+  assert.equal(result.status, 'blocked');
+});
+
+test('an earthwork costs nothing, but only stands within its own length band', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const start = { x: -30, y: BATTLE.baselineY - 20 };
+  const tooShort = game.buildEarthwork(start, { x: start.x + 2, y: start.y });
+  assert.equal(tooShort.status, 'short');
+  assert.equal(game.earthworks.length, 0);
+  const end = { x: start.x + 30, y: start.y };
+  const built = game.buildEarthwork(start, end);
+  assert.equal(built.status, 'built');
+  assert.equal(game.earthworks.length, 1);
+  assert.equal(game.battleBudget, BATTLE.budget, 'earthworks are free -- there is no treasury to spend');
+});
+
+test('undo hands a placed company\'s points back, and tears up an earthwork the same way', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('IG0', { x: 0, y: BATTLE.baselineY - 10 });
+  const afterPlacing = game.battleBudget;
+  assert.equal(game.undoLastPlacement(), true);
+  assert.equal(game.guards.length, 0);
+  assert.equal(game.battleBudget, BATTLE.budget);
+  assert.ok(game.battleBudget > afterPlacing);
+
+  game.buildEarthwork({ x: -30, y: BATTLE.baselineY - 20 }, { x: 0, y: BATTLE.baselineY - 20 });
+  assert.equal(game.undoLastPlacement(), true);
+  assert.equal(game.earthworks.length, 0);
+
+  assert.equal(game.undoLastPlacement(), false, 'nothing left to take back');
+});
+
+test('an earthwork slows whatever crosses it, but is never a barrier to route around', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.buildEarthwork({ x: -25, y: 0 }, { x: 25, y: 0 });
+  const onIt = { position: { x: 0, y: 0 }, velocity: { x: 0, y: 1 } };
+  const clearOfIt = { position: { x: 0, y: 200 }, velocity: { x: 0, y: 1 } };
+  assert.ok(game.paceOn(onIt) < game.paceOn(clearOfIt), 'standing astride it is slower than clear ground');
+  assert.equal(game.onEarthwork(onIt.position), true);
+  assert.equal(game.onEarthwork(clearOfIt.position), false);
+  // Not a wall: it never enters the wall list the route graph is built from.
+  assert.equal(game.navigation().barriers.length, 0);
+});
+
+test('isDefeated waits for the battle to start, then falls the moment the last company does', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.equal(game.isDefeated, false, 'an empty field before Start Battle is not a loss');
+  game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  assert.equal(game.isDefeated, false, 'the one company placed is still standing');
+  game.guards[0].health = -1;
+  game.guards = game.guards.filter((guard) => guard.isAlive);
+  assert.equal(game.isDefeated, true, 'the last company fell');
+});
+
+test('a battle is lost once every company of the line is routed, and won once every raider is', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  game.placeGuard('IG0', { x: 20, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  game.guards[0].routed = true;
+  assert.equal(game.isDefeated, false, 'one company is still in the fight');
+  game.guards[1].routed = true;
+  assert.equal(game.isDefeated, true);
+  assert.equal(game.isVictorious, false);
+  for (const raider of game.raiders) {
+    raider.routed = true;
+  }
+  assert.equal(game.isVictorious, true);
+});
+
+test('isVictorious fires once every raider on the field is down, and never before the battle starts', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.raiders = [];
+  assert.equal(game.isVictorious, false, 'a field with nothing on it yet is not a win');
+  game.startBattle();
+  assert.equal(game.isVictorious, true, 'nothing left standing against an already-started battle');
+});
+
+test('the open battleground mode never touches the treasury, seasons or the raider spawn timer', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.startBattle();
+  const tokensBefore = game.tokens;
+  const raidersBefore = game.raiders.length;
+  stepSeconds(game, RAIDER_SPAWN_INTERVAL_SECONDS * 3);
+  assert.equal(game.tokens, tokensBefore, 'no income to collect');
+  assert.equal(game.season, 0, 'no season to turn');
+  assert.equal(game.raiders.length, raidersBefore, 'the line was drawn up once, not trickled in');
+});
+
+test('the Emperor is on the open battleground roster too: free, unique, and its own model', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const entry = game.battleRoster.find((one) => one.id === 'EMPEROR');
+  assert.ok(entry, 'expected the Emperor on the battle roster');
+  assert.equal(entry.cost, 0);
+
+  const point = { x: 0, y: BATTLE.baselineY - 10 };
+  const result = game.placeGuard('EMPEROR', point);
+  assert.equal(result.placed, true);
+  assert.ok(result.guard instanceof Emperor);
+  assert.equal(game.emperor, result.guard);
+  assert.equal(game.battleBudget, BATTLE.budget, 'free -- placing it should not touch the budget');
+
+  const again = game.placeGuard('EMPEROR', { x: 20, y: BATTLE.baselineY - 10 });
+  assert.equal(again.placed, false);
+  assert.equal(again.status, 'unique', 'only one Emperor, the same as a siege');
+});
+
+test('undoing the Emperor\'s placement frees it up to be fielded again', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(game.emperorMustered, true);
+
+  game.undoLastPlacement();
+  assert.equal(game.emperor, null);
+  assert.equal(game.emperorMustered, false);
+  assert.equal(game.guards.length, 0);
+
+  const result = game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, true, 'undone, so it should be free to place again');
+});
+
+test('losing the Emperor ends an open battleground fight too, even with other companies still standing', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 });
+  game.placeGuard('IG_LIGHT', { x: 40, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  assert.equal(game.isDefeated, false);
+
+  game.emperor.health = -1;
+  assert.equal(game.guards.length, 2, 'the other company is still standing');
+  assert.equal(game.isDefeated, true, 'losing the Emperor alone should be enough');
+});
+
+test('a raider with a company nearby runs it down rather than making for the Emperor', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  // Placed within the deployment zone, then moved -- placeGuard's own zone
+  // check is not what this test is about.
+  const emperor = game.placeGuard('EMPEROR', { x: 0, y: BATTLE.baselineY - 10 }).guard;
+  emperor.position = { x: 0, y: -300 };
+  const nearGuard = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }).guard;
+  const raider = { position: { x: 0, y: BATTLE.baselineY - 10 + 50 } };
+  game.raiders = [raider];
+
+  assert.deepEqual(game.raiderDestination(raider), nearGuard.position);
+  assert.notDeepEqual(game.raiderDestination(raider), emperor.position);
+});
+
+test('with nothing nearby, a raider makes for the Emperor instead of just charging south blind', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const emperor = game.placeGuard('EMPEROR', { x: 15, y: BATTLE.baselineY - 10 }).guard;
+  emperor.position = { x: 15, y: -300 };
+  const raider = { position: { x: 0, y: 0 } };
+  game.raiders = [raider];
+
+  assert.ok(distanceBetween(raider.position, emperor.position) > FEAR.noticeRadius, 'sanity: too far to just be a nearby company');
+  assert.deepEqual(game.raiderDestination(raider), emperor.position);
+});
+
+test('with no Emperor fielded and nothing nearby, a raider falls back to charging its own lane south', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = { position: { x: 30, y: 0 } };
+  game.raiders = [raider];
+
+  assert.deepEqual(game.raiderDestination(raider), { x: 30, y: -BATTLE.fieldHalfDepth });
+});
+
+function distanceBetween(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// --- battle stats -----------------------------------------------------------
+
+test('unitSize counts the figures a type\'s own formation actually musters', () => {
+  assert.equal(unitSize('EMPEROR'), 1, 'the Emperor rides alone');
+  assert.equal(unitSize('IR0'), 18);
+});
+
+test('faction headcounts: imperial equal in every tier and largest, island clans thinning by tier, steppe fewest', () => {
+  const sizes = (ids) => ids.map((id) => unitSize(id));
+  const imperial = sizes(['IG_LIGHT', 'IG0', 'IG_HEAVY']);
+  const island = sizes(['JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI']);
+  const steppe = sizes(['IR0', 'IR1', 'CR0', 'CR1']);
+  assert.deepEqual(imperial, [48, 48, 48]);
+  assert.ok(island[0] > island[1] && island[1] > island[2], `island tiers should thin out: ${island}`);
+  assert.ok(Math.min(...imperial) >= Math.max(...island), 'imperial companies are never smaller than an island one');
+  assert.ok(Math.max(...steppe) < Math.min(...island), 'steppe companies are the smallest');
+});
+
+test('a fresh battle starts with every stat at zero', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.deepEqual(game.battleStats, {
+    kills: 0, deaths: 0, enemyLoss: 0, playerLoss: 0, enemyLossByType: {}, playerLossByType: {},
+    enemyFielded: 0, playerFielded: 0,
+  });
+});
+
+test('trackBattleLosses tallies kills, deaths, and each side\'s individual soldiers lost, by type', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = new Raider('IR0', { x: 0, y: 100 });
+  const guard = game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }).guard;
+  game.raiders = [raider];
+
+  const before = new Map([[raider, raider.health], [guard, guard.health]]);
+  raider.health -= 4; // wounded, still standing
+  guard.health = -1; // this one falls
+
+  game.trackBattleLosses(before);
+
+  assert.equal(game.battleStats.kills, 0, 'the raider is only wounded');
+  assert.equal(game.battleStats.deaths, 1, 'the guard fell');
+  const enemyIndividuals = (4 / RAIDER_TYPES.IR0.maxHealth) * unitSize('IR0');
+  assert.equal(game.battleStats.enemyLoss, enemyIndividuals);
+  assert.equal(game.battleStats.enemyLossByType.IR0, enemyIndividuals);
+  // Capped at the guard's own max health -- the killing blow drove it well
+  // past zero, but none of that overkill is a soldier it never had.
+  const guardHealthLost = before.get(guard) - Math.max(guard.health, 0);
+  const playerIndividuals = (guardHealthLost / GUARD_TYPES.IG_LIGHT.maxHealth) * unitSize('IG_LIGHT');
+  assert.equal(game.battleStats.playerLoss, playerIndividuals);
+  assert.equal(game.battleStats.playerLossByType.IG_LIGHT, playerIndividuals);
+});
+
+test('a company wiped out entirely loses exactly its own full headcount, not a fraction of it', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const raider = new Raider('CR0', { x: 0, y: 100 });
+  game.raiders = [raider];
+  const before = new Map([[raider, raider.health]]);
+  raider.health = -3; // however far past zero, the company is entirely gone
+
+  game.trackBattleLosses(before);
+
+  assert.equal(game.battleStats.kills, 1);
+  const fullLoss = (before.get(raider) / RAIDER_TYPES.CR0.maxHealth) * unitSize('CR0');
+  assert.ok(game.battleStats.enemyLoss >= unitSize('CR0') - 0.001, 'overkill should not undercount the headcount lost');
+  assert.equal(game.battleStats.enemyLoss, fullLoss);
+});
+
+test('losses accumulate across several frames, and split cleanly between types that both took losses', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const swordsman = new Raider('IR0', { x: 0, y: 100 });
+  const spearman = new Raider('IR1', { x: 40, y: 100 });
+  game.raiders = [swordsman, spearman];
+
+  let before = game.snapshotHealth();
+  swordsman.health -= 3;
+  game.trackBattleLosses(before);
+
+  before = game.snapshotHealth();
+  swordsman.health -= 5;
+  spearman.health -= 2;
+  game.trackBattleLosses(before);
+
+  const swordsmanLoss = (8 / RAIDER_TYPES.IR0.maxHealth) * unitSize('IR0');
+  const spearmanLoss = (2 / RAIDER_TYPES.IR1.maxHealth) * unitSize('IR1');
+  const close = (actual, expected) => assert.ok(
+    Math.abs(actual - expected) < 1e-9,
+    `expected close to ${expected}, got ${actual}`,
+  );
+  close(game.battleStats.enemyLossByType.IR0, swordsmanLoss);
+  close(game.battleStats.enemyLossByType.IR1, spearmanLoss);
+  close(game.battleStats.enemyLoss, swordsmanLoss + spearmanLoss);
+  assert.equal(game.battleStats.kills, 0);
+});
+
+// --- factions in the open battleground mode ---------------------------------
+
+test('unless told otherwise the imperial army meets the steppe horde', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  assert.deepEqual(game.factions, { player: 'imperial', enemy: 'steppe' });
+});
+
+test('the player is offered only the roster of the faction they chose', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'japan', enemy: 'steppe' },
+  });
+  const point = { x: 0, y: BATTLE.baselineY - 10 };
+  assert.equal(game.placeGuard('IG0', point).status, 'unknown', 'an imperial company is not on offer');
+  const placed = game.placeGuard('JG_SAMURAI', point);
+  assert.equal(placed.placed, true);
+  const cost = FACTIONS.japan.roster.find((entry) => entry.id === 'JG_SAMURAI').cost;
+  assert.equal(game.battleBudget, BATTLE.budget - cost);
+});
+
+test('the steppe horde can be fielded by the player, cavalry and all', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'steppe', enemy: 'imperial' },
+  });
+  const result = game.placeGuard('CR0', { x: 0, y: BATTLE.baselineY - 10 });
+  assert.equal(result.placed, true);
+  assert.equal(result.guard.type.cavalry, true);
+});
+
+test('the enemy draws up its line from the faction it was given', () => {
+  for (const [enemy, allowed] of [
+    ['imperial', ['IG_LIGHT', 'IG0', 'IG_HEAVY']],
+    ['japan', ['JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI']],
+    ['steppe', ['IR0', 'IR1', 'CR0', 'CR1']],
+  ]) {
+    const game = new Game({
+      random: fixedRandom(0.5), level: BATTLE_LEVEL, factions: { player: 'imperial', enemy },
+    });
+    assert.ok(game.raiders.length > 0);
+    for (const raider of game.raiders) {
+      assert.ok(allowed.includes(raider.typeId), `${enemy} should not field ${raider.typeId}`);
+    }
+  }
+});
+
+test('both sides may choose the same faction', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'japan', enemy: 'japan' },
+  });
+  assert.equal(game.placeGuard('JG_SOHEI', { x: 0, y: BATTLE.baselineY - 10 }).placed, true);
+  assert.ok(game.raiders.every((raider) => raider.typeId.startsWith('JG_')));
+});
+
+test('an unknown faction falls back to the default for its side', () => {
+  const game = new Game({
+    random: fixedRandom(0), level: BATTLE_LEVEL, factions: { player: 'atlantis', enemy: 'japan' },
+  });
+  assert.deepEqual(game.factions, { player: 'imperial', enemy: 'japan' });
+});
+
+test('the Emperor answers to the imperial army alone', () => {
+  for (const [id, faction] of Object.entries(FACTIONS)) {
+    const offered = faction.roster.some((entry) => entry.id === 'EMPEROR');
+    assert.equal(offered, id === 'imperial', `${id} and the Emperor`);
+  }
+});
+
+test('every faction is fully playable: known types, portraits and models, on either side', () => {
+  for (const [id, faction] of Object.entries(FACTIONS)) {
+    const types = [...faction.roster.map((entry) => entry.id), ...faction.line.infantry, ...faction.line.flank];
+    assert.ok(faction.name && faction.blurb, `${id} needs a name and a description`);
+    assert.ok(faction.line.infantry.length > 0 && faction.line.flank.length > 0, `${id} needs a full line`);
+    for (const typeId of types) {
+      assert.doesNotThrow(() => new Raider(typeId), `${typeId} as an enemy`);
+      assert.doesNotThrow(() => new Guard(typeId), `${typeId} as a player company`);
+      assert.ok(compileUnit(typeId), `${typeId} needs a model`);
+    }
+  }
+});
+
+test('the open field takes its ground from the chosen map, and falls back to plains for an unknown one', () => {
+  const flat = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  const hilly = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, battleMap: 'ridges' });
+  assert.equal(flat.battleMap, 'plains');
+  assert.equal(hilly.battleMap, 'ridges');
+  assert.equal(hilly.terrain.land.hillHeight, BATTLE_MAPS.ridges.land.hillHeight);
+  assert.notEqual(flat.terrain.land.hillHeight, hilly.terrain.land.hillHeight);
+  hilly.loadLevel(BATTLE_LEVEL, undefined, 'no-such-map');
+  assert.equal(hilly.battleMap, 'plains');
+});
+
+test('every battle map leaves the two baselines clear enough to fight over', () => {
+  for (const id of Object.keys(BATTLE_MAPS)) {
+    const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, battleMap: id });
+    assert.ok(game.raiders.length > 0, `${id} draws up an enemy line`);
+    assert.ok(game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 }), `${id} lets a company be placed`);
+  }
+});
+
+test('a battle map pins its own weather for the whole fight', () => {
+  const alpine = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'alpine' });
+  alpine.seconds = 500;
+  assert.equal(alpine.seasonPhase, BATTLE_MAPS.alpine.weather.season + 0.5, 'the season never turns mid-fight');
+  assert.equal(alpine.mist, BATTLE_MAPS.alpine.weather.mist);
+  assert.equal(alpine.rain, 0);
+
+  const greenwood = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'greenwood' });
+  assert.ok(greenwood.rain > 0, 'the greenwood is rained on');
+
+  const siege = new Game({ random: fixedRandom() });
+  assert.equal(siege.battleWeather, null, 'a siege keeps the calendar');
+  assert.equal(siege.rain, 0);
+});
+
+test('every battle map names its weather, and the mountain maps keep a clearing for the armies', () => {
+  for (const [id, map] of Object.entries(BATTLE_MAPS)) {
+    assert.ok(map.weather?.label, `${id} has a weather label`);
+    assert.ok(map.weather.icon, `${id} has a weather icon`);
+    assert.ok(map.tag, `${id} has a short tag`);
+    if (map.land.mountainChance > 0.5) {
+      assert.ok(map.land.mountainClearing, `${id} leaves the middle open`);
+    }
+  }
+  const pass = new Game({ random: fixedRandom(), level: BATTLE_LEVEL, battleMap: 'pass' });
+  const clearing = pass.terrain.land.mountainClearing;
+  const nearby = pass.terrain.mountainsWithin(-clearing.halfWidth, clearing.minY, clearing.halfWidth, clearing.maxY);
+  assert.equal(nearby.filter((mountain) => Math.abs(mountain.x) < clearing.halfWidth && mountain.y > clearing.minY && mountain.y < clearing.maxY).length, 0);
+});
+
+test('the battle maps range from flat plains to mountains, snow and extreme relief', () => {
+  const ids = Object.keys(BATTLE_MAPS);
+  assert.ok(ids.length >= 5 && ids.length <= 7, 'a few maps, each its own kind of ground');
+  const relief = (id) => (BATTLE_MAPS[id].land.hillHeight ?? 0) + (BATTLE_MAPS[id].land.ridge?.height ?? 0);
+  assert.equal(relief('plains'), 0);
+  assert.ok(relief('ridges') > relief('greenwood'), 'the ridges are steeper than the woods');
+  const peak = (id) => BATTLE_MAPS[id].land.mountainMaxHeight ?? 0;
+  assert.ok(peak('alpine') > peak('pass') && peak('pass') > peak('badlands'), 'the summit stands highest');
+  assert.ok(BATTLE_MAPS.alpine.land.snowPatchThreshold < 0, 'the summit is under snow');
+});
+
+test('starting the battle records how many soldiers each side fielded', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL });
+  game.placeGuard('IG_LIGHT', { x: 0, y: BATTLE.baselineY - 10 });
+  game.startBattle();
+  assert.equal(game.battleStats.playerFielded, unitSize('IG_LIGHT'));
+  assert.equal(game.battleStats.enemyFielded, game.raiders.reduce((total, raider) => total + unitSize(raider.typeId), 0));
+  assert.ok(game.battleStats.enemyFielded > 0);
+});
+
+test('the enemy line spends as much of the chosen budget as it can, and never more', () => {
+  const faction = FACTIONS[DEFAULT_FACTIONS.enemy];
+  const costs = Object.fromEntries(faction.roster.map((entry) => [entry.id, entry.cost]));
+  const cheapest = Math.min(...faction.line.infantry.map((typeId) => costs[typeId]));
+  for (const budget of [16, 32, 52, 96]) {
+    for (const value of [0, 0.5, 0.99]) {
+      const game = new Game({ random: fixedRandom(value), level: BATTLE_LEVEL, budget });
+      const spent = game.raiders.reduce((total, raider) => total + costs[raider.typeId], 0);
+      assert.ok(spent <= budget, `${budget}: within budget`);
+      assert.ok(budget - spent < cheapest, `${budget}: nothing else affordable was left unbought`);
+      assert.equal(game.battleBudget, budget, 'the player gets the same budget');
+    }
+  }
+});
+
+test('a bigger budget fields a bigger line, in extra ranks once a row is full', () => {
+  const small = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, budget: 16 });
+  const big = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, budget: 96 });
+  assert.ok(big.raiders.length > small.raiders.length * 3);
+  const ranks = new Set(big.raiders.map((raider) => Math.round(raider.position.y / BATTLE.rankDepth)));
+  assert.ok(ranks.size > 2, 'deep enough to have more than one rank');
+});
+
+test('a budget outside the slider is held to its ends', () => {
+  const game = new Game({ random: fixedRandom(0), level: BATTLE_LEVEL, budget: 9999 });
+  assert.equal(game.battleBudgetLimit, BATTLE.budgetRange.max);
 });

@@ -173,7 +173,7 @@ test('an unfinished wall keeps rising after being attacked', () => {
   game.tokens = 1000;
   const wall = game.buildWall({ x: 100, y: 0 }, { x: 200, y: 0 }).wall;
   stepSeconds(game, WALL.planSeconds + 1);
-  wall.takeHit(20);
+  wall.takeHit({ aa: 20, normal: 0 });
   const wounded = wall.health;
   stepSeconds(game, 1);
   assert.ok(wall.health > wounded, 'construction makes good the damage');

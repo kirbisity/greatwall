@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game.js';
 import { Guard, Raider } from '../src/entities.js';
+import { blowDamage, blowOf } from '../src/damage.js';
 import {
   chargeImpact, isBraced, lockEngagements, resolveMelee,
 } from '../src/melee.js';
@@ -160,7 +161,7 @@ test('a fresh order takes a company off hold', () => {
   assert.equal(guard.holding, false);
 });
 
-test('a company on hold takes HOLD.defenseBonus less damage for the first HOLD.seconds of a bout', () => {
+test('a company on hold takes its hold bonus less damage for the first HOLD.seconds of a bout', () => {
   const held = new Guard('IG0', { x: 0, y: 0 });
   const loose = new Guard('IG0', { x: 0, y: 40 });
   held.holding = true;
@@ -171,7 +172,7 @@ test('a company on hold takes HOLD.defenseBonus less damage for the first HOLD.s
   }
   lockEngagements([held, loose], attackers);
   resolveMelee([held, loose, ...attackers], FRAME);
-  close((1000 - loose.health) / (1000 - held.health), 1 + HOLD.defenseBonus);
+  close((1000 - loose.health) / (1000 - held.health), 1 + GUARD_TYPES.IG0.holdBonus);
   for (let frame = 0; frame < (HOLD.seconds + 0.5) * FPS; frame += 1) {
     resolveMelee([held, loose, ...attackers], FRAME);
   }
@@ -182,13 +183,13 @@ test('a company on hold takes HOLD.defenseBonus less damage for the first HOLD.s
 
 // --- morale --------------------------------------------------------------------
 
-test('every unit type breaks somewhere between 30% and 100% health, the Emperor aside', () => {
+test('every unit type breaks somewhere between 15% and 100% health, the Emperor aside', () => {
   for (const [id, type] of Object.entries({ ...GUARD_TYPES, ...RAIDER_TYPES })) {
     if (id === 'EMPEROR') {
       assert.equal(type.breaksAt, 0, 'the Emperor never runs');
       continue;
     }
-    assert.ok(type.breaksAt >= 0.3 && type.breaksAt < 1, `${id} breaks at ${type.breaksAt}`);
+    assert.ok(type.breaksAt >= 0.15 && type.breaksAt < 1, `${id} breaks at ${type.breaksAt}`);
   }
   assert.ok(GUARD_TYPES.IG_HEAVY.breaksAt < GUARD_TYPES.IG_LIGHT.breaksAt, 'discipline comes with the tier');
 });
@@ -329,8 +330,8 @@ test('heavy cavalry charging a braced spear wall is stopped dead and punished', 
   assert.equal(lancers.inMelee, true, 'locked in, not through');
   assert.equal(lancers.momentum, 0, 'stopped dead');
   assert.equal(lancers.impact, 1, 'its charge bonus is wasted on the points');
-  const expected = lancers.type.maxHealth
-    - (spears.type.attack * MASS.counterChargeMultiplier) / lancers.type.defense;
+  const blow = blowOf(spears.type, MASS.counterChargeMultiplier);
+  const expected = lancers.type.maxHealth - blowDamage(blow, lancers.type.armor) / lancers.type.defense;
   close(lancers.health, expected);
 });
 
@@ -396,4 +397,95 @@ test('a routed company has to actually run for it before it leaves the field', (
   guard.position = { x: ROUT.runDistance + 1, y: 0 };
   game.checkEscape(guard, []);
   assert.equal(guard.fled, true);
+});
+
+const total = (type) => type.attackAA + type.attackNormal;
+const armors = (...ids) => ids.map((id) => ({ ...GUARD_TYPES, ...RAIDER_TYPES }[id].armor));
+
+test('each faction\'s three tiers carry its armour ratings', () => {
+  assert.deepEqual(armors('IR0', 'IR1', 'CR1'), [0.1, 0.4, 0.7]);
+  assert.deepEqual(armors('IG_LIGHT', 'IG0', 'IG_HEAVY'), [0.1, 0.6, 0.8]);
+  assert.deepEqual(armors('JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI'), [0.2, 0.6, 0.7]);
+});
+
+test('the Chinese tiers hit about alike; the sohei out-hit the samurai', () => {
+  const [light, regular, heavy] = ['IG_LIGHT', 'IG0', 'IG_HEAVY'].map((id) => total(GUARD_TYPES[id]));
+  assert.ok(Math.max(light, regular, heavy) - Math.min(light, regular, heavy) <= 0.75);
+  assert.ok(total(GUARD_TYPES.JG_SOHEI) > total(GUARD_TYPES.JG_SAMURAI));
+});
+
+test('Japanese units favour ordinary attack; Chinese and Mongol lean anti-armour, most at the top', () => {
+  for (const id of ['JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI']) {
+    assert.ok(GUARD_TYPES[id].attackNormal > GUARD_TYPES[id].attackAA, id);
+  }
+  for (const type of [GUARD_TYPES.IG_HEAVY, RAIDER_TYPES.IR1, RAIDER_TYPES.CR1]) {
+    assert.ok(type.attackAA > type.attackNormal, type.name);
+  }
+  assert.ok(RAIDER_TYPES.CR1.attackAA - RAIDER_TYPES.CR1.attackNormal
+    > RAIDER_TYPES.IR0.attackAA - RAIDER_TYPES.IR0.attackNormal);
+});
+
+test('the Emperor stands about a top-tier guard', () => {
+  const emperor = GUARD_TYPES.EMPEROR;
+  const heavy = GUARD_TYPES.IG_HEAVY;
+  assert.equal(emperor.armor, heavy.armor);
+  assert.equal(emperor.defense, heavy.defense);
+  assert.equal(total(emperor), total(heavy));
+});
+
+test('the Emperor\'s attack scales with the castle without collapsing to whole numbers', () => {
+  const game = new Game({ random: fixedRandom() });
+  const stats = game.emperorStats({ typeId: 'CC2' });
+  close(stats.attackAA, 3.2);
+  close(stats.attackNormal, 2.4);
+});
+
+test('Japanese samurai and sohei are the steadiest under fire', () => {
+  assert.ok(GUARD_TYPES.JG_SAMURAI.breaksAt <= 0.2);
+  assert.ok(GUARD_TYPES.JG_SOHEI.breaksAt <= 0.2);
+  assert.ok(GUARD_TYPES.JG_ASHIGARU.breaksAt < GUARD_TYPES.IG_LIGHT.breaksAt);
+});
+
+test('the Chinese hold with a 30% boost, everyone else 20%', () => {
+  for (const id of ['IG_LIGHT', 'IG0', 'IG_HEAVY', 'EMPEROR']) {
+    assert.equal(GUARD_TYPES[id].holdBonus, 0.3, id);
+  }
+  assert.equal(HOLD.defenseBonus, 0.2);
+  for (const id of ['JG_ASHIGARU', 'JG_SAMURAI', 'JG_SOHEI']) {
+    assert.equal(GUARD_TYPES[id].holdBonus, undefined, id);
+  }
+});
+
+test('a Japanese company on hold gets the ordinary 20% boost', () => {
+  const held = new Guard('JG_SAMURAI', { x: 0, y: 0 });
+  const loose = new Guard('JG_SAMURAI', { x: 0, y: 40 });
+  held.holding = true;
+  const attackers = [new Raider('IR0', { x: 10, y: 0 }), new Raider('IR0', { x: 10, y: 40 })];
+  for (const company of [held, loose, ...attackers]) {
+    company.type = { ...company.type, maxHealth: 1000, breaksAt: 0 };
+    company.health = 1000;
+  }
+  lockEngagements([held, loose], attackers);
+  resolveMelee([held, loose, ...attackers], FRAME);
+  close((1000 - loose.health) / (1000 - held.health), 1 + HOLD.defenseBonus);
+});
+
+test('armour blunts an ordinary-attack army but not an anti-armour one', () => {
+  const armoured = () => {
+    const guard = new Guard('IG_HEAVY', { x: 0, y: 0 });
+    guard.type = { ...guard.type, maxHealth: 1000, breaksAt: 0 };
+    guard.health = 1000;
+    return guard;
+  };
+  const fightWith = (attackType) => {
+    const guard = armoured();
+    const raider = new Raider('IR0', { x: 10, y: 0 });
+    raider.type = { ...raider.type, ...attackType };
+    lockEngagements([guard], [raider]);
+    resolveMelee([guard, raider], FRAME);
+    return 1000 - guard.health;
+  };
+  const plain = fightWith({ attackAA: 0, attackNormal: 4 });
+  const piercing = fightWith({ attackAA: 4, attackNormal: 0 });
+  close(plain / piercing, 1 - GUARD_TYPES.IG_HEAVY.armor);
 });

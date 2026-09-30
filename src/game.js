@@ -19,6 +19,7 @@ import {
 } from './melee.js';
 import { Terrain } from './terrain.js';
 import { unitSize } from './units.js';
+import { blowOf } from './damage.js';
 import { LEVELS } from './levels.js';
 import { BUILDINGS } from './buildings/index.js';
 import {
@@ -88,6 +89,11 @@ const LANDING_SPREAD = 26;
 const WATER_PROBE_SPACING = 6;
 
 /** Where a wall's own sound effect should seem to come from. */
+/** A scaled stat kept to hundredths, so fractional attacks are not rounded to whole ones. */
+function roundedStat(value) {
+  return Math.round(value * 100) / 100;
+}
+
 function wallMidpoint(wall) {
   return { x: (wall.start.x + wall.end.x) / 2, y: (wall.start.y + wall.end.y) / 2 };
 }
@@ -889,7 +895,8 @@ export class Game {
     return {
       ...base,
       maxHealth: Math.round(base.maxHealth * multiplier),
-      attack: Math.round(base.attack * multiplier),
+      attackAA: roundedStat(base.attackAA * multiplier),
+      attackNormal: roundedStat(base.attackNormal * multiplier),
       defense: Math.round(base.defense * multiplier),
     };
   }
@@ -1438,14 +1445,14 @@ export class Game {
     for (const wall of wallsNear(navigation.grid, raider.position, raider.type.range + reachMargin)) {
       const reach = wall.length + reachMargin;
       if (isWithinSegmentBand(raider.position, wall.start, wall.end, raider.type.range, reach)) {
-        wall.takeHit(raider.type.attack * wear);
+        wall.takeHit(blowOf(raider.type, wear));
         raider.touchedThisFrame = true;
         if (!raider.soundedEngage) {
           this.onEffect('engaging', wallMidpoint(wall));
           raider.soundedEngage = true;
         }
         if (!climb) {
-          raider.takeHit(WALL.attack);
+          raider.takeHit({ aa: WALL.attack, normal: 0 });
           // Battering stone that fights back breaks morale the same way melee
           // does; a routed raider stops swinging and runs (see moveRaiders).
           if (!raider.isAlive || testMorale(raider)) {
@@ -1459,8 +1466,8 @@ export class Game {
   resolveCastleContact(raider, castle) {
     const reach = castle.type.hitbox + raider.type.range;
     if (distanceSquared(castle.position, raider.position) < reach * reach) {
-      castle.takeHit(raider.type.attack);
-      raider.takeHit(castle.type.attack);
+      castle.takeHit(blowOf(raider.type));
+      raider.takeHit({ aa: castle.type.attack, normal: 0 });
       raider.touchedThisFrame = true;
       if (!raider.soundedEngage) {
         this.onEffect('engaging', castle.position);

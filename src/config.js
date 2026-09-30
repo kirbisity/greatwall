@@ -76,6 +76,9 @@ export const WALL = {
   repairSeconds: 10,
   // How close a wall end must come to a city edge before it snaps onto it.
   brimSnapRadius: 26,
+  // A wall's armour is total: only anti-armour blows hurt it.
+  armor: 1,
+  // Its counter-blow against whoever batters it: falling stone, not a sword, so armour is no help.
   attack: 1,
   defense: 2,
   costPerUnit: 2,
@@ -209,19 +212,21 @@ export const CHARGE = {
 
 /** A company told to hold its ground braces for the first shock of a fight. */
 export const HOLD = {
+  // A unit type may set its own `holdBonus` (the Chinese are steadier at it).
   defenseBonus: 0.2,
   seconds: 2,
 };
 
 /**
  * A company whose morale breaks (see each unit type's `breaksAt`) runs for
- * it: it hits at `attackMultiplier` of its strength, can only be pinned by
+ * it: it hits at `attackMultiplier` and defends at `defenseMultiplier` of its strength, can only be pinned by
  * an enemy that gets within `catchDistance` of it, and once it is clear of
  * every enemy by `escapeDistance` it has left the field altogether. For a
  * raider, the city itself counts as an enemy -- see Game#raiderThreats.
  */
 export const ROUT = {
   attackMultiplier: 0.5,
+  defenseMultiplier: 0.5,
   catchDistance: 8,
   escapeDistance: 160,
   // And it must have run at least this far from where it broke -- it is seen
@@ -310,15 +315,15 @@ export const SPAWN_MAX_DISTANCE = 400;
 export const CASTLE_TYPES = {
   CC0: {
     name: 'Small Castle', cost: 300, maxHealth: 500, wealth: 40,
-    attack: 2, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
+    attack: 2, armor: 0, defense: 3, hitbox: 20, footprint: 28, upgradesTo: 'CC1',
   },
   CC1: {
     name: 'Medium Castle', cost: 1000, maxHealth: 1000, wealth: 80,
-    attack: 2, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
+    attack: 2, armor: 0, defense: 3, hitbox: 40, footprint: 58, upgradesTo: 'CC2',
   },
   CC2: {
     name: 'Fortified City', cost: 3000, maxHealth: 2000, wealth: 160,
-    attack: 2, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
+    attack: 2, armor: 0, defense: 3, hitbox: 60, footprint: 88, upgradesTo: null,
   },
 };
 
@@ -392,28 +397,32 @@ export const FLAG = {
 /**
  * Every unit type's `breaksAt` is the share of its health at which its
  * morale breaks and it routs (see ROUT): the less disciplined, the sooner --
- * 0.7 for the lightest levies, down to 0.3 for the steadiest heavy troops.
+ * 0.7 for the lightest levies, down to 0.15 for the steadiest heavy troops.
  * The Emperor's 0 means it never does. `mass`, `cavalry` and `spears`: see MASS.
+ *
+ * A unit strikes with `attackAA` (anti-armour, which ignores armour) plus
+ * `attackNormal` (worth only what its target's `armor`, 0 to 1, lets through);
+ * the target's `defense` then blunts the total. See src/damage.js.
  */
 export const RAIDER_TYPES = {
   CR0: {
-    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10, attack: 5,
-    defense: 2, range: 5, lineOfSight: 40,
+    name: 'Steppe Saber Cavalry', speed: 18, maxHealth: 10,
+    attackAA: 2.5, attackNormal: 2.5, armor: 0.1, defense: 2, range: 5, lineOfSight: 40,
     mass: 2, cavalry: true, breaksAt: 0.6, avatar: AVATARS.steppeRegular,
   },
   IR0: {
-    name: 'Steppe Light Infantry', speed: 7, maxHealth: 20, attack: 2,
-    defense: 3, range: 2, lineOfSight: 30,
+    name: 'Steppe Light Infantry', speed: 7, maxHealth: 20,
+    attackAA: 1, attackNormal: 1, armor: 0.1, defense: 3, range: 2, lineOfSight: 30,
     mass: 1, breaksAt: 0.7, avatar: AVATARS.steppeLight,
   },
   IR1: {
-    name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20, attack: 3,
-    defense: 5, range: 2, lineOfSight: 30,
+    name: 'Steppe Heavy Infantry', speed: 7, maxHealth: 20,
+    attackAA: 2, attackNormal: 1.5, armor: 0.4, defense: 5, range: 2, lineOfSight: 30,
     mass: 2, breaksAt: 0.45, avatar: AVATARS.steppeHeavy,
   },
   CR1: {
-    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10, attack: 8,
-    defense: 2, range: 6, lineOfSight: 50,
+    name: 'Steppe Spear Cavalry', speed: 20, maxHealth: 10,
+    attackAA: 5, attackNormal: 3, armor: 0.7, defense: 2, range: 6, lineOfSight: 50,
     mass: 3, cavalry: true, breaksAt: 0.5, avatar: AVATARS.steppeHeavy,
   },
 };
@@ -427,38 +436,38 @@ export const STARTING_CASTLE_TYPE = 'CC0';
  */
 export const GUARD_TYPES = {
   IG_LIGHT: {
-    name: 'Imperial Light Guard', speed: 7, maxHealth: 25, attack: 2,
-    defense: 3, range: 2, cost: 260,
-    mass: 1, breaksAt: 0.6, avatar: AVATARS.imperialLight,
+    name: 'Imperial Light Guard', speed: 7, maxHealth: 25,
+    attackAA: 1.5, attackNormal: 1.5, armor: 0.1, defense: 4, range: 2, cost: 260,
+    holdBonus: 0.3, mass: 1, breaksAt: 0.6, avatar: AVATARS.imperialLight,
   },
   IG0: {
-    name: 'Imperial Guardsman', speed: 6, maxHealth: 30, attack: 3,
-    defense: 4, range: 2, cost: 450,
-    mass: 2, breaksAt: 0.45, avatar: AVATARS.imperialRegular,
+    name: 'Imperial Guardsman', speed: 6, maxHealth: 30,
+    attackAA: 1.75, attackNormal: 1.5, armor: 0.6, defense: 5, range: 2, cost: 450,
+    holdBonus: 0.3, mass: 2, breaksAt: 0.45, avatar: AVATARS.imperialRegular,
   },
   IG_HEAVY: {
-    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40, attack: 3,
-    defense: 6, range: 2, cost: 680,
-    mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.imperialHeavy,
+    name: 'Imperial Heavy Guard', speed: 5, maxHealth: 40,
+    attackAA: 2, attackNormal: 1.5, armor: 0.8, defense: 7, range: 2, cost: 680,
+    holdBonus: 0.3, mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.imperialHeavy,
   },
   // The island garrison. Same three rungs at the same prices as the imperial
   // army, so a level can swap the defenders it fields without also changing
   // what the player can afford: the ashigaru trade a little armour for pace,
   // and the sohei a little pace for reach off the wall.
   JG_ASHIGARU: {
-    name: 'Ashigaru Spearman', speed: 8, maxHealth: 24, attack: 2,
-    defense: 3, range: 3, cost: 260,
-    mass: 1, spears: true, breaksAt: 0.6, avatar: AVATARS.japanLight,
+    name: 'Ashigaru Spearman', speed: 8, maxHealth: 24,
+    attackAA: 0.75, attackNormal: 1.75, armor: 0.2, defense: 3, range: 3, cost: 260,
+    mass: 1, spears: true, breaksAt: 0.4, avatar: AVATARS.japanLight,
   },
   JG_SAMURAI: {
-    name: 'Samurai Retainer', speed: 6, maxHealth: 30, attack: 4,
-    defense: 4, range: 2, cost: 450,
-    mass: 2, breaksAt: 0.35, avatar: AVATARS.japanRegular,
+    name: 'Samurai Retainer', speed: 6, maxHealth: 30,
+    attackAA: 1.5, attackNormal: 3, armor: 0.6, defense: 4, range: 2, cost: 450,
+    mass: 2, breaksAt: 0.2, avatar: AVATARS.japanRegular,
   },
   JG_SOHEI: {
-    name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42, attack: 3,
-    defense: 6, range: 3, cost: 680,
-    mass: 3, spears: true, breaksAt: 0.3, avatar: AVATARS.japanHeavy,
+    name: 'Sohei Warrior Monk', speed: 5, maxHealth: 42,
+    attackAA: 2, attackNormal: 3.5, armor: 0.7, defense: 6, range: 3, cost: 680,
+    mass: 3, spears: true, breaksAt: 0.15, avatar: AVATARS.japanHeavy,
   },
   // The one company every level fields the same way -- see Game#dispatchOptions
   // and #spawnEmperor. About a regular guard's own stats, but with three
@@ -466,9 +475,9 @@ export const GUARD_TYPES = {
   // These are its stats at a castle's first tier; EMPEROR_TIER_MULTIPLIER
   // scales attack, defense and health up as the city grows.
   EMPEROR: {
-    name: 'The Emperor', speed: 10, maxHealth: 90, attack: 3,
-    defense: 4, range: 2, cost: 0,
-    mass: 2, breaksAt: 0, avatar: AVATARS.emperor,
+    name: 'The Emperor', speed: 10, maxHealth: 90,
+    attackAA: 2, attackNormal: 1.5, armor: 0.8, defense: 7, range: 2, cost: 0,
+    holdBonus: 0.3, mass: 3, breaksAt: 0, avatar: AVATARS.emperor,
   },
 };
 

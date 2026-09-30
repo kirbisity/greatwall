@@ -2,6 +2,7 @@ import { distanceSquared } from './geometry.js';
 import {
   CHARGE, HOLD, MASS, MELEE, ROUT,
 } from './config.js';
+import { addBlows, blowOf, scaleBlow } from './damage.js';
 
 /**
  * Hand-to-hand between the two sides.
@@ -81,7 +82,7 @@ function meetsSpears(cavalry, spears) {
  * and the riders keep most of their pace rather than stopping to fight.
  */
 function trample(cavalry, target) {
-  target.takeHit(cavalry.type.attack * MASS.trampleMultiplier * chargeSpeed(cavalry));
+  target.takeHit(blowOf(cavalry.type, MASS.trampleMultiplier * chargeSpeed(cavalry)));
   const speed = Math.hypot(cavalry.velocity.x, cavalry.velocity.y);
   const aheadX = cavalry.velocity.x / speed;
   const aheadY = cavalry.velocity.y / speed;
@@ -98,7 +99,7 @@ function trample(cavalry, target) {
 
 /** Cavalry run onto set spears: stopped dead, its charge spent on the points. */
 function counterCharge(cavalry, spears, speed) {
-  cavalry.takeHit(spears.type.attack * MASS.counterChargeMultiplier * speed);
+  cavalry.takeHit(blowOf(spears.type, MASS.counterChargeMultiplier * speed));
   cavalry.momentum = 0;
   cavalry.impact = 1;
 }
@@ -209,12 +210,13 @@ function prunedFoes(company) {
 function strikingPower(company) {
   const charge = company.meleeSeconds <= CHARGE.seconds ? company.impact : 1;
   const morale = company.routed ? ROUT.attackMultiplier : 1;
-  return company.type.attack * charge * morale;
+  return blowOf(company.type, charge * morale);
 }
 
 /** How much a company on hold shrugs off, for the first HOLD.seconds of a bout. */
 function bracing(company) {
-  return company.holding && company.meleeSeconds <= HOLD.seconds ? 1 + HOLD.defenseBonus : 1;
+  const bonus = company.type.holdBonus ?? HOLD.defenseBonus;
+  return company.holding && company.meleeSeconds <= HOLD.seconds ? 1 + bonus : 1;
 }
 
 function breaksNow(company) {
@@ -293,13 +295,13 @@ export function resolveMelee(companies, seconds) {
       continue;
     }
     company.meleeSeconds += seconds;
-    const share = strikingPower(company) * MELEE.damageRate * seconds / company.foes.size;
+    const share = scaleBlow(strikingPower(company), MELEE.damageRate * seconds / company.foes.size);
     for (const foe of company.foes) {
-      struck.set(foe, (struck.get(foe) ?? 0) + share);
+      struck.set(foe, struck.has(foe) ? addBlows(struck.get(foe), share) : share);
     }
   }
   for (const [company, blows] of struck) {
-    company.takeHit(blows / bracing(company));
+    company.takeHit(blows, bracing(company));
   }
 
   // Only blows break morale -- here, and from a wall that strikes back at

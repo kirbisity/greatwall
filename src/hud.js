@@ -62,20 +62,20 @@ export function clampIntoView(box, view, margin) {
 const MENU_MARGIN = 8;
 
 /**
- * Companies destroyed, companies lost, and the K/D between them, for the
- * open battleground mode's own end-of-round screen. The two loss lines
- * beneath are a different, finer-grained count: individual soldiers, not
- * companies -- see Game#trackBattleLosses for how that number is worked
- * out, and Hud#renderBattleBreakdown for the same figure broken down by
- * which type it came from.
+ * Companies destroyed and lost, then the finer-grained count of individual
+ * soldiers lost on each side -- see Game#trackBattleLosses for how that is
+ * worked out, and Hud#renderBattleBreakdown for the same figure broken down
+ * by which type it came from. K/D is over soldiers, not companies: a company
+ * ground to a sliver counts for most of its troops.
  */
 export function formatBattleStats(stats) {
-  const kd = stats.deaths === 0
-    ? (stats.kills > 0 ? '∞' : '0.00')
-    : (stats.kills / stats.deaths).toFixed(2);
-  return `Enemy companies destroyed ${stats.kills} · Your companies lost ${stats.deaths} · K/D ${kd}\n`
+  const kd = stats.playerLoss === 0
+    ? (stats.enemyLoss > 0 ? '∞' : '0.00')
+    : (stats.enemyLoss / stats.playerLoss).toFixed(2);
+  return `Enemy companies destroyed ${stats.kills} · Your companies lost ${stats.deaths}\n`
     + `Enemy soldiers lost: ${Math.round(stats.enemyLoss)}\n`
-    + `Your soldiers lost: ${Math.round(stats.playerLoss)}`;
+    + `Your soldiers lost: ${Math.round(stats.playerLoss)}\n`
+    + `K/D ${kd}`;
 }
 
 function element(id) {

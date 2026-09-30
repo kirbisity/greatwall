@@ -1,7 +1,8 @@
 import { distance } from './geometry.js';
 import {
-  CASTLE_REBUILD, CASTLE_TYPES, HOUSES, MOMENTUM, UNIT_TYPES, WALL, WALL_TIERS,
+  CASTLE_REBUILD, CASTLE_TYPES, HOUSES, MOMENTUM, ROUT, UNIT_TYPES, WALL, WALL_TIERS,
 } from './config.js';
+import { blowDamage } from './damage.js';
 
 export class Wall {
   /**
@@ -184,8 +185,8 @@ export class Wall {
     return Math.trunc(spent * this.health / this.maxHealth / 2);
   }
 
-  takeHit(attackPower) {
-    this.health -= attackPower / WALL.defense;
+  takeHit(blow) {
+    this.health -= blowDamage(blow, WALL.armor) / WALL.defense;
   }
 }
 
@@ -228,8 +229,9 @@ export class Castle {
     return this.health / this.effectiveType.maxHealth;
   }
 
-  takeHit(attackPower) {
-    this.health -= attackPower / this.effectiveType.defense;
+  takeHit(blow) {
+    const { armor, defense } = this.effectiveType;
+    this.health -= blowDamage(blow, armor) / defense;
   }
 
   regenerate(fraction) {
@@ -350,8 +352,13 @@ class Company {
     return this.inMelee || this.recoverySeconds > 0;
   }
 
-  takeHit(attackPower) {
-    this.health -= attackPower / this.type.defense;
+  /**
+   * `guard` multiplies its defence for this blow (bracing). A routed company
+   * has lost its nerve for defence as much as for attack.
+   */
+  takeHit(blow, guard = 1) {
+    const morale = this.routed ? ROUT.defenseMultiplier : 1;
+    this.health -= blowDamage(blow, this.type.armor) / (this.type.defense * morale * guard);
   }
 
   /**

@@ -3,8 +3,15 @@ import assert from 'node:assert/strict';
 import { Raider, Wall } from '../src/entities.js';
 import { steerCompany } from '../src/pathfinding.js';
 import { buildNavigation, routeFrom } from '../src/navigation.js';
-import { AVOIDANCE, FPS, WALL } from '../src/config.js';
+import {
+  AVOIDANCE, FPS, ROUT, WALL,
+} from '../src/config.js';
 import { distance } from '../src/geometry.js';
+import { blowOf } from '../src/damage.js';
+
+function close(actual, expected) {
+  assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} is not ${expected}`);
+}
 
 /** Frames a raider spends inside a wall's damage band crossing it head-on. */
 function contactFrames(raider) {
@@ -17,29 +24,63 @@ function crossWall(typeId) {
   const wall = new Wall({ x: 0, y: 0 }, { x: 100, y: 0 });
   const frames = contactFrames(raider);
   for (let frame = 0; frame < frames && raider.isAlive; frame += 1) {
-    wall.takeHit(raider.type.attack);
-    raider.takeHit(WALL.attack);
+    wall.takeHit(blowOf(raider.type));
+    raider.takeHit({ aa: WALL.attack, normal: 0 });
   }
   return { survived: raider.isAlive, wallDamage: WALL.maxHealth - wall.health };
 }
 
-test('damage is the attacker power divided by the defender armour', () => {
+test('damage is anti-armour plus armour-reduced normal attack, divided by defence', () => {
   const wall = new Wall({ x: 0, y: 0 }, { x: 10, y: 0 });
-  wall.takeHit(10);
+  wall.takeHit({ aa: 10, normal: 0 });
   assert.equal(wall.health, WALL.maxHealth - 10 / WALL.defense);
 
-  const raider = new Raider('CR0');
-  raider.takeHit(10);
-  assert.equal(raider.health, raider.type.maxHealth - 10 / raider.type.defense);
+  const raider = new Raider('CR1');
+  raider.takeHit({ aa: 4, normal: 10 });
+  const expected = 4 + 10 * (1 - raider.type.armor);
+  close(raider.health, raider.type.maxHealth - expected / raider.type.defense);
+});
+
+test('a wall has full armour: ordinary attack does nothing to it, anti-armour does', () => {
+  const wall = new Wall({ x: 0, y: 0 }, { x: 10, y: 0 });
+  assert.equal(WALL.armor, 1);
+  wall.takeHit({ aa: 0, normal: 50 });
+  assert.equal(wall.health, WALL.maxHealth);
+  wall.takeHit({ aa: 6, normal: 50 });
+  assert.equal(wall.health, WALL.maxHealth - 6 / WALL.defense);
+});
+
+test('armour absorbs only the ordinary share of a blow', () => {
+  const plated = new Raider('CR1');
+  const bare = new Raider('IR0');
+  const blow = { aa: 0, normal: 4 };
+  plated.takeHit(blow);
+  bare.takeHit(blow);
+  close(plated.type.maxHealth - plated.health, 4 * (1 - plated.type.armor) / plated.type.defense);
+  close(bare.type.maxHealth - bare.health, 4 * (1 - bare.type.armor) / bare.type.defense);
+  assert.ok(plated.type.armor > bare.type.armor);
+});
+
+test('a routed company defends at ROUT.defenseMultiplier of its strength', () => {
+  const steady = new Raider('IR1');
+  const routed = new Raider('IR1');
+  routed.routed = true;
+  const blow = { aa: 3, normal: 3 };
+  steady.takeHit(blow);
+  routed.takeHit(blow);
+  close(
+    (routed.type.maxHealth - routed.health) / (steady.type.maxHealth - steady.health),
+    1 / ROUT.defenseMultiplier,
+  );
 });
 
 // Locks in the wall counter-matrix: cavalry trade themselves for a wall,
 // infantry walk through one. Rebalancing should fail this deliberately.
 const CROSSING_OUTCOMES = [
-  { typeId: 'CR0', name: 'Sabre Cavalry', survived: false, wallDamage: 52.5 },
-  { typeId: 'CR1', name: 'Spear Cavalry', survived: false, wallDamage: 84 },
-  { typeId: 'IR0', name: 'Light Axe Infantry', survived: true, wallDamage: 34 },
-  { typeId: 'IR1', name: 'Light Sword Infantry', survived: true, wallDamage: 51 },
+  { typeId: 'CR0', name: 'Sabre Cavalry', survived: false, wallDamage: 26.3 },
+  { typeId: 'CR1', name: 'Spear Cavalry', survived: false, wallDamage: 52.5 },
+  { typeId: 'IR0', name: 'Light Axe Infantry', survived: true, wallDamage: 17 },
+  { typeId: 'IR1', name: 'Light Sword Infantry', survived: true, wallDamage: 34 },
 ];
 
 for (const expected of CROSSING_OUTCOMES) {

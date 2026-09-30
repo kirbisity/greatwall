@@ -29,14 +29,21 @@ test('a menu wider than the screen keeps its start on screen', () => {
   assert.equal(-40 + dx, 8, 'its first option must be reachable even if its last is not');
 });
 
-test('formatBattleStats shows companies destroyed/lost and K/D, rounding each side\'s soldiers lost', () => {
+test('formatBattleStats shows companies destroyed/lost, soldiers lost, and a soldier-based K/D', () => {
   const text = formatBattleStats({
-    kills: 9, deaths: 2, enemyLoss: 131.6, playerLoss: 27.2,
+    kills: 9, deaths: 2, enemyLoss: 130, playerLoss: 40,
   });
   assert.equal(
     text,
-    'Enemy companies destroyed 9 · Your companies lost 2 · K/D 4.50\nEnemy soldiers lost: 132\nYour soldiers lost: 27',
+    'Enemy companies destroyed 9 · Your companies lost 2\nEnemy soldiers lost: 130\nYour soldiers lost: 40\nK/D 3.25',
   );
+});
+
+test('formatBattleStats K/D ignores company counts', () => {
+  const text = formatBattleStats({
+    kills: 1, deaths: 9, enemyLoss: 60, playerLoss: 30,
+  });
+  assert.match(text, /K\/D 2\.00/);
 });
 
 test('formatBattleStats reads K/D as a clean win with no losses at all', () => {
